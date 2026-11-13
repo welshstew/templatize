@@ -1,0 +1,23 @@
+Northwind Traders Ltd
+14 Harbour Street
+Bristol BS1 4QA
+
+12 March 2025
+
+Ms. Alice Johnson
+Contoso Pharmaceuticals
+alice.johnson@contoso.com
+
+Dear Ms. Johnson,
+
+Thank you for your order PO-55821 dated 2025-03-04. We are pleased to confirm
+that the shipment of 240 units will leave our Bristol warehouse on 19 March 2025.
+
+Your account manager, Ravi Patel (ravi.patel@northwind.example), will contact
+you to arrange delivery. The total amount due is GBP 18,450.00, payable within
+30 days.
+
+Kind regards,
+
+Samuel Okafor
+Head of Sales, Northwind Traders Ltd

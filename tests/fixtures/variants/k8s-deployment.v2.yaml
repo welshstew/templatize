@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: orders
+  labels:
+    app: orders-api
+    tier: backend
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      containers:
+        - name: orders-api
+          image: registry.acme.io/orders/api:1.9.4
+          ports:
+            - containerPort: 8443
+          env:
+            - name: UPSTREAM_URL
+              value: "https://ledger.internal.acme.io/v2"
+            - name: NODE_IP
+              value: "172.16.4.37"
+          resources:
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

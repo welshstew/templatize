@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api
+  namespace: payments
+  labels:
+    app: payments-api
+    tier: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payments-api
+  template:
+    metadata:
+      labels:
+        app: payments-api
+    spec:
+      containers:
+        - name: payments-api
+          image: registry.acme.io/payments/api:1.22.0
+          ports:
+            - containerPort: 8443
+          env:
+            - name: UPSTREAM_URL
+              value: "https://ledger.internal.acme.io/v2"
+            - name: NODE_IP
+              value: "172.16.4.21"
+          resources:
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

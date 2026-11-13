@@ -1,0 +1,23 @@
+Northwind Traders Ltd
+14 Harbour Street
+Bristol BS1 4QA
+
+2 April 2025
+
+Mr. Daniel Chen
+Fabrikam Logistics
+d.chen@fabrikam.example
+
+Dear Mr. Chen,
+
+Thank you for your order PO-56010 dated 2025-03-27. We are pleased to confirm
+that the shipment of 75 units will leave our Bristol warehouse on 9 April 2025.
+
+Your account manager, Ravi Patel (ravi.patel@northwind.example), will contact
+you to arrange delivery. The total amount due is GBP 5,765.50, payable within
+30 days.
+
+Kind regards,
+
+Samuel Okafor
+Head of Sales, Northwind Traders Ltd
