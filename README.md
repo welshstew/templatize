@@ -237,6 +237,33 @@ Podman, podman-compose (1.1 or later) turns that request into a CDI device
 `nvidia-cdi-refresh` service do it. The targets pass `--force-recreate` because
 podman-compose keeps existing containers when only the image or the environment changed.
 
+**AMD or Intel GPU via Vulkan** (e.g. a Radeon RX 5700 XT):
+`COMPOSE_PROFILES=llm docker compose -f compose.yaml -f compose.vulkan.yaml up -d --build`.
+The host needs the GPU driver loaded and `/dev/dri` present, so the card must not be
+bound to `vfio-pci` for a VM. Vulkan is used instead of ROCm because ROCm doesn't
+officially support RDNA1 cards. It uses llama.cpp's `server-vulkan` build and offloads
+every layer; the default model plus a 16k context needs about 5 GB of VRAM.
+
+**LLM on another machine** (e.g. a GPU in a home server, reached over Tailscale).
+`deploy/llm-host/` is a standalone compose file for that machine. It **requires** an API
+key, read from a file so it doesn't show in `docker inspect` or `ps`, and an explicit
+bind address, normally the machine's Tailscale IP:
+
+```sh
+# on the GPU machine
+cd deploy/llm-host && cp .env.example .env        # set LLM_BIND and MODELS_DIR
+../../scripts/download-model.sh "$MODELS_DIR"
+openssl rand -hex 32 > llm_api_key && chmod 600 llm_api_key
+docker compose up -d --build
+
+# where the app runs
+TEMPLATIZE_LLM_URL=http://<gpu-host>:8080 TEMPLATIZE_LLM_API_KEY_FILE=/path/to/llm_api_key make up
+```
+
+If that machine is off or unreachable, the app reports the LLM as unavailable and
+carries on with heuristics and NER. A Tailscale ACL limiting port 8080 to the app's host
+is a good extra layer.
+
 **Your own model:** put any instruct GGUF in `./models` and set
 `TEMPLATIZE_LLM_MODEL=<file>`. Or point `TEMPLATIZE_LLM_URL` at any llama.cpp server.
 
@@ -247,6 +274,7 @@ podman-compose keeps existing containers when only the image or the environment 
 | `TEMPLATIZE_LLM_CTX` | `16384` | context size; ~5 GB RAM in total with the default model |
 | `TEMPLATIZE_LLM_THREADS` | auto | CPU threads |
 | `TEMPLATIZE_LLM_TIMEOUT` | `300` | seconds per review |
+| `TEMPLATIZE_LLM_API_KEY` / `TEMPLATIZE_LLM_API_KEY_FILE` | unset | Bearer key for a llama-server started with an API key (the file form is preferred) |
 | `TEMPLATIZE_LLM_MAX_CHARS` | `24000` | longer documents are not sent; heuristics only |
 
 The llm container:
@@ -423,6 +451,28 @@ round trip renders the template with the vars files as Ansible reads them, and t
 test suite runs real `ansible-playbook` (when installed) on the fixtures, including
 CRLF, mixed line endings and literal `{{`. API: `POST /role` and `POST /role/download`.
 In the UI: the **Ansible role** tab of the output panel.
+
+### Running it publicly: rate limits and proxies
+
+templatize has **no login**. On a public server, put it behind your reverse proxy, with
+authentication if you want it private. It also limits each client's usage itself:
+
+| Variable | Default | |
+|---|---|---|
+| `TEMPLATIZE_RATE_LIMIT` | `300/minute` | per client IP, all API calls incl. `/mcp` (`off` to disable) |
+| `TEMPLATIZE_LLM_RATE_LIMIT` | `20/hour` | per client IP, LLM reviews (expensive) |
+| `TEMPLATIZE_LLM_CONCURRENCY` | `1` | LLM reviews running at once |
+| `TEMPLATIZE_LLM_QUEUE` | `2` | reviews allowed to wait for a slot; beyond that, 429 "busy" |
+| `TEMPLATIZE_TRUSTED_PROXIES` | (none) | proxy IPs/CIDRs whose `X-Forwarded-For` gives the client IP, e.g. `172.16.0.0/12` |
+
+How it behaves:
+- Over-limit requests get `429` with `Retry-After`. The UI shows the message; for the LLM,
+  the review is simply skipped.
+- Static UI files, `/healthz` and `/info` are never limited.
+- Limits are kept in memory per process and never logged; IPs aren't stored beyond the
+  bucket state.
+- `X-Forwarded-For` is ignored unless the direct peer is a trusted proxy, so clients
+  can't spoof their way around a limit.
 
 ### MCP server
 
@@ -765,6 +815,15 @@ Register new detectors in `detectors/__init__.py`.
 2. Register it in `EMITTERS` in `emitters/__init__.py`.
 3. Run the fixture suite with the new engine (`tests/core/test_fixtures.py`).
    Every fixture must round-trip.
+
+## Website
+
+`site/` is a static introduction page for GitHub Pages: no JavaScript, and no
+third-party scripts, fonts or trackers. `.github/workflows/pages.yml` publishes it, and
+`.github/FUNDING.yml` adds GitHub's Sponsor button for Buy Me a Coffee. **Before
+publishing**, replace the placeholder repository URL and Buy Me a Coffee username (search
+both files for `welshstew`). The Buy Me a Coffee link is a plain link, not their widget
+script, so visitors aren't tracked.
 
 ## Tests
 

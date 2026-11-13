@@ -359,3 +359,25 @@ def test_sweeping_fixed_verdicts_are_ignored() -> None:
     assert len(cands) >= 4
     assert rv.fixed == []
     assert any("unreliable" in n.message for n in rv.notices)
+
+
+def test_api_key_is_sent_and_401_is_explained(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with fake_llama() as fake:
+        fake.required_key = "s3cret"
+        rv = asyncio.run(review_candidates(LlmConfig(url=fake.url, api_key="s3cret"), TEXT, []))
+        assert rv is not None and fake.auth_headers[-1] == "Bearer s3cret"
+        with pytest.raises(LlmUnavailable, match="rejected the API key"):
+            asyncio.run(review_candidates(LlmConfig(url=fake.url, api_key="wrong"), TEXT, []))
+
+        # API settings read the key from a *_FILE (Docker secrets style)
+        key_file = tmp_path / "key"
+        key_file.write_text("s3cret\n")
+        monkeypatch.setenv("TEMPLATIZE_LLM_URL", fake.url)
+        monkeypatch.setenv("TEMPLATIZE_LLM_API_KEY_FILE", str(key_file))
+        settings = Settings.from_env()
+        assert settings.llm_api_key == "s3cret"
+        assert "s3cret" not in repr(settings)
+        r = TestClient(create_app(settings)).post("/suggest/llm", json={"text": TEXT}).json()
+        assert r["available"] is True

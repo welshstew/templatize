@@ -1,0 +1,13 @@
+# AMD/Intel GPU via Vulkan for the optional LLM service (e.g. Radeon RX 5700 XT).
+# The host needs the GPU driver loaded and /dev/dri present (not bound to vfio-pci).
+#   COMPOSE_PROFILES=llm docker compose -f compose.yaml -f compose.vulkan.yaml up -d --build
+services:
+  llm:
+    build:
+      args:
+        LLAMA_IMAGE: ghcr.io/ggml-org/llama.cpp:server-vulkan-b11946
+    image: ${TEMPLATIZE_LLM_VULKAN_IMAGE:-templatize-llm:dev-vulkan}
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      LLM_GPU_LAYERS: ${TEMPLATIZE_LLM_GPU_LAYERS:-99}

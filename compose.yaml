@@ -24,6 +24,8 @@ services:
       # enabled) or unreachable, its suggestions are simply not offered.
       TEMPLATIZE_NER_URL: ${TEMPLATIZE_NER_URL:-http://ner:8081}
       TEMPLATIZE_LLM_URL: ${TEMPLATIZE_LLM_URL:-http://llm:8080}
+      # Needed when the LLM runs elsewhere with a key (e.g. a GPU box over Tailscale).
+      TEMPLATIZE_LLM_API_KEY: ${TEMPLATIZE_LLM_API_KEY:-}
     healthcheck:
       test: ["CMD", "templatize-healthcheck"]
       interval: 10s
@@ -66,6 +68,7 @@ services:
       LLM_MODEL: /models/${TEMPLATIZE_LLM_MODEL:-Qwen3-4B-Instruct-2507-Q4_K_M.gguf}
       LLM_CTX: ${TEMPLATIZE_LLM_CTX:-16384}
       LLM_THREADS: ${TEMPLATIZE_LLM_THREADS:-0}
+      LLM_API_KEY: ${TEMPLATIZE_LLM_API_KEY:-}
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
       interval: 15s

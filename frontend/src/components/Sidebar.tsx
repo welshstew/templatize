@@ -346,6 +346,13 @@ function LlmPill({ llm }: { llm: LlmStatus }) {
       </div>
     );
   }
+  if (llm.state === "limited") {
+    return (
+      <div class="llm-pill muted" role="status">
+        LLM review skipped: {llm.detail}
+      </div>
+    );
+  }
   if (llm.state === "unavailable") {
     return (
       <div class="llm-pill muted" role="status" title={llm.detail}>

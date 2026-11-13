@@ -64,6 +64,7 @@ def fetch_entities(config: NerConfig, text: str) -> list[dict[str, object]]:
         with urllib.request.urlopen(req, timeout=config.timeout) as r:
             data = json.loads(r.read())
     except urllib.error.HTTPError as exc:
+        exc.close()  # the error carries the open response; release the socket
         raise NerUnavailable(f"NER service returned HTTP {exc.code}") from None
     except (OSError, ValueError) as exc:
         raise NerUnavailable(f"NER service unreachable ({type(exc).__name__})") from None
