@@ -20,63 +20,77 @@
      "end": 21,
      "text": "Northwind Traders Ltd",
      "label": "organization",
-     "score": 0.813
+     "score": 0.9666
     },
     {
      "start": 22,
      "end": 39,
      "text": "14 Harbour Street",
-     "label": "location",
-     "score": 0.5496
+     "label": "street address",
+     "score": 0.705
     },
     {
      "start": 40,
      "end": 47,
      "text": "Bristol",
      "label": "location",
-     "score": 0.7282
+     "score": 0.7973
     },
     {
      "start": 72,
      "end": 89,
      "text": "Ms. Alice Johnson",
      "label": "person",
-     "score": 0.5108
+     "score": 0.783
+    },
+    {
+     "start": 90,
+     "end": 113,
+     "text": "Contoso Pharmaceuticals",
+     "label": "organization",
+     "score": 0.8082
     },
     {
      "start": 284,
      "end": 291,
      "text": "Bristol",
      "label": "location",
-     "score": 0.6508
+     "score": 0.8968
     },
     {
      "start": 343,
      "end": 353,
      "text": "Ravi Patel",
      "label": "person",
-     "score": 0.7271
+     "score": 0.8104
     },
     {
      "start": 448,
      "end": 461,
      "text": "GBP 18,450.00",
      "label": "money",
-     "score": 0.6546
+     "score": 0.9195
     },
     {
      "start": 503,
      "end": 516,
      "text": "Samuel Okafor",
      "label": "person",
-     "score": 0.8447
+     "score": 0.9152
+    },
+    {
+     "start": 517,
+     "end": 530,
+     "text": "Head of Sales",
+     "label": "job title",
+     "score": 0.6488
     },
     {
      "start": 532,
      "end": 553,
      "text": "Northwind Traders Ltd",
      "label": "organization",
-     "score": 0.8111
+     "score": 0.9352
     }
    ]
   },
@@ -85,10 +99,10 @@
    "entities": [
     {
      "start": 334,
-     "end": 341,
-     "text": "acme.io",
+     "end": 338,
+     "text": "acme",
      "label": "organization",
-     "score": 0.5703
+     "score": 0.5303
     }
    ]
   },
@@ -96,24 +110,32 @@
    "text": "[server]\r\nhost = app01.example.net\r\nport = 8443\r\nadmin = root@example.net\r\n\r\n[paths]\r\ndata = /var/lib/app\r\n",
    "entities": [
     {
+     "start": 49,
+     "end": 54,
+     "text": "admin",
+     "label": "person",
+     "score": 0.5578
+    },
+    {
      "start": 57,
      "end": 61,
      "text": "root",
      "label": "person",
-     "score": 0.5204
-    },
-    {
-     "start": 62,
-     "end": 73,
-     "text": "example.net",
-     "label": "location",
-     "score": 0.5011
+     "score": 0.6293
     }
    ]
   },
   "docker-compose.yml": {
    "text": "services:\n  web:\n    image: ghcr.io/acme/storefront:2.14.3\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    environment:\n      DATABASE_URL: postgres://store:s3cret@db:5432/storefront\n      REDIS_HOST: cache\n      LOG_LEVEL: info\n    depends_on:\n      - db\n      - cache\n\n  db:\n    image: postgres:16.4\n    volumes:\n      - /srv/storefront/pgdata:/var/lib/postgresql/data\n    environment:\n      POSTGRES_USER: store\n      POSTGRES_PASSWORD: s3cret\n      POSTGRES_DB: storefront\n\n  cache:\n    image: redis:7.2.5-alpine\n",
-   "entities": []
+   "entities": [
+    {
+     "start": 36,
+     "end": 40,
+     "text": "acme",
+     "label": "organization",
+     "score": 0.5147
+    }
+   ]
   },
   "endraw.txt": {
    "text": "Literal tags: {% endraw %} and {% raw %} then value 10.9.8.7 {{ a }}\n",
@@ -121,15 +143,53 @@
   },
   "jinja_literals.txt": {
    "text": "This document talks about Jinja itself.\nA variable looks like {{ user.name }} and a tag looks like {% if x %}.\nComments are written {# like this #}. Raw blocks: {% raw %}{{ x }}{% endraw %}\nEdge cases: {{{ triple }}}, {%- trimmed -%}, {#- c -#}, lone { and } and }}.\nServer: db01.example.com at 192.168.1.10\n",
-   "entities": []
+   "entities": [
+    {
+     "start": 26,
+     "end": 31,
+     "text": "Jinja",
+     "label": "organization",
+     "score": 0.6252
+    }
+   ]
   },
   "k8s-deployment.yaml": {
    "text": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payments-api\n  namespace: payments\n  labels:\n    app: payments-api\n    tier: backend\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: payments-api\n  template:\n    metadata:\n      labels:\n        app: payments-api\n    spec:\n      containers:\n        - name: payments-api\n          image: registry.acme.io/payments/api:1.22.0\n          ports:\n            - containerPort: 8443\n          env:\n            - name: UPSTREAM_URL\n              value: \"https://ledger.internal.acme.io/v2\"\n            - name: NODE_IP\n              value: \"172.16.4.21\"\n          resources:\n            limits:\n              memory: \"512Mi\"\n              cpu: \"500m\"\n",
-   "entities": []
+   "entities": [
+    {
+     "start": 362,
+     "end": 366,
+     "text": "acme",
+     "label": "organization",
+     "score": 0.6561
+    },
+    {
+     "start": 535,
+     "end": 539,
+     "text": "acme",
+     "label": "organization",
+     "score": 0.7184
+    }
+   ]
   },
   "mixed_newlines.txt": {
    "text": "line one host=alpha.example.org\r\nline two\nline three\rline four ip 10.1.1.1\n\r\nend",
-   "entities": []
+   "entities": [
+    {
+     "start": 14,
+     "end": 19,
+     "text": "alpha",
+     "label": "organization",
+     "score": 0.5977
+    },
+    {
+     "start": 20,
+     "end": 31,
+     "text": "example.org",
+     "label": "organization",
+     "score": 0.6751
+    }
+   ]
   },
   "nginx.conf": {
    "text": "# Reverse proxy for the billing service\nupstream billing_backend {\n    server 10.20.30.41:8080 max_fails=3;\n    server 10.20.30.42:8080 max_fails=3;\n}\n\nserver {\n    listen 443 ssl http2;\n    server_name billing.example.com;\n\n    ssl_certificate     /etc/nginx/certs/billing.example.com.crt;\n    ssl_certificate_key /etc/nginx/certs/billing.example.com.key;\n\n    access_log /var/log/nginx/billing.access.log;\n    client_max_body_size 25m;\n\n    location / {\n        proxy_pass http://billing_backend;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n    }\n\n    location /static/ {\n        root /srv/billing/public;\n        expires 7d;\n    }\n}\n",
@@ -137,17 +197,32 @@
   },
   "no_trailing_newline.env": {
    "text": "API_HOST=api.example.com\nAPI_KEY=abc123def456\nDEBUG=false",
-   "entities": []
+   "entities": [
+    {
+     "start": 9,
+     "end": 12,
+     "text": "api",
+     "label": "organization",
+     "score": 0.5957
+    }
+   ]
   },
   "unicode.txt": {
    "text": "Größe: 42\nCafé owner: Zoë Ångström <zoe@café.example>\n日本語のテキスト server=東京.example.jp\nEmoji 🎉 build v1.2.3 on 2024-12-31 🎉\n",
    "entities": [
     {
+     "start": 10,
+     "end": 14,
+     "text": "Café",
+     "label": "location",
+     "score": 0.6419
+    },
+    {
      "start": 22,
      "end": 34,
      "text": "Zoë Ångström",
      "label": "person",
-     "score": 0.9253
+     "score": 0.9697
     }
    ]
   },
@@ -159,28 +234,28 @@
      "end": 25,
      "text": "Dr. Jean-Luc Picard-Smith",
      "label": "person",
-     "score": 0.8507
+     "score": 0.9199
     },
     {
      "start": 30,
      "end": 47,
      "text": "Anna_Maria O'Neil",
      "label": "person",
-     "score": 0.7837
+     "score": 0.8912
     },
     {
      "start": 51,
      "end": 60,
      "text": "Acme-Corp",
      "label": "organization",
-     "score": 0.8322
+     "score": 0.9274
     },
     {
      "start": 64,
      "end": 73,
      "text": "São Paulo",
      "label": "location",
-     "score": 0.8175
+     "score": 0.9189
     }
    ]
   },
@@ -192,21 +267,28 @@
      "end": 20,
      "text": "Mrs. Priya Nair",
      "label": "person",
-     "score": 0.7934
+     "score": 0.8905
     },
     {
      "start": 24,
      "end": 40,
      "text": "+44 20 7946 0958",
      "label": "phone number",
-     "score": 0.693
+     "score": 0.8826
     },
     {
      "start": 50,
      "end": 67,
      "text": "221B Baker Street",
      "label": "street address",
-     "score": 0.6567
+     "score": 0.8996
+    },
+    {
+     "start": 69,
+     "end": 83,
+     "text": "London NW1 6XE",
+     "label": "street address",
+     "score": 0.6492
     }
    ]
   },
@@ -218,28 +300,35 @@
      "end": 14,
      "text": "Zoë Ångström",
      "label": "person",
-     "score": 0.9686
+     "score": 0.986
     },
     {
      "start": 20,
      "end": 36,
      "text": "Café Müller GmbH",
      "label": "organization",
-     "score": 0.8432
+     "score": 0.9479
     },
     {
      "start": 42,
      "end": 51,
      "text": "€1.200,50",
      "label": "money",
-     "score": 0.5546
+     "score": 0.7701
+    },
+    {
+     "start": 55,
+     "end": 59,
+     "text": "日本電気",
+     "label": "organization",
+     "score": 0.7022
     },
     {
      "start": 63,
      "end": 68,
      "text": "Tōkyō",
      "label": "location",
-     "score": 0.73
+     "score": 0.9001
     }
    ]
   },

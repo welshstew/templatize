@@ -3,8 +3,10 @@
 # repository revision and verified by SHA-256. Used by docker/ner.Dockerfile at
 # build time (build online, run offline) and for local development.
 #
-#   Model:  GLiNER small v2.1 (urchade/gliner_small-v2.1, Apache-2.0), ONNX export
-#           with int8 dynamic quantisation, ~190 MB in total
+#   Model:  GLiNER small v2.1 (urchade/gliner_small-v2.1, Apache-2.0), full-precision
+#           (fp32) ONNX export, ~620 MB in total. The int8 export in the same repo
+#           is 3x smaller but measurably worse (mean score shift 0.14, missed
+#           organisations/job titles) and CPU-dependent (ARM and x86 disagree).
 #   Source: https://huggingface.co/onnx-community/gliner_small-v2.1
 set -eu
 
@@ -37,6 +39,6 @@ fetch() {  # fetch <remote path> <local name> <sha256>
 }
 
 mkdir -p "$DIR"
-fetch "onnx/model_int8.onnx" "model.onnx" "c76c90920547fd937aaf505e7f2de5ec73168bf1c25abbb55a298104cb061400"
+fetch "onnx/model.onnx" "model.onnx" "874bc905cf3537a3bca91a55c3d99c78dbc571ebc2d8e209eb0aadd63e9d3948"
 fetch "tokenizer.json" "tokenizer.json" "677203884d026e721115cf0daccf70ec4239545a13d6619e3e66d7151e0c9ce3"
 fetch "gliner_config.json" "gliner_config.json" "8e8b59de124a256a3f3de67879d0da686fe3f73ecc05093506ba525e451b920d"

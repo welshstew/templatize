@@ -37,7 +37,7 @@ DEFAULT_LABELS = [
 ]
 MAX_TEXT_CHARS = 1_000_000
 MAX_BODY_BYTES = MAX_TEXT_CHARS * 6 + 100_000
-MODEL_NAME = "gliner_small-v2.1 (ONNX int8)"
+MODEL_NAME = "gliner_small-v2.1 (ONNX fp32)"
 
 
 class EntitiesRequest(BaseModel):

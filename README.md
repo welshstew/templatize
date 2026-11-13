@@ -116,7 +116,7 @@ Configuration (environment variables):
 A small named-entity model finds values that regexes can't: person and company names,
 locations, street addresses, phone numbers, money amounts, job titles and products.
 Labels map to variable names, e.g. `person` → `person_name` and `money` → `amount`. It
-is fast (about 40 ms for the business-letter fixture on CPU), so it runs inside
+is fast (well under a second for the business-letter fixture on CPU), so it runs inside
 `/suggest` itself, and its candidates are merged like any other detector's (labelled
 **NER** in the UI).
 
@@ -125,7 +125,7 @@ make up-ner    # app + ner (COMPOSE_PROFILES=ner docker compose up -d --build)
 ```
 
 **Model:** [GLiNER small v2.1](https://huggingface.co/urchade/gliner_small-v2.1)
-(Apache-2.0), using the int8-quantised ONNX export from
+(Apache-2.0), using the full-precision (fp32) ONNX export from
 [`onnx-community/gliner_small-v2.1`](https://huggingface.co/onnx-community/gliner_small-v2.1)
 pinned to revision `8142fb00`. That repo has no licence field of its own; it's a format
 conversion of the Apache-2.0 model. `scripts/download-ner-model.sh` downloads the model
@@ -146,16 +146,23 @@ The trade-off:
 
 | | ONNX Runtime (this) | PyTorch (`gliner` package) |
 |---|---|---|
-| Image | **531 MB** (184 MB model, 63 MB onnxruntime, 67 MB numpy, base OS) | ~2 GB (CPU torch wheel alone ~700 MB+, plus transformers) |
-| Startup / latency | 0.4 s load, ~40 ms per short document | slower start, similar inference |
+| Image | **~960 MB** (611 MB model, 63 MB onnxruntime, 67 MB numpy, base OS) | ~2.5 GB (CPU torch wheel ~700 MB+, transformers, the same 611 MB of weights) |
+| Startup / latency | ~1 s load, well under 1 s per short document | slower start, similar inference |
 | Risk | our own pre/post-processing could drift from upstream | reference implementation |
 
-That risk is covered by a **parity test**. `scripts/dev/gliner_golden.py` runs the
+**Why fp32 and not the 3× smaller int8 export.** In the same repo, int8 is measurably
+worse. Against fp32 it changes the detected spans in 11 of 15 test cases, with a mean
+score shift of 0.14. On the business letter it misses `Contoso Pharmaceuticals` and
+`Head of Sales` and mislabels the street address. It's also CPU-dependent: ARM and x86
+runners gave different results, which is how CI caught it. fp32 behaves the same on
+both.
+
+The reimplementation risk is covered by a **parity test**. `scripts/dev/gliner_golden.py` runs the
 reference `gliner` 0.2.30, in a throwaway environment with torch, on the **same ONNX
 file** across all fixtures plus edge cases (hyphenated and apostrophe names, phone and
 address, emoji and CJK). It stores the results in `tests/ner/golden.json`. Our
-implementation matches them exactly: identical spans and labels, and the largest score
-difference is 0.0 over 24 entities. To regenerate:
+implementation matches them: identical spans and labels, with scores equal within
+0.005. A span within 0.02 of the threshold may flip between CPUs and is tolerated. To regenerate:
 `uv run --no-project --python 3.12 --with gliner==0.2.30 --with onnxruntime scripts/dev/gliner_golden.py MODEL_DIR > tests/ner/golden.json`.
 
 ONNX Runtime ships a telemetry component, which is turned off: `ORT_DISABLE_TELEMETRY=1`
@@ -171,8 +178,10 @@ filesystem.
 | `TEMPLATIZE_NER_MAX_CHARS` | `200000` | longer documents skip NER |
 | `TEMPLATIZE_NER_THREADS` | auto | ONNX Runtime intra-op threads |
 
-**Limits.** GLiNER small misses some entities (for example `Contoso Pharmaceuticals` in
-the letter) and sometimes tags generic phrases. Its confidence (0.45 + 0.4 × score) keeps
+RAM: about 1 GB for the NER service with the fp32 model.
+
+**Limits.** GLiNER small sometimes tags short generic tokens (for example a single
+lowercase word as an `organization` in config files). Its confidence (0.45 + 0.4 × score) keeps
 it below the strong heuristics. The LLM review, if enabled, sees NER candidates too.
 
 ### Optional LLM detector (llama.cpp, fully local)
