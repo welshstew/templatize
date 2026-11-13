@@ -143,3 +143,23 @@ def test_render_is_sandboxed() -> None:
 def test_unknown_engine() -> None:
     with pytest.raises(ValueError, match="unknown engine"):
         get_emitter("handlebars")
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        '{{ "a" * 100000000 }}',
+        "{{ [1] * 100000000 }}",
+        "{{ 10 ** 100000 }}",
+        "{% for i in range(10**9) %}x{% endfor %}",
+        "{% for i in range(99999) %}{% for j in range(99999) %}xxxxxxxxxx{% endfor %}{% endfor %}",
+    ],
+)
+def test_render_resource_limits(template: str) -> None:
+    with pytest.raises(TemplateRenderError):
+        get_emitter("jinja2").render(template, {})
+
+
+def test_render_wraps_runtime_errors() -> None:
+    with pytest.raises(TemplateRenderError, match="ZeroDivisionError"):
+        get_emitter("jinja2").render("{{ 1 / 0 }}", {})

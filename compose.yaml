@@ -1,0 +1,31 @@
+# templatize stack. `docker compose up` runs the app alone (fully functional).
+# Optional profiles (later milestones): `ner` (GLiNER), `llm` (llama.cpp).
+name: templatize
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp:size=64m"]
+
+services:
+  app:
+    image: ${TEMPLATIZE_IMAGE:-templatize:dev}
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+    <<: *hardening
+    ports:
+      - "${TEMPLATIZE_BIND:-127.0.0.1}:${TEMPLATIZE_PORT:-8000}:8000"
+    environment:
+      TEMPLATIZE_ACCESS_LOG: ${TEMPLATIZE_ACCESS_LOG:-0}
+      # Optional services; empty => those suggestions are simply not offered.
+      TEMPLATIZE_NER_URL: ${TEMPLATIZE_NER_URL:-}
+      TEMPLATIZE_LLM_URL: ${TEMPLATIZE_LLM_URL:-}
+    healthcheck:
+      test: ["CMD", "templatize-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
