@@ -13,7 +13,7 @@ extracted values must reproduce the input **byte for byte**.
 
 Everything runs offline. No external services, API keys, telemetry or update checks.
 
-> Status: milestone 3 (core library, CLI, web API, web UI). MCP server and optional
+> Status: milestone 4 (core library, CLI, web API, web UI, MCP server). Optional
 > NER/LLM detectors follow.
 
 ## Quick start
@@ -21,7 +21,7 @@ Everything runs offline. No external services, API keys, telemetry or update che
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). Building the UI also needs Node.js 22+ (24 recommended); the container image builds it for you.
 
 ```sh
-uv sync --all-extras        # install (locked) dependencies, incl. the web API
+uv sync --all-extras        # install (locked) dependencies, incl. web API and MCP extras
 make check                  # ruff + mypy --strict + pytest
 
 uv run templatize suggest tests/fixtures/nginx.conf
@@ -107,7 +107,84 @@ Configuration (environment variables):
 | `TEMPLATIZE_ACCESS_LOG` | `0` | method/path/status only; bodies are never logged |
 | `TEMPLATIZE_MAX_BODY_BYTES` | ~25 MB | 4 documents × 1M chars × JSON escaping |
 | `TEMPLATIZE_STATIC_DIR` | unset (`/app/static` in the image) | built UI to serve at `/` |
+| `TEMPLATIZE_MCP_HTTP` | `1` | serve MCP streamable HTTP at `/mcp` (needs the `mcp` extra) |
+| `TEMPLATIZE_MCP_ALLOWED_HOSTS` | (none) | extra allowed `Host` values for `/mcp`, comma-separated, e.g. `myhost.ts.net:*` |
 | `TEMPLATIZE_NER_URL`, `TEMPLATIZE_LLM_URL` | empty | optional services (later milestones) |
+
+### MCP server
+
+The same core library is exposed as an MCP server (official Python SDK, `mcp` 2.x)
+with four read-only tools:
+
+| Tool | What it does |
+|---|---|
+| `suggest_parameters(text, variants?, min_confidence?)` | Scored candidate variables (spans are code points) |
+| `generate_template(text, variables?, variants?, min_confidence?)` | Template, `.env`, `render.py` and the round-trip verdict. Give variables **by value**, e.g. `[{"name": "db_host", "value": "db01.example.com", "occurrences": "all"}]`, so the model never has to count characters (spans also work). Omit `variables` to accept suggestions automatically |
+| `render_template(template, values?, newline?)` | Sandboxed render. Errors come back in `error`, not as an exception |
+| `validate_template(template, values?, expected_text?)` | Syntax, referenced, missing and unused variables, renders?, and reproduces `expected_text` byte for byte? |
+
+Transports:
+- **stdio:** `templatize-mcp`, or `docker run --rm -i IMAGE templatize-mcp`.
+- **Streamable HTTP:** `/mcp` on the running app (stateless, JSON responses), or standalone
+  with `templatize-mcp --transport http --port 8001`.
+
+**Claude Code**: pick one of these.
+
+```sh
+# HTTP: the app must be running (make up, or make serve)
+claude mcp add --transport http templatize http://127.0.0.1:8000/mcp
+
+# stdio from a checkout (no server needed)
+claude mcp add templatize -- uv --directory /path/to/jinja-ninja run --extra mcp templatize-mcp
+
+# stdio from the container image (no Python needed; fully offline)
+claude mcp add templatize -- docker run --rm -i --network none --read-only templatize:dev templatize-mcp
+```
+
+Add `--scope user` to make it available in every project. Check it with `claude mcp list`
+or `/mcp` inside a session.
+
+**Claude Desktop**: edit `claude_desktop_config.json` (Settings → Developer → Edit
+Config; on macOS it lives at `~/Library/Application Support/Claude/claude_desktop_config.json`)
+and restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "templatize": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/jinja-ninja", "run", "--extra", "mcp", "templatize-mcp"]
+    }
+  }
+}
+```
+
+or, with the container image (use `podman` instead of `docker` if that's your runtime; the
+GUI app may need the full path, e.g. `/opt/podman/bin/podman`):
+
+```json
+{
+  "mcpServers": {
+    "templatize": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "--network", "none", "--read-only", "templatize:dev", "templatize-mcp"]
+    }
+  }
+}
+```
+
+Then ask, for example: *"Use templatize to turn this nginx config into a template with the
+server name and upstream IP as variables."*
+
+**Security and privacy.** `/mcp` has DNS-rebinding protection: only `127.0.0.1`,
+`localhost`, `[::1]` and the compose service name `app` are accepted as `Host` (and
+`Origin`). If you expose the server elsewhere, for example over Tailscale, add hosts with
+`TEMPLATIZE_MCP_ALLOWED_HOSTS=myhost.tailnet.ts.net:*`. There's no authentication, so
+don't expose it beyond networks you trust.
+
+Tool errors reach the client with a useful message but are never logged. Crashes are
+logged by exception type only, and the SDK's own loggers are kept at WARNING because its
+INFO lines echo error text. Set `TEMPLATIZE_MCP_HTTP=0` to turn off `/mcp`.
 
 ### Containers (offline)
 
@@ -136,7 +213,9 @@ checker container then:
 2. waits for the app to be healthy;
 3. loads the web UI and every asset it references, and checks that nothing points
    outside the origin;
-4. runs every fixture through `/suggest` → `/build` (round-trip must pass) →
+4. speaks MCP to `/mcp`: lists the 4 tools and checks that `generate_template`
+   round-trips a fixture;
+5. runs every fixture through `/suggest` → `/build` (round-trip must pass) →
    `/render` (must reproduce the input) → `/download` (zip must be complete).
 
 This must pass before a milestone counts as done.
@@ -156,7 +235,7 @@ runtime image (`--target runtime`) contains no test data.
              │  (ner, llm: later)                                         ▼       │    render.py
              │                                         roundtrip.py ◄── render    │    PASS/FAIL
              └────────────────────────────────────────────────────────────────────┘
-                  ▲ CLI    ▲ templatize_api (FastAPI) ◄── frontend/ (Preact UI)   ▲ MCP (milestone 4)
+                  ▲ CLI    ▲ templatize_api (FastAPI) ◄── frontend/ (Preact UI)   ▲ templatize_mcp (stdio, /mcp)
 ```
 
 | Module | Role |

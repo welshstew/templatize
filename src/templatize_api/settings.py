@@ -12,6 +12,12 @@ from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS
 DEFAULT_MAX_BODY_BYTES = (MAX_VARIANTS + 1) * MAX_INPUT_CHARS * 6 + 1_000_000
 
 
+# DNS-rebinding protection for /mcp: accepted Host headers. "app:*" is the compose
+# service name (used by the offline checker). Add e.g. "myhost.tailnet.ts.net:*" via
+# TEMPLATIZE_MCP_ALLOWED_HOSTS when exposing the server beyond localhost.
+DEFAULT_MCP_ALLOWED_HOSTS = ("127.0.0.1:*", "localhost:*", "[::1]:*", "app:*")
+
+
 def _bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -34,6 +40,9 @@ class Settings:
     # Optional services (later milestones). Absent/unreachable => features hidden.
     ner_url: str | None = None
     llm_url: str | None = None
+    # MCP over streamable HTTP at /mcp (needs the `mcp` extra).
+    mcp_http: bool = True
+    mcp_allowed_hosts: tuple[str, ...] = DEFAULT_MCP_ALLOWED_HOSTS
     extra: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -49,4 +58,11 @@ class Settings:
             static_dir=Path(static) if static else None,
             ner_url=_opt("TEMPLATIZE_NER_URL"),
             llm_url=_opt("TEMPLATIZE_LLM_URL"),
+            mcp_http=_bool("TEMPLATIZE_MCP_HTTP", True),
+            mcp_allowed_hosts=DEFAULT_MCP_ALLOWED_HOSTS
+            + tuple(
+                h.strip()
+                for h in os.environ.get("TEMPLATIZE_MCP_ALLOWED_HOSTS", "").split(",")
+                if h.strip()
+            ),
         )

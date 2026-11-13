@@ -1,0 +1,215 @@
+"""MCP server exposing templatize (official Python MCP SDK).
+
+    templatize-mcp                      # stdio (Claude Desktop / Claude Code launch it)
+    templatize-mcp --transport http     # streamable HTTP on 127.0.0.1:8001/mcp
+
+The web API also serves streamable HTTP at ``/mcp`` (see templatize_api.app).
+Logging goes to stderr only (stdout is the stdio transport) and never includes
+tool arguments.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Annotated, Literal
+
+from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
+from pydantic import Field
+
+from templatize import __version__
+from templatize.build import VariableInput
+from templatize_mcp import tools
+
+INSTRUCTIONS = """\
+templatize turns a plain-text document (config file, manifest, email, contract...)
+into a Jinja2 template plus a .env file of extracted values and a render.py script,
+and verifies that rendering the template reproduces the input byte for byte.
+
+Typical flow:
+1. suggest_parameters(text, variants?) -> scored candidate variables. Passing 1-3
+   other versions of the same document as `variants` makes the parts that differ
+   very-high-confidence suggestions.
+2. generate_template(text, variables=[{name, value}...]) -> template, .env,
+   render.py and a round-trip verdict. Identify variables by `value` (the exact text);
+   you never need character offsets. Omit `variables` to accept suggestions above
+   `min_confidence` automatically.
+3. render_template / validate_template to try other values or check a template
+   that you edited.
+Everything runs locally; nothing is stored or sent anywhere.
+"""
+
+log = logging.getLogger("templatize.mcp")
+
+
+@contextmanager
+def _tool_errors(tool: str) -> Iterator[None]:
+    """Privacy boundary for tool calls.
+
+    Bad input becomes a ToolError whose message the client sees. Anything else is
+    logged by exception *type* only (messages and tracebacks can quote user text) and
+    reported generically. The SDK therefore never logs a raw exception from our code.
+    """
+    try:
+        yield
+    except tools.ToolInputError as exc:
+        raise ToolError(str(exc)) from None
+    except Exception as exc:
+        log.error("tool %s crashed: %s", tool, type(exc).__name__)
+        raise ToolError(f"internal error ({type(exc).__name__})") from None
+
+
+def quiet_sdk_logging() -> None:
+    """The SDK logs failed tool calls at INFO including their error text and argument
+    names; keep its loggers at WARNING so user text never reaches the logs."""
+    logging.getLogger("mcp").setLevel(logging.WARNING)
+
+
+READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+
+DEFAULT_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+
+
+def create_server() -> MCPServer:
+    quiet_sdk_logging()
+    server: MCPServer = MCPServer(
+        name="templatize",
+        title="templatize",
+        instructions=INSTRUCTIONS,
+        version=__version__,
+        log_level="WARNING",
+    )
+
+    @server.tool(annotations=READ_ONLY)
+    def suggest_parameters(
+        text: Annotated[str, Field(description="The document to analyse.")],
+        variants: Annotated[
+            list[str] | None,
+            Field(description="Optional 1-3 other versions of the same document.", max_length=3),
+        ] = None,
+        min_confidence: Annotated[
+            float, Field(ge=0, le=1, description="Drop candidates below this confidence.")
+        ] = 0.0,
+    ) -> tools.SuggestParametersResult:
+        """Find parts of a document that should become template variables (IPs, hostnames,
+        dates, emails, key/value pairs, repeated tokens, and regions that differ between
+        example variants). Returns scored candidates; spans are Unicode code-point offsets."""
+        with _tool_errors("suggest_parameters"):
+            return tools.suggest_parameters(text, variants, min_confidence)
+
+    @server.tool(annotations=READ_ONLY)
+    def generate_template(
+        text: Annotated[str, Field(description="The original document.")],
+        variables: Annotated[
+            list[VariableInput] | None,
+            Field(
+                description=(
+                    "Variables to create. Identify each by `value` (exact text from the "
+                    'document; occurrences: "all" or a list of 0-based indexes) or by `spans`. '
+                    "Names must be lowercase snake_case. Omit to accept suggestions automatically."
+                )
+            ),
+        ] = None,
+        variants: Annotated[
+            list[str] | None,
+            Field(
+                description="Other versions of the document (only used when `variables` is omitted).",
+                max_length=3,
+            ),
+        ] = None,
+        min_confidence: Annotated[
+            float,
+            Field(ge=0, le=1, description="Threshold when accepting suggestions automatically."),
+        ] = 0.5,
+    ) -> tools.GenerateTemplateResult:
+        """Build a Jinja2 template, a .env file and a render.py script from a document, and
+        verify the round trip (template + .env must reproduce the input byte for byte)."""
+        with _tool_errors("generate_template"):
+            return tools.generate_template(text, variables, variants, min_confidence)
+
+    @server.tool(annotations=READ_ONLY)
+    def render_template(
+        template: Annotated[str, Field(description="Jinja2 template source.")],
+        values: Annotated[
+            dict[str, str] | None,
+            Field(description="Values by variable name (or .env key; case-insensitive)."),
+        ] = None,
+        newline: Annotated[
+            Literal["\n", "\r\n", "\r"] | None,
+            Field(description="Line ending for template newlines; detected when omitted."),
+        ] = None,
+    ) -> tools.RenderTemplateResult:
+        """Render a Jinja2 template with values in a sandbox (bounded output, no file or
+        network access). Render errors are returned in `error`, not raised."""
+        with _tool_errors("render_template"):
+            return tools.render_template(template, values, newline)
+
+    @server.tool(annotations=READ_ONLY)
+    def validate_template(
+        template: Annotated[str, Field(description="Jinja2 template source.")],
+        values: Annotated[
+            dict[str, str] | None, Field(description="Values by variable name.")
+        ] = None,
+        expected_text: Annotated[
+            str | None,
+            Field(
+                description="If given, check the rendered output equals this text byte for byte."
+            ),
+        ] = None,
+    ) -> tools.ValidateTemplateResult:
+        """Check a template: syntax, which variables it references, missing/unused values,
+        whether it renders, and optionally whether it reproduces `expected_text` exactly."""
+        with _tool_errors("validate_template"):
+            return tools.validate_template(template, values, expected_text)
+
+    return server
+
+
+def transport_security(allowed_hosts: list[str]) -> TransportSecuritySettings:
+    """DNS-rebinding protection: only accept these Host headers (and matching Origins)."""
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=[f"http://{h}" for h in allowed_hosts]
+        + [f"https://{h}" for h in allowed_hosts],
+    )
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="templatize-mcp", description="templatize MCP server")
+    ap.add_argument("--transport", choices=["stdio", "http"], default="stdio")
+    ap.add_argument("--host", default="127.0.0.1", help="http transport only")
+    ap.add_argument("--port", type=int, default=8001, help="http transport only")
+    ap.add_argument(
+        "--allowed-host",
+        action="append",
+        default=None,
+        help="extra Host header to accept over http (repeatable), e.g. myhost.ts.net:*",
+    )
+    args = ap.parse_args(argv)
+    # stdout carries the protocol in stdio mode: logs must go to stderr.
+    logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
+    server = create_server()
+    if args.transport == "stdio":
+        server.run("stdio")
+    else:
+        hosts = DEFAULT_ALLOWED_HOSTS + (args.allowed_host or [])
+        server.run(
+            "streamable-http",
+            host=args.host,
+            port=args.port,
+            streamable_http_path="/mcp",
+            stateless_http=True,
+            json_response=True,
+            transport_security=transport_security(hosts),
+        )
+
+
+if __name__ == "__main__":
+    main()

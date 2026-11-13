@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -135,3 +136,70 @@ def find_occurrences(text: str, value: str, *, whole_word: bool = True) -> list[
         else:
             pos = idx + 1
     return spans
+
+
+class VariableInput(BaseModel):
+    """A variable identified by *value* rather than offsets: friendlier for LLM/MCP
+    clients, which are unreliable at counting characters.
+
+    Exactly one of ``value`` or ``spans`` must be given. With ``value``, the library
+    finds the occurrences in the text (whole-word where the value starts/ends with a
+    word character; falls back to substring matching if that finds nothing) and keeps
+    ``"all"`` of them or the listed 0-based occurrence indexes."""
+
+    name: str
+    value: str | None = None
+    occurrences: Literal["all"] | list[int] = "all"
+    spans: list[Span] | None = None
+    type: VarType | None = None
+    description: str | None = None
+
+
+class VariableResolutionError(ValueError):
+    pass
+
+
+def resolve_inputs(text: str, inputs: Sequence[VariableInput]) -> list[VariableSpec]:
+    specs: list[VariableSpec] = []
+    claimed: list[Span] = []
+    for inp in inputs:
+        if (inp.value is None) == (inp.spans is None):
+            raise VariableResolutionError(f"{inp.name!r}: give exactly one of 'value' or 'spans'")
+        if inp.spans is not None:
+            spans = list(inp.spans)
+        else:
+            assert inp.value is not None
+            found = find_occurrences(text, inp.value) or find_occurrences(
+                text, inp.value, whole_word=False
+            )
+            if not found:
+                raise VariableResolutionError(
+                    f"{inp.name!r}: value {inp.value!r} does not occur in the text"
+                )
+            # Skip occurrences already taken by earlier variables (e.g. a longer value).
+            free = [s for s in found if not any(s.overlaps(c) for c in claimed)]
+            if inp.occurrences == "all":
+                spans = free
+            else:
+                bad = [i for i in inp.occurrences if not 0 <= i < len(found)]
+                if bad:
+                    raise VariableResolutionError(
+                        f"{inp.name!r}: occurrence index {bad[0]} out of range "
+                        f"(value occurs {len(found)} times)"
+                    )
+                spans = [found[i] for i in inp.occurrences]
+            if not spans:
+                raise VariableResolutionError(
+                    f"{inp.name!r}: every occurrence of {inp.value!r} overlaps another variable"
+                )
+        claimed.extend(spans)
+        specs.append(
+            VariableSpec(
+                name=inp.name,
+                spans=spans,
+                type=inp.type,
+                value=inp.value,
+                description=inp.description,
+            )
+        )
+    return specs

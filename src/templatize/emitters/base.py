@@ -48,6 +48,10 @@ class Emitter(Protocol):
         """Render ``template`` with ``values``; raise :class:`TemplateRenderError` on failure."""
         ...
 
+    def variables_in(self, template: str) -> set[str]:
+        """Names the template references; raise :class:`TemplateRenderError` on syntax errors."""
+        ...
+
     def runner_files(self, ir: TemplateIR) -> list[EmittedFile]:
         """Extra files (e.g. ``render.py``) that render the template locally."""
         ...

@@ -63,6 +63,8 @@ class InfoResponse(BaseModel):
     engines: list[str]
     detectors: list[str]
     optional_detectors: dict[str, bool]
+    mcp_http: str | None
+    """Path of the MCP streamable HTTP endpoint, if enabled."""
     limits: Limits
 
 

@@ -154,6 +154,62 @@ def check_ui(base: str) -> str | None:
     return None
 
 
+def _mcp_rpc(base: str, method: str, params: dict[str, Any], rid: int) -> dict[str, Any]:
+    body = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params}
+    req = urllib.request.Request(
+        base + "/mcp",
+        data=json.dumps(body).encode(),
+        headers={
+            "content-type": "application/json",
+            "accept": "application/json, text/event-stream",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        payload: dict[str, Any] = json.loads(resp.read())
+    if "error" in payload:
+        raise RuntimeError(f"{method}: {payload['error']}")
+    result: dict[str, Any] = payload["result"]
+    return result
+
+
+def check_mcp(base: str, fixture: Path) -> str | None:
+    """MCP over streamable HTTP: list tools, then generate a template for a fixture and
+    require a passing round trip. Returns an error message or None."""
+    try:
+        _mcp_rpc(
+            base,
+            "initialize",
+            {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "offline-check", "version": "1"},
+            },
+            1,
+        )
+        listed = {t["name"] for t in _mcp_rpc(base, "tools/list", {}, 2)["tools"]}
+        expected = {
+            "suggest_parameters",
+            "generate_template",
+            "render_template",
+            "validate_template",
+        }
+        if listed != expected:
+            return f"unexpected tools {sorted(listed)}"
+        text = fixture.read_bytes().decode("utf-8")
+        res = _mcp_rpc(
+            base, "tools/call", {"name": "generate_template", "arguments": {"text": text}}, 3
+        )
+    except (OSError, RuntimeError, KeyError, ValueError) as exc:
+        return f"{type(exc).__name__}: {exc}"
+    if res.get("isError"):
+        return f"generate_template failed: {res.get('content')}"
+    structured = res.get("structuredContent") or {}
+    if not structured.get("roundtrip", {}).get("ok"):
+        return f"round-trip failed via MCP for {fixture.name}"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     ap.add_argument("--base-url", default="http://app:8000")
@@ -177,6 +233,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL web UI: {ui_error}")
         return 1
     print("PASS web UI served; all assets same-origin, no external references")
+
+    mcp_fixture = args.fixtures / "nginx.conf"
+    if mcp_fixture.exists():
+        mcp_error = check_mcp(base, mcp_fixture)
+        if mcp_error:
+            print(f"FAIL MCP over streamable HTTP: {mcp_error}")
+            return 1
+        print("PASS MCP over streamable HTTP: 4 tools; generate_template round-trips")
 
     fixtures = sorted(p for p in args.fixtures.iterdir() if p.is_file())
     if not fixtures:

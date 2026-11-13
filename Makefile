@@ -3,7 +3,8 @@ CONTAINER ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || echo po
 COMPOSE ?= $(CONTAINER) compose
 IMAGE ?= templatize:dev
 CHECK_IMAGE ?= templatize:offline-check
-OFFLINE = $(COMPOSE) -f compose.yaml -f compose.offline.yaml
+# Separate project name: never touches a stack started with `make up`.
+OFFLINE = $(COMPOSE) -p templatize-offline -f compose.yaml -f compose.offline.yaml
 PLATFORMS ?= linux/amd64,linux/arm64
 
 PHONY_EXTRA = frontend frontend-dev frontend-test check-all
