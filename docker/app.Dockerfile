@@ -45,3 +45,11 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
     CMD ["templatize-healthcheck"]
 # Default: the web API. CLI: `docker run --rm -i IMAGE templatize suggest -`.
 CMD ["templatize-api"]
+
+# ---------------------------------------------------------------------------
+# Test-only image: runtime + fixtures baked in. Used by `make offline-test*`.
+# Fixtures are copied from the build context rather than bind-mounted, because CI
+# runners that talk to the host's Docker daemon cannot bind-mount their workspace.
+FROM runtime AS offline-check
+COPY --chown=10001:10001 tests/fixtures /fixtures
+CMD ["python", "-m", "templatize_api.offline_check", "--base-url", "http://app:8000", "--fixtures", "/fixtures"]

@@ -2,10 +2,11 @@
 CONTAINER ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || echo podman)
 COMPOSE ?= $(CONTAINER) compose
 IMAGE ?= templatize:dev
+CHECK_IMAGE ?= templatize:offline-check
 OFFLINE = $(COMPOSE) -f compose.yaml -f compose.offline.yaml
 PLATFORMS ?= linux/amd64,linux/arm64
 
-.PHONY: install test lint format typecheck check image image-multiarch offline-test offline-test-cli up down serve clean
+.PHONY: install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
 
 install:
 	uv sync --all-extras
@@ -30,26 +31,28 @@ typecheck:
 check: lint typecheck test
 
 image:
-	$(CONTAINER) build -f docker/app.Dockerfile -t $(IMAGE) .
+	$(CONTAINER) build -f docker/app.Dockerfile --target runtime -t $(IMAGE) .
+
+check-image:
+	$(CONTAINER) build -f docker/app.Dockerfile --target offline-check -t $(CHECK_IMAGE) .
 
 # Requires docker buildx with QEMU/binfmt for the non-native platform.
 image-multiarch:
-	docker buildx build -f docker/app.Dockerfile --platform $(PLATFORMS) -t $(IMAGE) .
+	docker buildx build -f docker/app.Dockerfile --target runtime --platform $(PLATFORMS) -t $(IMAGE) .
 
 # Full stack with networking disabled: the compose network is internal-only, the
 # checker proves outbound access fails, then drives every fixture through the API
 # (suggest -> build -> round-trip -> render -> download). Must pass before a
 # milestone counts as done.
-offline-test: image
+offline-test: image check-image
 	$(OFFLINE) up --no-build --abort-on-container-exit --exit-code-from offline-check \
 		app offline-check; rc=$$?; $(OFFLINE) down --remove-orphans >/dev/null 2>&1; exit $$rc
 
 # CLI only, single container: --network none, read-only rootfs.
-offline-test-cli: image
+offline-test-cli: check-image
 	$(CONTAINER) run --rm --network none --read-only --cap-drop ALL \
 		--security-opt no-new-privileges \
-		-v "$(CURDIR)/tests/fixtures:/fixtures:ro" \
-		--entrypoint offline-fixtures $(IMAGE) /fixtures
+		--entrypoint offline-fixtures $(CHECK_IMAGE) /fixtures
 
 up:
 	$(COMPOSE) up -d --build app

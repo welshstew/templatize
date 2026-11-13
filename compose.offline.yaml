@@ -13,7 +13,11 @@ services:
     restart: "no"
 
   offline-check:
-    image: ${TEMPLATIZE_IMAGE:-templatize:dev}
+    image: ${TEMPLATIZE_CHECK_IMAGE:-templatize:offline-check}
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+      target: offline-check
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -21,13 +25,5 @@ services:
     depends_on:
       app:
         condition: service_healthy
-    volumes:
-      - ./tests/fixtures:/fixtures:ro
-    command:
-      - python
-      - -m
-      - templatize_api.offline_check
-      - --base-url
-      - http://app:8000
-      - --fixtures
-      - /fixtures
+    # Fixtures are baked into this image (no bind mounts: works on CI runners that
+    # use the host's Docker daemon).

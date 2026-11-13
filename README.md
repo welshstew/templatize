@@ -110,6 +110,11 @@ checker container then:
 
 This must pass before a milestone counts as done.
 
+The fixtures are baked into a separate `offline-check` image target instead of being
+bind-mounted. That way the test also works on CI runners that drive the host's Docker
+daemon from inside a job container, where workspace bind mounts don't resolve. The
+runtime image (`--target runtime`) contains no test data.
+
 ## Architecture
 
 ```text
