@@ -103,8 +103,13 @@ class SecurityHeadersMiddleware:
                 headers = list(message.get("headers", []))
                 existing = {k.lower() for k, _ in headers}
                 headers.extend(h for h in SECURITY_HEADERS if h[0] not in existing)
-                if not is_static and b"cache-control" not in existing:
-                    headers.append((b"cache-control", b"no-store"))
+                if b"cache-control" not in existing:
+                    # Hashed asset filenames never change; everything else may carry user text.
+                    headers.append(
+                        (b"cache-control", b"public, max-age=31536000, immutable")
+                        if is_static
+                        else (b"cache-control", b"no-store")
+                    )
                 message = {**message, "headers": headers}
             await send(message)
 

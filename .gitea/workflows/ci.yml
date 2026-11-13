@@ -13,9 +13,14 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.13.8"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - run: uv sync --frozen --all-extras
       - run: make lint
       - run: make typecheck
+      # builds the UI (type-check, bundle, external-URL check) so pytest can scan it too
+      - run: make frontend frontend-test
       - run: make test
 
   offline-test:

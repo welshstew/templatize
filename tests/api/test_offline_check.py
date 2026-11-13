@@ -70,3 +70,32 @@ def test_check_fixture_reports_roundtrip_failure(
 def test_healthcheck_exit_code_when_down(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEMPLATIZE_PORT", "1")  # nothing listens there
     assert healthcheck.main() == 1
+
+
+def test_check_ui(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import io
+    import urllib.request
+
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text('<script type="module" src="/assets/a.js"></script>')
+    js = tmp_path / "assets" / "a.js"
+    client = TestClient(create_app(Settings(static_dir=tmp_path)))
+
+    class Resp(io.BytesIO):
+        def __init__(self, r: Any) -> None:
+            super().__init__(r.content)
+            self.headers = r.headers
+            self.status = r.status_code
+
+        def __enter__(self) -> Resp:
+            return self
+
+    def urlopen(url: str, timeout: float = 0) -> Resp:
+        return Resp(client.get(url.removeprefix("http://test")))
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    js.write_text("console.log(1)")
+    assert offline_check.check_ui("http://test") is None
+    js.write_text('fetch("https://telemetry.example.com/x")')
+    err = offline_check.check_ui("http://test")
+    assert err is not None and "telemetry.example.com" in err

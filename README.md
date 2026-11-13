@@ -13,12 +13,12 @@ extracted values must reproduce the input **byte for byte**.
 
 Everything runs offline. No external services, API keys, telemetry or update checks.
 
-> Status: milestone 2 (core library, CLI, web API). Frontend, MCP server and optional
+> Status: milestone 3 (core library, CLI, web API, web UI). MCP server and optional
 > NER/LLM detectors follow.
 
 ## Quick start
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/). Building the UI also needs Node.js 22+ (24 recommended); the container image builds it for you.
 
 ```sh
 uv sync --all-extras        # install (locked) dependencies, incl. the web API
@@ -44,10 +44,38 @@ templatize build   FILE [--variant FILE]... (--accept-all | --vars vars.json)
   `[{"name": "db_host", "spans": [{"start": 10, "end": 18}]}]`.
 - `build` exits with code 2 if the round-trip check fails.
 
+### Web UI
+
+```sh
+make serve          # builds frontend/ and serves UI + API at http://127.0.0.1:8000
+make frontend-dev   # Vite dev server with hot reload (run `make serve` alongside; API is proxied)
+```
+
+1. Paste a document and press **Analyze**. You can also **add examples**: up to 3 other
+   versions of the same document. Regions that differ between them are suggested with
+   high confidence.
+2. Suggestions are highlighted by source: from the examples, key/value, pattern, or
+   repetition. Accept or reject them one at a time or all at once.
+3. **Select any text** in the document to turn it into a variable. You can apply it to
+   all occurrences, and selections that overlap an existing variable are refused.
+4. Rename variables and set their types in the sidebar. Editing a variable's *value*
+   drives the **live preview**.
+5. The **round-trip badge** in the header shows PASS/FAIL for the current variable set.
+   **Download .zip** gives you `template.j2`, `.env`, `render.py` and a README.
+
+The frontend is Preact + TypeScript, built with Vite, with no other runtime dependencies
+(about 37 KB of JS, 14 KB gzipped) and system fonts only. `npm run build` type-checks,
+bundles, and fails if the output references any external URL. `npm test` runs the
+client-side logic tests (selection, offsets, naming) with Node's built-in test runner.
+
+Offsets: the API uses Unicode code points and the browser uses UTF-16 code units.
+`frontend/src/offsets.ts` converts between them, so selections after emoji or other
+astral characters map exactly.
+
 ### Web API
 
 ```sh
-make serve                      # http://127.0.0.1:8000 (uv run templatize-api)
+TEMPLATIZE_STATIC_DIR=frontend/dist uv run templatize-api   # what `make serve` runs
 ```
 
 | Endpoint | Body | Returns |
@@ -78,6 +106,7 @@ Configuration (environment variables):
 | `TEMPLATIZE_HOST` / `TEMPLATIZE_PORT` | `127.0.0.1` / `8000` | the container uses `0.0.0.0` |
 | `TEMPLATIZE_ACCESS_LOG` | `0` | method/path/status only; bodies are never logged |
 | `TEMPLATIZE_MAX_BODY_BYTES` | ~25 MB | 4 documents × 1M chars × JSON escaping |
+| `TEMPLATIZE_STATIC_DIR` | unset (`/app/static` in the image) | built UI to serve at `/` |
 | `TEMPLATIZE_NER_URL`, `TEMPLATIZE_LLM_URL` | empty | optional services (later milestones) |
 
 ### Containers (offline)
@@ -105,7 +134,9 @@ The image is built online (dependencies from `uv.lock`) and runs offline:
 checker container then:
 1. proves that outbound TCP and DNS fail (if the internet is reachable, the test fails);
 2. waits for the app to be healthy;
-3. runs every fixture through `/suggest` → `/build` (round-trip must pass) →
+3. loads the web UI and every asset it references, and checks that nothing points
+   outside the origin;
+4. runs every fixture through `/suggest` → `/build` (round-trip must pass) →
    `/render` (must reproduce the input) → `/download` (zip must be complete).
 
 This must pass before a milestone counts as done.
@@ -125,7 +156,7 @@ runtime image (`--target runtime`) contains no test data.
              │  (ner, llm: later)                                         ▼       │    render.py
              │                                         roundtrip.py ◄── render    │    PASS/FAIL
              └────────────────────────────────────────────────────────────────────┘
-                  ▲ CLI         ▲ templatize_api (FastAPI)   ▲ MCP server (milestone 4)
+                  ▲ CLI    ▲ templatize_api (FastAPI) ◄── frontend/ (Preact UI)   ▲ MCP (milestone 4)
 ```
 
 | Module | Role |

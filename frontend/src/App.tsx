@@ -1,0 +1,290 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+
+import { api, type BuildResponse, type Info, type Notice, type RenderResponse } from "./api.ts";
+import { DocumentView, type TextSelection } from "./components/DocumentView.tsx";
+import { Editor } from "./components/Editor.tsx";
+import { OutputPanel } from "./components/OutputPanel.tsx";
+import { RoundTripBadge } from "./components/RoundTripBadge.tsx";
+import { SelectionPopover } from "./components/SelectionPopover.tsx";
+import { Sidebar } from "./components/Sidebar.tsx";
+import {
+  accepted,
+  addManual,
+  type Item,
+  itemsFromCandidates,
+  previewChanged,
+  previewValues,
+  setStatus,
+  specsFor,
+  updateItem,
+} from "./model.ts";
+import { OffsetMap } from "./offsets.ts";
+
+const DEFAULT_LIMITS = { max_input_chars: 1_000_000, max_variants: 3, max_variables: 2000 };
+
+/** Run ``fn`` ``delay`` ms after ``deps`` settle, aborting the previous run. */
+function useDebouncedEffect(fn: (signal: AbortSignal) => void, deps: unknown[], delay: number) {
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => fn(ctrl.signal), delay);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, deps);
+}
+
+function isAbort(e: unknown): boolean {
+  return e instanceof DOMException && e.name === "AbortError";
+}
+
+export function App() {
+  const [info, setInfo] = useState<Info | null>(null);
+  const [mode, setMode] = useState<"edit" | "review">("edit");
+  const [text, setText] = useState("");
+  const [variants, setVariants] = useState<string[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [notices, setNotices] = useState<Notice[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<TextSelection | null>(null);
+  const [build, setBuild] = useState<BuildResponse | null>(null);
+  const [buildError, setBuildError] = useState<string | null>(null);
+  const [buildPending, setBuildPending] = useState(false);
+  const [preview, setPreview] = useState<RenderResponse | null>(null);
+  const reviewedText = useRef("");
+
+  const limits = info?.limits ?? DEFAULT_LIMITS;
+  const map = useMemo(() => new OffsetMap(text), [text]);
+  const specs = useMemo(() => specsFor(items), [items]);
+  const specsKey = JSON.stringify(specs);
+  const valuesKey = JSON.stringify(previewValues(items));
+
+  useEffect(() => {
+    api.info().then(setInfo, () => setInfo(null));
+  }, []);
+
+  const analyze = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.suggest(text, variants.filter((v) => v.length > 0));
+      setItems(itemsFromCandidates(res.candidates));
+      setNotices(res.notices);
+      setSelectedId(null);
+      setSelection(null);
+      setBuild(null);
+      setPreview(null);
+      reviewedText.current = text;
+      setMode("review");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const backToEdit = () => {
+    if (accepted(items).length > 0 && !window.confirm("Editing the text discards the current variables. Continue?")) {
+      return;
+    }
+    setMode("edit");
+    setItems([]);
+    setNotices([]);
+    setBuild(null);
+    setPreview(null);
+    setSelection(null);
+  };
+
+  // Build (template, .env, render.py, round-trip) whenever the accepted variables change.
+  useDebouncedEffect(
+    (signal) => {
+      if (mode !== "review") return;
+      setBuildPending(true);
+      api.build(text, specs, signal).then(
+        (b) => {
+          setBuild(b);
+          setBuildError(null);
+          setBuildPending(false);
+        },
+        (e) => {
+          if (isAbort(e)) return;
+          setBuildError(e instanceof Error ? e.message : String(e));
+          setBuildPending(false);
+        },
+      );
+    },
+    [mode, text, specsKey],
+    250,
+  );
+
+  // Live preview: render the current template with the (possibly edited) values.
+  useDebouncedEffect(
+    (signal) => {
+      if (mode !== "review" || !build) return;
+      api.render(build.template.content, previewValues(items), signal).then(setPreview, (e) => {
+        if (!isAbort(e)) setPreview({ ok: false, output: null, error: String(e) });
+      });
+    },
+    [mode, build?.template.content, valuesKey],
+    200,
+  );
+
+  const onStatus = useCallback((ids: string[], status: Item["status"]) => {
+    setItems((cur) => setStatus(cur, new Set(ids), status));
+  }, []);
+  const onUpdate = useCallback((id: string, patch: Partial<Item>) => {
+    setItems((cur) => updateItem(cur, id, patch));
+  }, []);
+
+  const onAdd = (name: string, type: string, allOccurrences: boolean): string | null => {
+    if (!selection) return "no selection";
+    const res = addManual(items, map, { start: selection.start, end: selection.end, name, type, allOccurrences });
+    if (res.error) return res.error;
+    setItems(res.items);
+    setSelectedId(res.added?.id ?? null);
+    setSelection(null);
+    window.getSelection()?.removeAllRanges();
+    return null;
+  };
+
+  const download = async () => {
+    setError(null);
+    try {
+      const blob = await api.download(text, specs);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "template-bundle.zip";
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const acceptedCount = accepted(items).length;
+  const suggestedCount = items.filter((i) => i.status === "suggested").length;
+
+  return (
+    <div class="app">
+      <header class="topbar">
+        <h1>
+          <span class="logo" aria-hidden="true">
+            {"{{ }}"}
+          </span>{" "}
+          templatize
+        </h1>
+        {mode === "review" ? (
+          <>
+            <RoundTripBadge result={build?.roundtrip ?? null} pending={buildPending} />
+            <span class="spacer" />
+            <span class="muted counts">
+              {acceptedCount} variable{acceptedCount === 1 ? "" : "s"} · {suggestedCount} pending
+            </span>
+            <button onClick={backToEdit}>Edit text</button>
+            <button class="primary" onClick={download} disabled={!build || buildPending}>
+              Download .zip
+            </button>
+          </>
+        ) : (
+          <>
+            <span class="spacer" />
+            <span class="muted">Everything runs locally. Nothing is stored.</span>
+          </>
+        )}
+      </header>
+
+      {error ? (
+        <div class="banner error" role="alert">
+          {error}
+          <button class="icon" aria-label="Dismiss" onClick={() => setError(null)}>
+            ×
+          </button>
+        </div>
+      ) : null}
+
+      {mode === "edit" ? (
+        <main class="edit-layout">
+          <Editor
+            text={text}
+            variants={variants}
+            maxVariants={limits.max_variants}
+            maxChars={limits.max_input_chars}
+            busy={busy}
+            onText={setText}
+            onVariants={setVariants}
+            onAnalyze={analyze}
+          />
+          <section class="intro">
+            <h2>How it works</h2>
+            <ol>
+              <li>Paste text and press <b>Analyze</b>. Likely parameters are highlighted.</li>
+              <li>
+                Optionally <b>add examples</b>: other versions of the same document. What differs between
+                them is suggested with high confidence.
+              </li>
+              <li>Accept or reject suggestions, or <b>select any text</b> to make it a variable. Rename freely.</li>
+              <li>
+                Get a Jinja2 template, a <code>.env</code> and a <code>render.py</code>. The{" "}
+                <b>round-trip check</b> proves the template reproduces your input byte for byte.
+              </li>
+            </ol>
+          </section>
+        </main>
+      ) : (
+        <main class="review-layout">
+          <section class="doc-pane" aria-label="Document">
+            <div class="pane-head">
+              <h2>Document</h2>
+              <span class="legend">
+                <mark class="sug src-diff">examples</mark>
+                <mark class="sug src-key_value">key</mark>
+                <mark class="sug src-regex">pattern</mark>
+                <mark class="sug src-repetition">repeated</mark>
+                <mark class="acc src-manual">accepted</mark>
+              </span>
+            </div>
+            <DocumentView
+              map={map}
+              items={items}
+              selectedId={selectedId}
+              onSelectItem={setSelectedId}
+              onTextSelection={setSelection}
+            />
+            <p class="hint">Select any text to turn it into a variable. Click a highlight to find it in the list.</p>
+          </section>
+          <Sidebar
+            items={items}
+            notices={notices}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onStatus={onStatus}
+            onUpdate={onUpdate}
+          />
+          <OutputPanel
+            build={build}
+            buildError={buildError}
+            preview={preview}
+            previewChanged={previewChanged(items)}
+            original={reviewedText.current}
+          />
+        </main>
+      )}
+
+      {selection && mode === "review" ? (
+        <SelectionPopover
+          key={`${selection.start}-${selection.end}`}
+          text={text}
+          selection={selection}
+          items={items}
+          onAdd={onAdd}
+          onCancel={() => setSelection(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
