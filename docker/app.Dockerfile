@@ -16,11 +16,11 @@ WORKDIR /src
 # Dependencies first for layer caching.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --extra api --no-install-project
 COPY README.md ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-dev --extra api --no-editable
 
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
@@ -35,8 +35,21 @@ ENV PATH=/app/.venv/bin:$PATH \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     HF_HUB_DISABLE_TELEMETRY=1 \
-    DO_NOT_TRACK=1
+    DO_NOT_TRACK=1 \
+    TEMPLATIZE_HOST=0.0.0.0 \
+    TEMPLATIZE_PORT=8000
 USER 10001
 WORKDIR /work
-ENTRYPOINT ["templatize"]
-CMD ["--help"]
+EXPOSE 8000
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
+    CMD ["templatize-healthcheck"]
+# Default: the web API. CLI: `docker run --rm -i IMAGE templatize suggest -`.
+CMD ["templatize-api"]
+
+# ---------------------------------------------------------------------------
+# Test-only image: runtime + fixtures baked in. Used by `make offline-test*`.
+# Fixtures are copied from the build context rather than bind-mounted, because CI
+# runners that talk to the host's Docker daemon cannot bind-mount their workspace.
+FROM runtime AS offline-check
+COPY --chown=10001:10001 tests/fixtures /fixtures
+CMD ["python", "-m", "templatize_api.offline_check", "--base-url", "http://app:8000", "--fixtures", "/fixtures"]

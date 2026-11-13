@@ -13,7 +13,7 @@ extracted values must reproduce the input **byte for byte**.
 
 Everything runs offline. No external services, API keys, telemetry or update checks.
 
-> Status: milestone 1 (core library + CLI). Web API, frontend, MCP server and optional
+> Status: milestone 2 (core library, CLI, web API). Frontend, MCP server and optional
 > NER/LLM detectors follow.
 
 ## Quick start
@@ -21,7 +21,7 @@ Everything runs offline. No external services, API keys, telemetry or update che
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```sh
-uv sync                     # install (locked) dependencies
+uv sync --all-extras        # install (locked) dependencies, incl. the web API
 make check                  # ruff + mypy --strict + pytest
 
 uv run templatize suggest tests/fixtures/nginx.conf
@@ -44,16 +44,76 @@ templatize build   FILE [--variant FILE]... (--accept-all | --vars vars.json)
   `[{"name": "db_host", "spans": [{"start": 10, "end": 18}]}]`.
 - `build` exits with code 2 if the round-trip check fails.
 
+### Web API
+
+```sh
+make serve                      # http://127.0.0.1:8000 (uv run templatize-api)
+```
+
+| Endpoint | Body | Returns |
+|---|---|---|
+| `POST /suggest` | `{text, variants?: [≤3]}` | `{candidates, notices}` (spans in code points) |
+| `POST /build` | `{text, variables: [{name, spans, type?, value?}], engine?}` | `{template, env, runner, variables, roundtrip}` |
+| `POST /render` | `{template, values: {name\|ENV_KEY: value}, newline?}` | `{ok, output, error}`: errors are reported, not raised |
+| `POST /download` | same as `/build` | `application/zip` (`template.j2`, `.env`, `render.py`, `README.md`); header `x-roundtrip: pass\|fail` |
+| `GET /healthz`, `GET /info` | | health; version, engines, detectors, limits |
+
+The OpenAPI schema is at `/openapi.json`. Swagger UI and ReDoc are disabled because
+they load assets from a CDN.
+
+`/download` is a POST and not the GET in the original brief. The server keeps nothing
+between requests, so the request has to carry everything needed to build the zip.
+
+Hardening:
+- Request body limit (413).
+- Strict same-origin CSP: the browser can't fetch anything from the internet.
+- `Cache-Control: no-store` on API responses.
+- `/render` uses a sandboxed Jinja environment that also bounds string/list repetition,
+  exponents and output size (10M characters).
+
+Configuration (environment variables):
+
+| Variable | Default | |
+|---|---|---|
+| `TEMPLATIZE_HOST` / `TEMPLATIZE_PORT` | `127.0.0.1` / `8000` | the container uses `0.0.0.0` |
+| `TEMPLATIZE_ACCESS_LOG` | `0` | method/path/status only; bodies are never logged |
+| `TEMPLATIZE_MAX_BODY_BYTES` | ~25 MB | 4 documents × 1M chars × JSON escaping |
+| `TEMPLATIZE_NER_URL`, `TEMPLATIZE_LLM_URL` | empty | optional services (later milestones) |
+
 ### Containers (offline)
 
 ```sh
-make image          # docker if present, otherwise podman (override: CONTAINER=podman)
-make offline-test   # every fixture: suggest -> build -> round-trip, --network none, read-only rootfs
+make up               # docker compose up: app on 127.0.0.1:8000 (TEMPLATIZE_BIND/PORT to change)
+make down
+make offline-test     # full stack on an internal-only network, see below
+make offline-test-cli # CLI only: single container, --network none
 make image-multiarch  # docker buildx, linux/amd64 + linux/arm64
 ```
 
-The image is built online (dependencies from `uv.lock`) and runs offline. It uses a slim
-base, runs as a non-root user (uid 10001), and works with `--read-only`.
+The Makefile uses docker if it's installed and otherwise podman (`CONTAINER=podman`
+to force it).
+
+The image is built online (dependencies from `uv.lock`) and runs offline:
+- slim base;
+- non-root user (uid 10001);
+- read-only root filesystem with a small `/tmp` tmpfs;
+- all capabilities dropped and `no-new-privileges` set;
+- health check via `templatize-healthcheck`.
+
+**Offline verification.** `make offline-test` brings up the stack with
+`compose.offline.yaml`, which makes the compose network `internal` (no route out). A
+checker container then:
+1. proves that outbound TCP and DNS fail (if the internet is reachable, the test fails);
+2. waits for the app to be healthy;
+3. runs every fixture through `/suggest` → `/build` (round-trip must pass) →
+   `/render` (must reproduce the input) → `/download` (zip must be complete).
+
+This must pass before a milestone counts as done.
+
+The fixtures are baked into a separate `offline-check` image target instead of being
+bind-mounted. That way the test also works on CI runners that drive the host's Docker
+daemon from inside a job container, where workspace bind mounts don't resolve. The
+runtime image (`--target runtime`) contains no test data.
 
 ## Architecture
 
@@ -65,7 +125,7 @@ base, runs as a non-root user (uid 10001), and works with `--read-only`.
              │  (ner, llm: later)                                         ▼       │    render.py
              │                                         roundtrip.py ◄── render    │    PASS/FAIL
              └────────────────────────────────────────────────────────────────────┘
-                  ▲ CLI (now)   ▲ FastAPI (milestone 2)   ▲ MCP server (milestone 4)
+                  ▲ CLI         ▲ templatize_api (FastAPI)   ▲ MCP server (milestone 4)
 ```
 
 | Module | Role |
@@ -179,5 +239,13 @@ Register new detectors in `detectors/__init__.py`.
 
 ## Privacy
 
-User text is never logged or persisted. The core library has no logging, and the web
-layer (milestone 2) will not log request bodies.
+User text is never logged or persisted:
+- The core library has no logging.
+- The API keeps nothing between requests and has no access log by default. When the
+  access log is enabled it records only method, path and status.
+- Unhandled errors are logged by exception type and path only, because exception
+  messages can quote user text.
+- 422 responses omit FastAPI's default echo of the input.
+
+Tests check this by sending a marker string through every endpoint and asserting it
+never shows up in captured logs.

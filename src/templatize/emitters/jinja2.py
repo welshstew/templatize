@@ -18,9 +18,12 @@ from __future__ import annotations
 import re
 from collections import Counter
 from collections.abc import Mapping
+from typing import Any
 
 from jinja2 import Environment, StrictUndefined, TemplateError
-from jinja2.sandbox import SandboxedEnvironment
+from jinja2.exceptions import SecurityError
+from jinja2.runtime import Context
+from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from templatize.emitters.base import EmittedFile, TemplateRenderError
 from templatize.ir import TemplateIR
@@ -45,9 +48,35 @@ def environment_options(newline: str) -> dict[str, object]:
     }
 
 
+# Limits for rendering untrusted, user-edited templates (POST /render, MCP).
+MAX_RENDER_CHARS = 10_000_000
+MAX_POWER_EXPONENT = 64
+
+
+class GuardedSandboxedEnvironment(ImmutableSandboxedEnvironment):
+    """Jinja's sandbox blocks unsafe attribute access but not resource exhaustion such
+    as ``{{ "a" * 10**9 }}``. This variant also bounds sequence repetition and powers.
+    (``range`` is already capped by the sandbox; output size is capped in ``render``.)"""
+
+    intercepted_binops = frozenset({"*", "**"})
+
+    def call_binop(self, context: Context, operator: str, left: Any, right: Any) -> Any:
+        if operator == "**" and isinstance(right, int | float) and abs(right) > MAX_POWER_EXPONENT:
+            raise SecurityError(f"exponent larger than {MAX_POWER_EXPONENT} is not allowed")
+        if operator == "*":
+            for seq, n in ((left, right), (right, left)):
+                if (
+                    isinstance(seq, str | bytes | list | tuple)
+                    and isinstance(n, int)
+                    and len(seq) * n > MAX_RENDER_CHARS
+                ):
+                    raise SecurityError("result of repetition is too large")
+        return super().call_binop(context, operator, left, right)
+
+
 def make_environment(newline: str = "\n", *, sandboxed: bool = True) -> Environment:
     opts = environment_options(newline)
-    cls = SandboxedEnvironment if sandboxed else Environment
+    cls = GuardedSandboxedEnvironment if sandboxed else Environment
     return cls(**opts)  # type: ignore[arg-type]
 
 
@@ -133,11 +162,24 @@ class Jinja2Emitter:
             newline = dominant_newline([template])
         env = make_environment(newline, sandboxed=True)
         try:
-            return env.from_string(template).render(dict(values))
+            parts: list[str] = []
+            size = 0
+            for chunk in env.from_string(template).generate(dict(values)):
+                size += len(chunk)
+                if size > MAX_RENDER_CHARS:
+                    raise TemplateRenderError(
+                        f"output exceeds {MAX_RENDER_CHARS} characters; rendering stopped"
+                    )
+                parts.append(chunk)
+            return "".join(parts)
+        except TemplateRenderError:
+            raise
         except TemplateError as exc:
             lineno = getattr(exc, "lineno", None)
             location = f" (line {lineno})" if lineno else ""
             raise TemplateRenderError(f"{type(exc).__name__}: {exc.message}{location}") from exc
+        except Exception as exc:  # user templates can raise anything (1/0, range overflow, ...)
+            raise TemplateRenderError(f"{type(exc).__name__}: {exc}") from exc
 
     def runner_files(self, ir: TemplateIR) -> list[EmittedFile]:
         return [EmittedFile(path="render.py", content=render_script(self.newline_for(ir)))]

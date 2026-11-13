@@ -1,0 +1,29 @@
+# Offline verification overlay: `make offline-test`.
+#   docker compose -f compose.yaml -f compose.offline.yaml up --abort-on-container-exit \
+#     --exit-code-from offline-check
+# The default network becomes internal (no route to the outside world) and a
+# checker container drives every fixture through the API.
+networks:
+  default:
+    internal: true
+
+services:
+  app:
+    ports: !reset []
+    restart: "no"
+
+  offline-check:
+    image: ${TEMPLATIZE_CHECK_IMAGE:-templatize:offline-check}
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+      target: offline-check
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=16m"]
+    depends_on:
+      app:
+        condition: service_healthy
+    # Fixtures are baked into this image (no bind mounts: works on CI runners that
+    # use the host's Docker daemon).
