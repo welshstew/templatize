@@ -8,6 +8,8 @@ errors are returned without the ``input`` echo FastAPI includes by default.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -96,8 +98,39 @@ def _mount_frontend(app: FastAPI, settings: Settings) -> None:
             return FileResponse(favicon, media_type="image/svg+xml")
 
 
+def _mcp_http(settings: Settings) -> tuple[list[Any], AbstractAsyncContextManager[Any] | None]:
+    """Routes and lifespan for MCP streamable HTTP at /mcp, or nothing if disabled or the
+    `mcp` extra is not installed (the API then works exactly as before)."""
+    if not settings.mcp_http:
+        return [], None
+    try:
+        from templatize_mcp.server import create_server, transport_security
+    except ImportError:
+        log.info("mcp package not installed; /mcp not served")
+        return [], None
+    server = create_server()
+    http_app = server.streamable_http_app(
+        streamable_http_path="/mcp",
+        stateless_http=True,  # every tool is a pure function: no session state needed
+        json_response=True,
+        max_request_body_size=settings.max_body_bytes,
+        transport_security=transport_security(list(settings.mcp_allowed_hosts)),
+    )
+    return list(http_app.routes), server.session_manager.run()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    mcp_routes, mcp_lifespan = _mcp_http(settings)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if mcp_lifespan is None:
+            yield
+        else:
+            async with mcp_lifespan:
+                yield
+
     app = FastAPI(
         title="templatize",
         version=__version__,
@@ -105,6 +138,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Swagger UI/ReDoc load assets from a CDN: disabled for offline use.
         docs_url=None,
         redoc_url=None,
+        lifespan=lifespan,
     )
     app.state.settings = settings
 
@@ -137,6 +171,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engines=sorted(EMITTERS),
             detectors=list(HEURISTIC_DETECTORS),
             optional_detectors={"ner": False, "llm": False},
+            mcp_http="/mcp" if mcp_routes else None,
             limits=Limits(
                 max_input_chars=MAX_INPUT_CHARS,
                 max_variants=MAX_VARIANTS,
@@ -209,6 +244,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    app.router.routes.extend(mcp_routes)
     _mount_frontend(app, settings)
 
     # Outermost first: headers wrap everything, body limit applies before routing.

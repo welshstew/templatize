@@ -20,7 +20,7 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
-from jinja2 import Environment, StrictUndefined, TemplateError
+from jinja2 import Environment, StrictUndefined, TemplateError, meta
 from jinja2.exceptions import SecurityError
 from jinja2.runtime import Context
 from jinja2.sandbox import ImmutableSandboxedEnvironment
@@ -181,6 +181,15 @@ class Jinja2Emitter:
         except Exception as exc:  # user templates can raise anything (1/0, range overflow, ...)
             raise TemplateRenderError(f"{type(exc).__name__}: {exc}") from exc
 
+    def variables_in(self, template: str) -> set[str]:
+        env = make_environment(dominant_newline([template]), sandboxed=True)
+        try:
+            return set(meta.find_undeclared_variables(env.parse(template)))
+        except TemplateError as exc:
+            lineno = getattr(exc, "lineno", None)
+            location = f" (line {lineno})" if lineno else ""
+            raise TemplateRenderError(f"{type(exc).__name__}: {exc.message}{location}") from exc
+
     def runner_files(self, ir: TemplateIR) -> list[EmittedFile]:
         return [EmittedFile(path="render.py", content=render_script(self.newline_for(ir)))]
 
@@ -209,7 +218,7 @@ import sys
 from pathlib import Path
 
 from dotenv import dotenv_values
-from jinja2 import Environment, StrictUndefined, TemplateError
+from jinja2 import Environment, StrictUndefined, TemplateError, meta
 
 HERE = Path(__file__).resolve().parent
 # Line ending of the original document; Jinja normalises template newlines to this.

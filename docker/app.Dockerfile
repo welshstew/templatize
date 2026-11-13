@@ -28,11 +28,11 @@ WORKDIR /src
 # Dependencies first for layer caching.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra api --no-install-project
+    uv sync --frozen --no-dev --extra api --extra mcp --no-install-project
 COPY README.md ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra api --no-editable
+    uv sync --frozen --no-dev --extra api --extra mcp --no-editable
 
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
@@ -57,7 +57,9 @@ WORKDIR /work
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 \
     CMD ["templatize-healthcheck"]
-# Default: the web API. CLI: `docker run --rm -i IMAGE templatize suggest -`.
+# Default: web UI + API + MCP (streamable HTTP at /mcp).
+# MCP over stdio: `docker run --rm -i IMAGE templatize-mcp`
+# CLI:            `docker run --rm -i IMAGE templatize suggest -`
 CMD ["templatize-api"]
 
 # ---------------------------------------------------------------------------
