@@ -3,11 +3,12 @@ CONTAINER ?= $(shell command -v docker >/dev/null 2>&1 && echo docker || echo po
 COMPOSE ?= $(CONTAINER) compose
 IMAGE ?= templatize:dev
 CHECK_IMAGE ?= templatize:offline-check
+LLM_IMAGE ?= templatize-llm:dev
 # Separate project name: never touches a stack started with `make up`.
 OFFLINE = $(COMPOSE) -p templatize-offline -f compose.yaml -f compose.offline.yaml
 PLATFORMS ?= linux/amd64,linux/arm64
 
-PHONY_EXTRA = frontend frontend-dev frontend-test check-all
+PHONY_EXTRA = frontend frontend-dev frontend-test check-all up-llm model llm-image offline-test-llm
 .PHONY: $(PHONY_EXTRA) install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
 
 install:
@@ -52,6 +53,7 @@ check-image:
 # Requires docker buildx with QEMU/binfmt for the non-native platform.
 image-multiarch:
 	docker buildx build -f docker/app.Dockerfile --target runtime --platform $(PLATFORMS) -t $(IMAGE) .
+	docker buildx build -f docker/llm.Dockerfile --platform $(PLATFORMS) -t $(LLM_IMAGE) .
 
 # Full stack with networking disabled: the compose network is internal-only, the
 # checker proves outbound access fails, then drives every fixture through the API
@@ -69,6 +71,23 @@ offline-test-cli: check-image
 
 up:
 	$(COMPOSE) up -d --build app
+
+# App + local LLM detector (needs `make model` first).
+up-llm: model
+	COMPOSE_PROFILES=llm $(COMPOSE) up -d --build
+
+# Default GGUF for the LLM detector, pinned revision + SHA-256 verified (~2.5 GB).
+model:
+	./scripts/download-model.sh models
+
+llm-image:
+	$(CONTAINER) build -f docker/llm.Dockerfile -t $(LLM_IMAGE) .
+
+# Full offline test including a real LLM review inside the isolated network.
+offline-test-llm: image check-image llm-image model
+	COMPOSE_PROFILES=llm TEMPLATIZE_OFFLINE_EXPECT_LLM=1 $(OFFLINE) up --no-build \
+		--abort-on-container-exit --exit-code-from offline-check app llm offline-check; \
+		rc=$$?; COMPOSE_PROFILES=llm $(OFFLINE) down --remove-orphans >/dev/null 2>&1; exit $$rc
 
 down:
 	$(COMPOSE) down --remove-orphans

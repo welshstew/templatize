@@ -62,6 +62,20 @@ export interface BuildResponse {
   roundtrip: RoundTrip;
 }
 
+export interface LlmReview {
+  renames: { candidate_id: string; name: string; reason: string | null }[];
+  fixed: { candidate_id: string; reason: string | null }[];
+  additions: Candidate[];
+  discarded: number;
+  notices: Notice[];
+}
+
+export interface LlmReviewResponse {
+  available: boolean;
+  review: LlmReview | null;
+  detail: string | null;
+}
+
 export interface RenderResponse {
   ok: boolean;
   output: string | null;
@@ -122,6 +136,8 @@ export const api = {
   },
   suggest: (text: string, variants: string[], signal?: AbortSignal) =>
     post<SuggestResult>("/suggest", { text, variants }, signal),
+  suggestLlm: (text: string, variants: string[], signal?: AbortSignal) =>
+    post<LlmReviewResponse>("/suggest/llm", { text, variants }, signal),
   build: (text: string, variables: VariableSpec[], signal?: AbortSignal) =>
     post<BuildResponse>("/build", { text, variables }, signal),
   render: (template: string, values: Record<string, string>, signal?: AbortSignal) =>

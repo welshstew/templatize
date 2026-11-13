@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import re
 import socket
 import sys
@@ -210,10 +211,54 @@ def check_mcp(base: str, fixture: Path) -> str | None:
     return None
 
 
+def _get_json(base: str, path: str) -> Any:
+    with urllib.request.urlopen(base + path, timeout=10) as resp:
+        return json.loads(resp.read())
+
+
+def check_llm(base: str, fixture: Path, expect: bool, wait: float = 900.0) -> tuple[bool, str]:
+    """Without ``expect``: /suggest/llm must degrade gracefully (200, available=false is
+    fine). With ``expect``: wait for the model to load, run a real review, merge it and
+    require the round trip to still pass. Returns (ok, message)."""
+    text = fixture.read_bytes().decode("utf-8")
+    if expect:
+        deadline = time.monotonic() + wait
+        while not _get_json(base, "/info")["optional_detectors"]["llm"]:
+            if time.monotonic() > deadline:
+                return False, f"LLM did not become available within {wait:.0f}s"
+            time.sleep(5)
+    status, body, _ = _post(base, "/suggest/llm", {"text": text, "variants": []})
+    if status != 200:
+        return False, f"/suggest/llm -> {status}"
+    res = json.loads(body)
+    if not expect:
+        state = "available" if res["available"] else f"unavailable ({res.get('detail')})"
+        return True, f"/suggest/llm degrades gracefully: {state}"
+    if not res["available"] or res["review"] is None:
+        return False, f"LLM review unavailable: {res.get('detail')}"
+
+    from templatize.build import build, specs_from_candidates
+    from templatize.detectors.llm import LlmReview, apply_review
+    from templatize.suggest import suggest
+
+    review = LlmReview.model_validate(res["review"])
+    merged = apply_review(suggest(text).candidates, review)
+    result = build(text, specs_from_candidates(merged))
+    if not result.roundtrip.ok:
+        return False, "round-trip failed after merging the LLM review"
+    return True, (
+        f"LLM review: {len(review.renames)} renamed, {len(review.fixed)} flagged fixed, "
+        f"{len(review.additions)} added, {review.discarded} discarded; round-trip ok"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     ap.add_argument("--base-url", default="http://app:8000")
     ap.add_argument("--fixtures", type=Path, default=Path("/fixtures"))
+    ap.add_argument(
+        "--expect-llm", action="store_true", help="require a working LLM service (llm profile)"
+    )
     ap.add_argument(
         "--allow-network", action="store_true", help="skip the isolation check (local debugging)"
     )
@@ -241,6 +286,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAIL MCP over streamable HTTP: {mcp_error}")
             return 1
         print("PASS MCP over streamable HTTP: 4 tools; generate_template round-trips")
+
+    expect_llm = args.expect_llm or os.environ.get("TEMPLATIZE_OFFLINE_EXPECT_LLM") == "1"
+    llm_fixture = args.fixtures / "business_letter.txt"
+    if llm_fixture.exists():
+        ok, msg = check_llm(base, llm_fixture, expect_llm)
+        print(f"{'PASS' if ok else 'FAIL'} {msg}")
+        if not ok:
+            return 1
 
     fixtures = sorted(p for p in args.fixtures.iterdir() if p.is_file())
     if not fixtures:

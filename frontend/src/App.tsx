@@ -10,6 +10,7 @@ import { Sidebar } from "./components/Sidebar.tsx";
 import {
   accepted,
   addManual,
+  applyReview,
   type Item,
   itemsFromCandidates,
   previewChanged,
@@ -19,6 +20,12 @@ import {
   updateItem,
 } from "./model.ts";
 import { OffsetMap } from "./offsets.ts";
+
+export type LlmStatus =
+  | { state: "off" }
+  | { state: "running" }
+  | { state: "unavailable"; detail: string }
+  | { state: "done"; renamed: number; flagged: number; added: number };
 
 const DEFAULT_LIMITS = { max_input_chars: 1_000_000, max_variants: 3, max_variables: 2000 };
 
@@ -54,6 +61,8 @@ export function App() {
   const [buildPending, setBuildPending] = useState(false);
   const [preview, setPreview] = useState<RenderResponse | null>(null);
   const reviewedText = useRef("");
+  const [llm, setLlm] = useState<LlmStatus>({ state: "off" });
+  const llmAbort = useRef<AbortController | null>(null);
 
   const limits = info?.limits ?? DEFAULT_LIMITS;
   const map = useMemo(() => new OffsetMap(text), [text]);
@@ -78,6 +87,7 @@ export function App() {
       setPreview(null);
       reviewedText.current = text;
       setMode("review");
+      startLlmReview(text, variants.filter((v) => v.length > 0));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -85,10 +95,46 @@ export function App() {
     }
   };
 
+  // Heuristic results are shown instantly; the optional local LLM review is merged in
+  // when (if) it arrives, without overriding anything the user changed meanwhile.
+  const startLlmReview = (docText: string, docVariants: string[]) => {
+    llmAbort.current?.abort();
+    if (!info?.optional_detectors.llm) {
+      setLlm({ state: "off" });
+      return;
+    }
+    const ctrl = new AbortController();
+    llmAbort.current = ctrl;
+    setLlm({ state: "running" });
+    api.suggestLlm(docText, docVariants, ctrl.signal).then(
+      (res) => {
+        if (ctrl.signal.aborted) return;
+        if (!res.available || !res.review) {
+          setLlm({ state: "unavailable", detail: res.detail ?? "" });
+          return;
+        }
+        const review = res.review;
+        let outcome = { renamed: 0, flagged: 0, added: 0 };
+        setItems((cur) => {
+          const r = applyReview(cur, review);
+          outcome = r;
+          return r.items;
+        });
+        setNotices((cur) => [...cur, ...review.notices]);
+        setLlm({ state: "done", ...outcome });
+      },
+      (e) => {
+        if (!isAbort(e)) setLlm({ state: "unavailable", detail: e instanceof Error ? e.message : String(e) });
+      },
+    );
+  };
+
   const backToEdit = () => {
     if (accepted(items).length > 0 && !window.confirm("Editing the text discards the current variables. Continue?")) {
       return;
     }
+    llmAbort.current?.abort();
+    setLlm({ state: "off" });
     setMode("edit");
     setItems([]);
     setNotices([]);
@@ -245,6 +291,7 @@ export function App() {
                 <mark class="sug src-key_value">key</mark>
                 <mark class="sug src-regex">pattern</mark>
                 <mark class="sug src-repetition">repeated</mark>
+                {llm.state !== "off" ? <mark class="sug src-llm">LLM</mark> : null}
                 <mark class="acc src-manual">accepted</mark>
               </span>
             </div>
@@ -258,6 +305,7 @@ export function App() {
             <p class="hint">Select any text to turn it into a variable. Click a highlight to find it in the list.</p>
           </section>
           <Sidebar
+            llm={llm}
             items={items}
             notices={notices}
             selectedId={selectedId}

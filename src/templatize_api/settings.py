@@ -40,6 +40,8 @@ class Settings:
     # Optional services (later milestones). Absent/unreachable => features hidden.
     ner_url: str | None = None
     llm_url: str | None = None
+    llm_timeout: float = 300.0
+    llm_max_chars: int = 24_000
     # MCP over streamable HTTP at /mcp (needs the `mcp` extra).
     mcp_http: bool = True
     mcp_allowed_hosts: tuple[str, ...] = DEFAULT_MCP_ALLOWED_HOSTS
@@ -58,6 +60,8 @@ class Settings:
             static_dir=Path(static) if static else None,
             ner_url=_opt("TEMPLATIZE_NER_URL"),
             llm_url=_opt("TEMPLATIZE_LLM_URL"),
+            llm_timeout=float(os.environ.get("TEMPLATIZE_LLM_TIMEOUT", "300")),
+            llm_max_chars=int(os.environ.get("TEMPLATIZE_LLM_MAX_CHARS", "24000")),
             mcp_http=_bool("TEMPLATIZE_MCP_HTTP", True),
             mcp_allowed_hosts=DEFAULT_MCP_ALLOWED_HOSTS
             + tuple(

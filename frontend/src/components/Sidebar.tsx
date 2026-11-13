@@ -1,9 +1,11 @@
 import { useState } from "preact/hooks";
 
+import type { LlmStatus } from "../App.tsx";
 import type { Notice } from "../api.ts";
 import { canAccept, type Item, VAR_TYPES, validateName } from "../model.ts";
 
 interface Props {
+  llm: LlmStatus;
   items: Item[];
   notices: Notice[];
   selectedId: string | null;
@@ -159,6 +161,7 @@ function SuggestionRow({ item, items, selected, onSelect, onStatus }: {
         {item.spans.length > 1 ? <span class="muted">×{item.spans.length}</span> : null}
         <Sources item={item} />
       </div>
+      {item.llmNote ? <div class="meta llm-note">{item.llmNote}</div> : null}
       {item.variantValues?.length ? (
         <div class="meta muted">
           examples: {item.variantValues.map((v) => short(v, 24)).join(" · ")}
@@ -168,7 +171,35 @@ function SuggestionRow({ item, items, selected, onSelect, onStatus }: {
   );
 }
 
-export function Sidebar({ items, notices, selectedId, onSelect, onStatus, onUpdate }: Props) {
+function LlmPill({ llm }: { llm: LlmStatus }) {
+  if (llm.state === "off") return null;
+  if (llm.state === "running") {
+    return (
+      <div class="llm-pill running" role="status">
+        <span class="spinner" aria-hidden="true" /> LLM is reviewing the suggestions…
+      </div>
+    );
+  }
+  if (llm.state === "unavailable") {
+    return (
+      <div class="llm-pill muted" role="status" title={llm.detail}>
+        LLM review unavailable; showing heuristic suggestions only.
+      </div>
+    );
+  }
+  const parts = [
+    llm.renamed ? `renamed ${llm.renamed}` : "",
+    llm.added ? `added ${llm.added}` : "",
+    llm.flagged ? `flagged ${llm.flagged} as likely fixed` : "",
+  ].filter(Boolean);
+  return (
+    <div class="llm-pill done" role="status">
+      LLM review: {parts.length ? parts.join(", ") : "no changes"}
+    </div>
+  );
+}
+
+export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, onUpdate }: Props) {
   const [showRejected, setShowRejected] = useState(false);
   const acc = items.filter((i) => i.status === "accepted");
   const sug = items
@@ -178,6 +209,7 @@ export function Sidebar({ items, notices, selectedId, onSelect, onStatus, onUpda
 
   return (
     <aside class="sidebar" aria-label="Variables and suggestions">
+      <LlmPill llm={llm} />
       <section>
         <h2>
           Variables <span class="count">{acc.length}</span>
