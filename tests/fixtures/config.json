@@ -1,0 +1,19 @@
+{
+  "service": "inventory-api",
+  "version": "3.8.1",
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 9100
+  },
+  "database": {
+    "url": "postgresql://inventory@10.0.12.5:5432/inventory",
+    "pool_size": 20,
+    "timeout_seconds": 30
+  },
+  "features": {
+    "audit_log": true,
+    "beta_search": false
+  },
+  "admin_email": "ops@acme.io",
+  "instance_id": "6f1c2a9e-3b7d-4f0a-9c55-2d8e1b4a7f30"
+}

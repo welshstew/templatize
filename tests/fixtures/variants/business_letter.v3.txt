@@ -1,0 +1,23 @@
+Northwind Traders Ltd
+14 Harbour Street
+Bristol BS1 4QA
+
+18 April 2025
+
+Dr. Priya Nair
+Litware Inc
+pnair@litware.example
+
+Dear Dr. Nair,
+
+Thank you for your order PO-56322 dated 2025-04-11. We are pleased to confirm
+that the shipment of 1,200 units will leave our Bristol warehouse on 25 April 2025.
+
+Your account manager, Emma Brooks (emma.brooks@northwind.example), will contact
+you to arrange delivery. The total amount due is GBP 92,000.00, payable within
+30 days.
+
+Kind regards,
+
+Samuel Okafor
+Head of Sales, Northwind Traders Ltd

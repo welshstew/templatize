@@ -1,0 +1,5 @@
+This document talks about Jinja itself.
+A variable looks like {{ user.name }} and a tag looks like {% if x %}.
+Comments are written {# like this #}. Raw blocks: {% raw %}{{ x }}{% endraw %}
+Edge cases: {{{ triple }}}, {%- trimmed -%}, {#- c -#}, lone { and } and }}.
+Server: db01.example.com at 192.168.1.10

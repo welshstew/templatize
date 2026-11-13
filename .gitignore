@@ -9,3 +9,6 @@ dist/
 frontend/node_modules/
 frontend/dist/
 .DS_Store
+
+# local secrets (repo root only; fixtures may contain .env samples)
+/.env
