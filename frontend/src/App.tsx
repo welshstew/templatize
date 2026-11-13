@@ -291,6 +291,7 @@ export function App() {
                 <mark class="sug src-key_value">key</mark>
                 <mark class="sug src-regex">pattern</mark>
                 <mark class="sug src-repetition">repeated</mark>
+                {info?.optional_detectors.ner ? <mark class="sug src-ner">NER</mark> : null}
                 {llm.state !== "off" ? <mark class="sug src-llm">LLM</mark> : null}
                 <mark class="acc src-manual">accepted</mark>
               </span>

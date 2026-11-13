@@ -22,7 +22,7 @@ services:
       TEMPLATIZE_ACCESS_LOG: ${TEMPLATIZE_ACCESS_LOG:-0}
       # Optional services. The app probes them; if a service is absent (profile not
       # enabled) or unreachable, its suggestions are simply not offered.
-      TEMPLATIZE_NER_URL: ${TEMPLATIZE_NER_URL:-}
+      TEMPLATIZE_NER_URL: ${TEMPLATIZE_NER_URL:-http://ner:8081}
       TEMPLATIZE_LLM_URL: ${TEMPLATIZE_LLM_URL:-http://llm:8080}
     healthcheck:
       test: ["CMD", "templatize-healthcheck"]
@@ -30,6 +30,25 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+    restart: unless-stopped
+
+  # Optional: NER detector (GLiNER on ONNX Runtime, CPU; model baked into the image).
+  # Enable with `COMPOSE_PROFILES=ner`. Not published on any host port.
+  ner:
+    profiles: ["ner"]
+    image: ${TEMPLATIZE_NER_IMAGE:-templatize-ner:dev}
+    build:
+      context: .
+      dockerfile: docker/ner.Dockerfile
+    <<: *hardening
+    environment:
+      TEMPLATIZE_NER_THREADS: ${TEMPLATIZE_NER_THREADS:-0}
+    healthcheck:
+      test: ["CMD", "templatize-ner", "--check"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   # Optional: local LLM detector (llama.cpp). Enable with `COMPOSE_PROFILES=llm`.

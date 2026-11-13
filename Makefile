@@ -4,11 +4,12 @@ COMPOSE ?= $(CONTAINER) compose
 IMAGE ?= templatize:dev
 CHECK_IMAGE ?= templatize:offline-check
 LLM_IMAGE ?= templatize-llm:dev
+NER_IMAGE ?= templatize-ner:dev
 # Separate project name: never touches a stack started with `make up`.
 OFFLINE = $(COMPOSE) -p templatize-offline -f compose.yaml -f compose.offline.yaml
 PLATFORMS ?= linux/amd64,linux/arm64
 
-PHONY_EXTRA = frontend frontend-dev frontend-test check-all up-llm model llm-image offline-test-llm
+PHONY_EXTRA = frontend frontend-dev frontend-test check-all up-llm model llm-image offline-test-llm ner-image ner-model up-ner
 .PHONY: $(PHONY_EXTRA) install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
 
 install:
@@ -54,14 +55,17 @@ check-image:
 image-multiarch:
 	docker buildx build -f docker/app.Dockerfile --target runtime --platform $(PLATFORMS) -t $(IMAGE) .
 	docker buildx build -f docker/llm.Dockerfile --platform $(PLATFORMS) -t $(LLM_IMAGE) .
+	docker buildx build -f docker/ner.Dockerfile --platform $(PLATFORMS) -t $(NER_IMAGE) .
 
-# Full stack with networking disabled: the compose network is internal-only, the
-# checker proves outbound access fails, then drives every fixture through the API
-# (suggest -> build -> round-trip -> render -> download). Must pass before a
+# Full stack (app + NER) with networking disabled: the compose network is
+# internal-only, the checker proves outbound access fails, then drives every fixture
+# through the API (suggest -> build -> round-trip -> render -> download), checks the
+# UI, MCP and NER, and that the absent LLM degrades gracefully. Must pass before a
 # milestone counts as done.
-offline-test: image check-image
-	$(OFFLINE) up --no-build --abort-on-container-exit --exit-code-from offline-check \
-		app offline-check; rc=$$?; $(OFFLINE) down --remove-orphans >/dev/null 2>&1; exit $$rc
+offline-test: image check-image ner-image
+	COMPOSE_PROFILES=ner TEMPLATIZE_OFFLINE_EXPECT_NER=1 $(OFFLINE) up --no-build \
+		--abort-on-container-exit --exit-code-from offline-check app ner offline-check; \
+		rc=$$?; COMPOSE_PROFILES=ner $(OFFLINE) down --remove-orphans >/dev/null 2>&1; exit $$rc
 
 # CLI only, single container: --network none, read-only rootfs.
 offline-test-cli: check-image
@@ -80,14 +84,26 @@ up-llm: model
 model:
 	./scripts/download-model.sh models
 
+ner-image:
+	$(CONTAINER) build -f docker/ner.Dockerfile -t $(NER_IMAGE) .
+
+# GLiNER model for running/testing the NER service outside a container (~190 MB).
+ner-model:
+	./scripts/download-ner-model.sh models/ner
+
+# App + NER detector.
+up-ner:
+	COMPOSE_PROFILES=ner $(COMPOSE) up -d --build
+
 llm-image:
 	$(CONTAINER) build -f docker/llm.Dockerfile -t $(LLM_IMAGE) .
 
 # Full offline test including a real LLM review inside the isolated network.
-offline-test-llm: image check-image llm-image model
-	COMPOSE_PROFILES=llm TEMPLATIZE_OFFLINE_EXPECT_LLM=1 $(OFFLINE) up --no-build \
-		--abort-on-container-exit --exit-code-from offline-check app llm offline-check; \
-		rc=$$?; COMPOSE_PROFILES=llm $(OFFLINE) down --remove-orphans >/dev/null 2>&1; exit $$rc
+offline-test-llm: image check-image llm-image ner-image model
+	COMPOSE_PROFILES=ner,llm TEMPLATIZE_OFFLINE_EXPECT_NER=1 TEMPLATIZE_OFFLINE_EXPECT_LLM=1 \
+		$(OFFLINE) up --no-build --abort-on-container-exit --exit-code-from offline-check \
+		app ner llm offline-check; \
+		rc=$$?; COMPOSE_PROFILES=ner,llm $(OFFLINE) down --remove-orphans >/dev/null 2>&1; exit $$rc
 
 down:
 	$(COMPOSE) down --remove-orphans

@@ -24,6 +24,7 @@ services:
     tmpfs: ["/tmp:size=16m"]
     environment:
       TEMPLATIZE_OFFLINE_EXPECT_LLM: ${TEMPLATIZE_OFFLINE_EXPECT_LLM:-0}
+      TEMPLATIZE_OFFLINE_EXPECT_NER: ${TEMPLATIZE_OFFLINE_EXPECT_NER:-0}
     depends_on:
       app:
         condition: service_healthy

@@ -1,0 +1,251 @@
+{
+ "labels": [
+  "person",
+  "organization",
+  "location",
+  "street address",
+  "phone number",
+  "money",
+  "job title",
+  "product"
+ ],
+ "threshold": 0.5,
+ "gliner_version": "0.2.30",
+ "cases": {
+  "business_letter.txt": {
+   "text": "Northwind Traders Ltd\n14 Harbour Street\nBristol BS1 4QA\n\n12 March 2025\n\nMs. Alice Johnson\nContoso Pharmaceuticals\nalice.johnson@contoso.com\n\nDear Ms. Johnson,\n\nThank you for your order PO-55821 dated 2025-03-04. We are pleased to confirm\nthat the shipment of 240 units will leave our Bristol warehouse on 19 March 2025.\n\nYour account manager, Ravi Patel (ravi.patel@northwind.example), will contact\nyou to arrange delivery. The total amount due is GBP 18,450.00, payable within\n30 days.\n\nKind regards,\n\nSamuel Okafor\nHead of Sales, Northwind Traders Ltd\n",
+   "entities": [
+    {
+     "start": 0,
+     "end": 21,
+     "text": "Northwind Traders Ltd",
+     "label": "organization",
+     "score": 0.813
+    },
+    {
+     "start": 22,
+     "end": 39,
+     "text": "14 Harbour Street",
+     "label": "location",
+     "score": 0.5496
+    },
+    {
+     "start": 40,
+     "end": 47,
+     "text": "Bristol",
+     "label": "location",
+     "score": 0.7282
+    },
+    {
+     "start": 72,
+     "end": 89,
+     "text": "Ms. Alice Johnson",
+     "label": "person",
+     "score": 0.5108
+    },
+    {
+     "start": 284,
+     "end": 291,
+     "text": "Bristol",
+     "label": "location",
+     "score": 0.6508
+    },
+    {
+     "start": 343,
+     "end": 353,
+     "text": "Ravi Patel",
+     "label": "person",
+     "score": 0.7271
+    },
+    {
+     "start": 448,
+     "end": 461,
+     "text": "GBP 18,450.00",
+     "label": "money",
+     "score": 0.6546
+    },
+    {
+     "start": 503,
+     "end": 516,
+     "text": "Samuel Okafor",
+     "label": "person",
+     "score": 0.8447
+    },
+    {
+     "start": 532,
+     "end": 553,
+     "text": "Northwind Traders Ltd",
+     "label": "organization",
+     "score": 0.8111
+    }
+   ]
+  },
+  "config.json": {
+   "text": "{\n  \"service\": \"inventory-api\",\n  \"version\": \"3.8.1\",\n  \"listen\": {\n    \"host\": \"0.0.0.0\",\n    \"port\": 9100\n  },\n  \"database\": {\n    \"url\": \"postgresql://inventory@10.0.12.5:5432/inventory\",\n    \"pool_size\": 20,\n    \"timeout_seconds\": 30\n  },\n  \"features\": {\n    \"audit_log\": true,\n    \"beta_search\": false\n  },\n  \"admin_email\": \"ops@acme.io\",\n  \"instance_id\": \"6f1c2a9e-3b7d-4f0a-9c55-2d8e1b4a7f30\"\n}\n",
+   "entities": [
+    {
+     "start": 334,
+     "end": 341,
+     "text": "acme.io",
+     "label": "organization",
+     "score": 0.5703
+    }
+   ]
+  },
+  "crlf.ini": {
+   "text": "[server]\r\nhost = app01.example.net\r\nport = 8443\r\nadmin = root@example.net\r\n\r\n[paths]\r\ndata = /var/lib/app\r\n",
+   "entities": [
+    {
+     "start": 57,
+     "end": 61,
+     "text": "root",
+     "label": "person",
+     "score": 0.5204
+    },
+    {
+     "start": 62,
+     "end": 73,
+     "text": "example.net",
+     "label": "location",
+     "score": 0.5011
+    }
+   ]
+  },
+  "docker-compose.yml": {
+   "text": "services:\n  web:\n    image: ghcr.io/acme/storefront:2.14.3\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    environment:\n      DATABASE_URL: postgres://store:s3cret@db:5432/storefront\n      REDIS_HOST: cache\n      LOG_LEVEL: info\n    depends_on:\n      - db\n      - cache\n\n  db:\n    image: postgres:16.4\n    volumes:\n      - /srv/storefront/pgdata:/var/lib/postgresql/data\n    environment:\n      POSTGRES_USER: store\n      POSTGRES_PASSWORD: s3cret\n      POSTGRES_DB: storefront\n\n  cache:\n    image: redis:7.2.5-alpine\n",
+   "entities": []
+  },
+  "endraw.txt": {
+   "text": "Literal tags: {% endraw %} and {% raw %} then value 10.9.8.7 {{ a }}\n",
+   "entities": []
+  },
+  "jinja_literals.txt": {
+   "text": "This document talks about Jinja itself.\nA variable looks like {{ user.name }} and a tag looks like {% if x %}.\nComments are written {# like this #}. Raw blocks: {% raw %}{{ x }}{% endraw %}\nEdge cases: {{{ triple }}}, {%- trimmed -%}, {#- c -#}, lone { and } and }}.\nServer: db01.example.com at 192.168.1.10\n",
+   "entities": []
+  },
+  "k8s-deployment.yaml": {
+   "text": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: payments-api\n  namespace: payments\n  labels:\n    app: payments-api\n    tier: backend\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: payments-api\n  template:\n    metadata:\n      labels:\n        app: payments-api\n    spec:\n      containers:\n        - name: payments-api\n          image: registry.acme.io/payments/api:1.22.0\n          ports:\n            - containerPort: 8443\n          env:\n            - name: UPSTREAM_URL\n              value: \"https://ledger.internal.acme.io/v2\"\n            - name: NODE_IP\n              value: \"172.16.4.21\"\n          resources:\n            limits:\n              memory: \"512Mi\"\n              cpu: \"500m\"\n",
+   "entities": []
+  },
+  "mixed_newlines.txt": {
+   "text": "line one host=alpha.example.org\r\nline two\nline three\rline four ip 10.1.1.1\n\r\nend",
+   "entities": []
+  },
+  "nginx.conf": {
+   "text": "# Reverse proxy for the billing service\nupstream billing_backend {\n    server 10.20.30.41:8080 max_fails=3;\n    server 10.20.30.42:8080 max_fails=3;\n}\n\nserver {\n    listen 443 ssl http2;\n    server_name billing.example.com;\n\n    ssl_certificate     /etc/nginx/certs/billing.example.com.crt;\n    ssl_certificate_key /etc/nginx/certs/billing.example.com.key;\n\n    access_log /var/log/nginx/billing.access.log;\n    client_max_body_size 25m;\n\n    location / {\n        proxy_pass http://billing_backend;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n    }\n\n    location /static/ {\n        root /srv/billing/public;\n        expires 7d;\n    }\n}\n",
+   "entities": []
+  },
+  "no_trailing_newline.env": {
+   "text": "API_HOST=api.example.com\nAPI_KEY=abc123def456\nDEBUG=false",
+   "entities": []
+  },
+  "unicode.txt": {
+   "text": "Größe: 42\nCafé owner: Zoë Ångström <zoe@café.example>\n日本語のテキスト server=東京.example.jp\nEmoji 🎉 build v1.2.3 on 2024-12-31 🎉\n",
+   "entities": [
+    {
+     "start": 22,
+     "end": 34,
+     "text": "Zoë Ångström",
+     "label": "person",
+     "score": 0.9253
+    }
+   ]
+  },
+  "sentence-hyphens": {
+   "text": "Dr. Jean-Luc Picard-Smith met Anna_Maria O'Neil at Acme-Corp in São Paulo on Friday.",
+   "entities": [
+    {
+     "start": 0,
+     "end": 25,
+     "text": "Dr. Jean-Luc Picard-Smith",
+     "label": "person",
+     "score": 0.8507
+    },
+    {
+     "start": 30,
+     "end": 47,
+     "text": "Anna_Maria O'Neil",
+     "label": "person",
+     "score": 0.7837
+    },
+    {
+     "start": 51,
+     "end": 60,
+     "text": "Acme-Corp",
+     "label": "organization",
+     "score": 0.8322
+    },
+    {
+     "start": 64,
+     "end": 73,
+     "text": "São Paulo",
+     "label": "location",
+     "score": 0.8175
+    }
+   ]
+  },
+  "phone-address": {
+   "text": "Call Mrs. Priya Nair on +44 20 7946 0958 or visit 221B Baker Street, London NW1 6XE.",
+   "entities": [
+    {
+     "start": 5,
+     "end": 20,
+     "text": "Mrs. Priya Nair",
+     "label": "person",
+     "score": 0.7934
+    },
+    {
+     "start": 24,
+     "end": 40,
+     "text": "+44 20 7946 0958",
+     "label": "phone number",
+     "score": 0.693
+    },
+    {
+     "start": 50,
+     "end": 67,
+     "text": "221B Baker Street",
+     "label": "street address",
+     "score": 0.6567
+    }
+   ]
+  },
+  "emoji-unicode": {
+   "text": "🎉 Zoë Ångström from Café Müller GmbH paid €1.200,50 to 日本電気 in Tōkyō.",
+   "entities": [
+    {
+     "start": 2,
+     "end": 14,
+     "text": "Zoë Ångström",
+     "label": "person",
+     "score": 0.9686
+    },
+    {
+     "start": 20,
+     "end": 36,
+     "text": "Café Müller GmbH",
+     "label": "organization",
+     "score": 0.8432
+    },
+    {
+     "start": 42,
+     "end": 51,
+     "text": "€1.200,50",
+     "label": "money",
+     "score": 0.5546
+    },
+    {
+     "start": 63,
+     "end": 68,
+     "text": "Tōkyō",
+     "label": "location",
+     "score": 0.73
+    }
+   ]
+  },
+  "labels-only-text": {
+   "text": "...",
+   "entities": []
+  }
+ }
+}

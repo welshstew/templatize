@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 
@@ -22,7 +22,8 @@ from pydantic import ValidationError
 from templatize import __version__
 from templatize.build import BuildResult, build
 from templatize.bundle import make_zip
-from templatize.detectors import HEURISTIC_DETECTORS
+from templatize.detectors import HEURISTIC_DETECTORS, Detector, default_detectors
+from templatize.detectors import ner as ner_detector
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, check_health, review_candidates
 from templatize.emitters import EMITTERS, TemplateRenderError, get_emitter
 from templatize.emitters.base import Emitter
@@ -125,9 +126,15 @@ def _mcp_http(settings: Settings) -> tuple[list[Any], AbstractAsyncContextManage
 class _HealthCache:
     """Probe an optional service at most every ``ttl`` seconds."""
 
-    def __init__(self, url: str | None, ttl: float = 15.0) -> None:
+    def __init__(
+        self,
+        url: str | None,
+        ttl: float = 15.0,
+        probe: Callable[..., bool] = check_health,
+    ) -> None:
         self.url = url
         self.ttl = ttl
+        self.probe = probe
         self._at = -1e9
         self._ok = False
 
@@ -136,7 +143,7 @@ class _HealthCache:
             return False
         now = time.monotonic()
         if now - self._at > self.ttl:
-            self._ok = check_health(self.url, timeout=1.5)
+            self._ok = self.probe(self.url, timeout=1.5)
             self._at = now
         return self._ok
 
@@ -144,6 +151,24 @@ class _HealthCache:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     llm_health = _HealthCache(settings.llm_url)
+    ner_health = _HealthCache(settings.ner_url, probe=ner_detector.check_health)
+
+    def run_suggest(text: str, variants: list[str]) -> SuggestResult:
+        """Heuristics, plus the NER service when it is up (it answers in milliseconds;
+        if it fails mid-request the result just carries a notice)."""
+        detectors: list[Detector] = default_detectors()
+        if settings.ner_url and ner_health.ok():
+            detectors.append(
+                ner_detector.NerDetector(
+                    ner_detector.NerConfig(
+                        url=settings.ner_url,
+                        timeout=settings.ner_timeout,
+                        max_chars=settings.ner_max_chars,
+                    )
+                )
+            )
+        return suggest(text, variants, detectors=detectors)
+
     mcp_routes, mcp_lifespan = _mcp_http(settings)
 
     @asynccontextmanager
@@ -193,7 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             version=__version__,
             engines=sorted(EMITTERS),
             detectors=list(HEURISTIC_DETECTORS),
-            optional_detectors={"ner": False, "llm": llm_health.ok()},
+            optional_detectors={"ner": ner_health.ok(), "llm": llm_health.ok()},
             mcp_http="/mcp" if mcp_routes else None,
             limits=Limits(
                 max_input_chars=MAX_INPUT_CHARS,
@@ -208,7 +233,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         Spans are Unicode code-point offsets into ``text``."""
         try:
-            return suggest(req.text, req.variants)
+            return run_suggest(req.text, req.variants)
         except InputLimitError as exc:
             raise ApiError(413, str(exc)) from None
 
@@ -222,7 +247,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.llm_url:
             return LlmReviewResponse(available=False, detail="no LLM configured")
         try:
-            heuristic = suggest(req.text, req.variants)
+            heuristic = run_suggest(req.text, req.variants)
         except InputLimitError as exc:
             raise ApiError(413, str(exc)) from None
         config = LlmConfig(

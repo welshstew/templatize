@@ -21,6 +21,8 @@ jobs:
       - run: make typecheck
       # builds the UI (type-check, bundle, external-URL check) so pytest can scan it too
       - run: make frontend frontend-test
+      # GLiNER model (~190 MB, pinned + verified) so the NER parity tests run in CI
+      - run: make ner-model
       - run: make test
 
   offline-test:
