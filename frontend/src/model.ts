@@ -4,7 +4,7 @@
  * for the DOM.
  */
 
-import type { Candidate, Span, VariableSpec } from "./api.ts";
+import type { Candidate, LlmReview, Span, VariableSpec } from "./api.ts";
 import type { OffsetMap } from "./offsets.ts";
 
 export type Status = "suggested" | "accepted" | "rejected";
@@ -24,6 +24,12 @@ export interface Item {
   previewValue: string;
   /** Created by the user from a selection (removing it deletes it). */
   manual: boolean;
+  /** Where the name came from (key, type, llm, manual...). */
+  nameOrigin: string;
+  /** Name as originally suggested, to tell whether the user renamed it. */
+  originalName: string;
+  /** Set when the LLM thinks this is fixed text rather than a parameter. */
+  llmNote: string | null;
 }
 
 export const VAR_TYPES = [
@@ -62,7 +68,61 @@ export function itemsFromCandidates(cands: Candidate[]): Item[] {
     status: "suggested",
     previewValue: c.value,
     manual: false,
+    nameOrigin: c.name_origin,
+    originalName: c.name,
+    llmNote: null,
   }));
+}
+
+export interface ReviewOutcome {
+  items: Item[];
+  renamed: number;
+  flagged: number;
+  added: number;
+}
+
+const PROTECTED_ORIGINS = new Set(["key", "manual"]);
+
+/** Merge an LLM review that arrives after the user may already have acted:
+ * only pending suggestions the user has not renamed are renamed (never key-derived
+ * names), "fixed text" verdicts are shown as a note with lower confidence, and new
+ * suggestions are added only where they overlap nothing that is not rejected. */
+export function applyReview(items: Item[], review: LlmReview): ReviewOutcome {
+  const renames = new Map(review.renames.map((r) => [r.candidate_id, r]));
+  const fixed = new Map(review.fixed.map((f) => [f.candidate_id, f]));
+  let renamed = 0;
+  let flagged = 0;
+  let next = items.map((item) => {
+    if (item.status !== "suggested") return item;
+    let out = item;
+    const r = renames.get(item.id);
+    if (r && item.name === item.originalName && !PROTECTED_ORIGINS.has(item.nameOrigin)) {
+      out = { ...out, name: r.name, originalName: r.name, nameOrigin: "llm" };
+      renamed++;
+    }
+    const f = fixed.get(item.id);
+    if (f) {
+      out = {
+        ...out,
+        llmNote: f.reason ? `LLM: likely fixed text (${f.reason})` : "LLM: likely fixed text",
+        confidence: out.confidence === null ? null : Math.round(out.confidence * 50) / 100,
+      };
+      flagged++;
+    }
+    if (out !== item && !out.sources.includes("llm")) out = { ...out, sources: [...out.sources, "llm"] };
+    return out;
+  });
+  // De-duplicate names introduced by renames against everything else.
+  next = next.map((i) => (renames.has(i.id) ? { ...i, name: uniqueName(i.name, next, i.id) } : i));
+
+  let added = 0;
+  for (const add of itemsFromCandidates(review.additions)) {
+    const live = next.filter((i) => i.status !== "rejected");
+    if (live.some((i) => i.spans.some((s) => add.spans.some((t) => overlaps(s, t))))) continue;
+    next = [...next, { ...add, name: uniqueName(add.name, next) }];
+    added++;
+  }
+  return { items: next, renamed, flagged, added };
 }
 
 export function accepted(items: Item[]): Item[] {
@@ -202,6 +262,9 @@ export function addManual(items: Item[], map: OffsetMap, req: ManualRequest): Ma
     status: "accepted",
     previewValue: value,
     manual: true,
+    nameOrigin: "manual",
+    originalName: req.name,
+    llmNote: null,
   };
   const next = items.map((i) =>
     i.status === "suggested" && i.spans.some((s) => spans.some((n) => overlaps(s, n)))

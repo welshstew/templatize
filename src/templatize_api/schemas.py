@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 from templatize.build import VariableSpec
+from templatize.detectors.llm import LlmReview
 from templatize.emitters import EmittedFile
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Variable
 from templatize.roundtrip import RoundTripResult
@@ -18,6 +19,13 @@ MAX_VARIABLES = 2_000
 class SuggestRequest(BaseModel):
     text: Document
     variants: list[Document] = Field(default_factory=list, max_length=MAX_VARIANTS)
+
+
+class LlmReviewResponse(BaseModel):
+    available: bool
+    """False when no LLM is configured or it is unreachable/loading: show nothing extra."""
+    review: LlmReview | None = None
+    detail: str | None = None
 
 
 class BuildRequest(BaseModel):

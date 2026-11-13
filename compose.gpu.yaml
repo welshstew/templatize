@@ -1,0 +1,17 @@
+# NVIDIA GPU for the optional LLM service (needs the NVIDIA Container Toolkit):
+#   COMPOSE_PROFILES=llm docker compose -f compose.yaml -f compose.gpu.yaml up -d
+services:
+  llm:
+    build:
+      args:
+        LLAMA_IMAGE: ghcr.io/ggml-org/llama.cpp:server-cuda-b11946
+    image: ${TEMPLATIZE_LLM_GPU_IMAGE:-templatize-llm:dev-cuda}
+    environment:
+      LLM_GPU_LAYERS: ${TEMPLATIZE_LLM_GPU_LAYERS:-99}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

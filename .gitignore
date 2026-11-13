@@ -12,3 +12,6 @@ frontend/dist/
 
 # local secrets (repo root only; fixtures may contain .env samples)
 /.env
+
+# LLM model weights (make model)
+/models/

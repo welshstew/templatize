@@ -20,13 +20,37 @@ services:
       - "${TEMPLATIZE_BIND:-127.0.0.1}:${TEMPLATIZE_PORT:-8000}:8000"
     environment:
       TEMPLATIZE_ACCESS_LOG: ${TEMPLATIZE_ACCESS_LOG:-0}
-      # Optional services; empty => those suggestions are simply not offered.
+      # Optional services. The app probes them; if a service is absent (profile not
+      # enabled) or unreachable, its suggestions are simply not offered.
       TEMPLATIZE_NER_URL: ${TEMPLATIZE_NER_URL:-}
-      TEMPLATIZE_LLM_URL: ${TEMPLATIZE_LLM_URL:-}
+      TEMPLATIZE_LLM_URL: ${TEMPLATIZE_LLM_URL:-http://llm:8080}
     healthcheck:
       test: ["CMD", "templatize-healthcheck"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 5s
+    restart: unless-stopped
+
+  # Optional: local LLM detector (llama.cpp). Enable with `COMPOSE_PROFILES=llm`.
+  # Needs the model on the host first: `make model`. Not published on any host port.
+  llm:
+    profiles: ["llm"]
+    image: ${TEMPLATIZE_LLM_IMAGE:-templatize-llm:dev}
+    build:
+      context: .
+      dockerfile: docker/llm.Dockerfile
+    <<: *hardening
+    volumes:
+      - ${TEMPLATIZE_MODELS_DIR:-./models}:/models:ro
+    environment:
+      LLM_MODEL: /models/${TEMPLATIZE_LLM_MODEL:-Qwen3-4B-Instruct-2507-Q4_K_M.gguf}
+      LLM_CTX: ${TEMPLATIZE_LLM_CTX:-16384}
+      LLM_THREADS: ${TEMPLATIZE_LLM_THREADS:-0}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
     restart: unless-stopped

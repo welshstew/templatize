@@ -10,6 +10,7 @@ Exit status: 0 on success, 1 on usage/input errors, 2 if the round-trip check fa
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -18,6 +19,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from templatize.build import BuildResult, VariableSpec, build, specs_from_candidates
 from templatize.bundle import make_zip
+from templatize.detectors.llm import LlmConfig, LlmUnavailable, apply_review, review_candidates
 from templatize.emitters import EMITTERS
 from templatize.ir import Candidate, IRValidationError
 from templatize.suggest import InputLimitError, SuggestResult, suggest
@@ -64,8 +66,24 @@ def _write_outputs(result: BuildResult, outdir: Path | None, zip_path: Path | No
         print(f"wrote {zip_path}", file=sys.stderr)
 
 
+def _suggest(text: str, variants: list[str], llm_url: str | None) -> SuggestResult:
+    res = suggest(text, variants)
+    if not llm_url:
+        return res
+    try:
+        review = asyncio.run(
+            review_candidates(LlmConfig(url=llm_url), text, res.candidates, variants)
+        )
+    except LlmUnavailable as exc:
+        print(f"warning: LLM review skipped: {exc}", file=sys.stderr)
+        return res
+    return SuggestResult(
+        candidates=apply_review(res.candidates, review), notices=[*res.notices, *review.notices]
+    )
+
+
 def cmd_suggest(args: argparse.Namespace) -> int:
-    res = suggest(_read(args.file), [_read(v) for v in args.variant])
+    res = _suggest(_read(args.file), [_read(v) for v in args.variant], args.llm_url)
     if args.json:
         print(res.model_dump_json(indent=2))
     else:
@@ -79,7 +97,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     if args.vars:
         specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
     else:
-        res = suggest(text, [_read(v) for v in args.variant])
+        res = _suggest(text, [_read(v) for v in args.variant], args.llm_url)
         specs = specs_from_candidates(_select(res, args.min_confidence))
     result = build(text, specs, engine=args.engine)
     _write_outputs(result, args.output, args.zip)
@@ -114,6 +132,7 @@ def make_parser() -> argparse.ArgumentParser:
     s.add_argument("--variant", action="append", default=[], help="another example of the document")
     s.add_argument("--json", action="store_true")
     s.add_argument("--min-confidence", type=float, default=0.0)
+    s.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
     s.set_defaults(func=cmd_suggest)
 
     b = sub.add_parser("build", help="generate template, .env and render script")
@@ -123,6 +142,7 @@ def make_parser() -> argparse.ArgumentParser:
     sel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
     sel.add_argument("--vars", help="JSON file with a list of variable specs")
     b.add_argument("--min-confidence", type=float, default=0.0)
+    b.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
     b.add_argument("--engine", default="jinja2", choices=sorted(EMITTERS))
     b.add_argument("-o", "--output", type=Path, help="write files to this directory")
     b.add_argument("--zip", type=Path, help="write a zip bundle")

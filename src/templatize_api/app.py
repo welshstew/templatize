@@ -8,6 +8,7 @@ errors are returned without the ``input`` echo FastAPI includes by default.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
@@ -22,6 +23,7 @@ from templatize import __version__
 from templatize.build import BuildResult, build
 from templatize.bundle import make_zip
 from templatize.detectors import HEURISTIC_DETECTORS
+from templatize.detectors.llm import LlmConfig, LlmUnavailable, check_health, review_candidates
 from templatize.emitters import EMITTERS, TemplateRenderError, get_emitter
 from templatize.emitters.base import Emitter
 from templatize.emitters.jinja2 import Jinja2Emitter
@@ -35,6 +37,7 @@ from templatize_api.schemas import (
     ErrorResponse,
     InfoResponse,
     Limits,
+    LlmReviewResponse,
     RenderRequest,
     RenderResponse,
     SuggestRequest,
@@ -119,8 +122,28 @@ def _mcp_http(settings: Settings) -> tuple[list[Any], AbstractAsyncContextManage
     return list(http_app.routes), server.session_manager.run()
 
 
+class _HealthCache:
+    """Probe an optional service at most every ``ttl`` seconds."""
+
+    def __init__(self, url: str | None, ttl: float = 15.0) -> None:
+        self.url = url
+        self.ttl = ttl
+        self._at = -1e9
+        self._ok = False
+
+    def ok(self) -> bool:
+        if not self.url:
+            return False
+        now = time.monotonic()
+        if now - self._at > self.ttl:
+            self._ok = check_health(self.url, timeout=1.5)
+            self._at = now
+        return self._ok
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    llm_health = _HealthCache(settings.llm_url)
     mcp_routes, mcp_lifespan = _mcp_http(settings)
 
     @asynccontextmanager
@@ -170,7 +193,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             version=__version__,
             engines=sorted(EMITTERS),
             detectors=list(HEURISTIC_DETECTORS),
-            optional_detectors={"ner": False, "llm": False},
+            optional_detectors={"ner": False, "llm": llm_health.ok()},
             mcp_http="/mcp" if mcp_routes else None,
             limits=Limits(
                 max_input_chars=MAX_INPUT_CHARS,
@@ -188,6 +211,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return suggest(req.text, req.variants)
         except InputLimitError as exc:
             raise ApiError(413, str(exc)) from None
+
+    @app.post("/suggest/llm", tags=["templating"], responses=ERRORS)
+    async def suggest_llm_endpoint(req: SuggestRequest) -> LlmReviewResponse:
+        """Ask the optional local LLM (llama.cpp) to review the heuristic suggestions:
+        better names, variable-vs-fixed verdicts and missed variables. Slow (seconds to
+        minutes on CPU): call it after /suggest and merge the result when it arrives.
+
+        Never fails because the LLM is absent: returns ``available: false`` instead."""
+        if not settings.llm_url:
+            return LlmReviewResponse(available=False, detail="no LLM configured")
+        try:
+            heuristic = suggest(req.text, req.variants)
+        except InputLimitError as exc:
+            raise ApiError(413, str(exc)) from None
+        config = LlmConfig(
+            url=settings.llm_url, timeout=settings.llm_timeout, max_chars=settings.llm_max_chars
+        )
+        try:
+            review = await review_candidates(config, req.text, heuristic.candidates, req.variants)
+        except LlmUnavailable as exc:
+            return LlmReviewResponse(available=False, detail=str(exc))
+        return LlmReviewResponse(available=True, review=review)
 
     @app.post("/build", tags=["templating"], responses=ERRORS)
     def build_endpoint(req: BuildRequest) -> BuildResponse:

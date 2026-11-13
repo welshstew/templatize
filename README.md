@@ -13,8 +13,8 @@ extracted values must reproduce the input **byte for byte**.
 
 Everything runs offline. No external services, API keys, telemetry or update checks.
 
-> Status: milestone 4 (core library, CLI, web API, web UI, MCP server). Optional
-> NER/LLM detectors follow.
+> Status: milestone 5 (core library, CLI, web API, web UI, MCP server, optional local
+> LLM detector). The optional NER detector follows.
 
 ## Quick start
 
@@ -110,6 +110,84 @@ Configuration (environment variables):
 | `TEMPLATIZE_MCP_HTTP` | `1` | serve MCP streamable HTTP at `/mcp` (needs the `mcp` extra) |
 | `TEMPLATIZE_MCP_ALLOWED_HOSTS` | (none) | extra allowed `Host` values for `/mcp`, comma-separated, e.g. `myhost.ts.net:*` |
 | `TEMPLATIZE_NER_URL`, `TEMPLATIZE_LLM_URL` | empty | optional services (later milestones) |
+
+### Optional LLM detector (llama.cpp, fully local)
+
+A local model reviews the heuristic suggestions. It runs on CPU by default, or on a GPU
+with an override file. In the brief's priority order, it:
+1. gives candidates descriptive names (`ip_address` → `backend_ip_1`, `date_2` →
+   `letter_date`);
+2. classifies each candidate as a variable or as fixed text;
+3. finds parameters the heuristics miss: person and company names, order numbers,
+   amounts, quantities (`PO-55821` → `order_reference_number`,
+   `GBP 18,450.00` → `total_amount`, `Ravi Patel` → `account_manager_name`).
+
+**The model never writes the template.** It returns JSON only, and llama.cpp constrains
+decoding to a JSON schema (`response_format.json_schema` becomes a grammar), so the
+output always parses. Missed variables come back as an exact substring plus an occurrence
+index, never as character offsets. The code locates each substring and discards any that
+don't occur in the input, merges the rest with the heuristic candidates, and the
+round-trip check runs as usual. In the UI, heuristic suggestions appear instantly. The
+LLM review is merged in when it arrives, labelled **LLM**, and without overriding
+anything you changed in the meantime.
+
+**Model:** [Qwen3-4B-Instruct-2507](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507),
+Q4_K_M GGUF (~2.5 GB, Apache-2.0), from
+[`unsloth/Qwen3-4B-Instruct-2507-GGUF`](https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF)
+pinned to revision `a06e946b`. Why this one:
+- **No reasoning step:** it never emits `<think>` blocks, so grammar-constrained JSON is
+  clean. Qwen3.5-4B reasons by default.
+- **Text-only:** a long-supported llama.cpp architecture, with no vision projector to
+  manage.
+- **Small enough for CPU:** Gemma 4 E4B is 5 GB at the same quantisation.
+
+```sh
+make model     # download to ./models and verify SHA-256 (resumable; no-op if already verified)
+make up-llm    # app + llm (COMPOSE_PROFILES=llm docker compose up -d --build)
+```
+
+Or manually: download
+`https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/Qwen3-4B-Instruct-2507-Q4_K_M.gguf`
+into `./models/` and check that its SHA-256 is
+`3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`.
+
+**GPU** (NVIDIA Container Toolkit): `COMPOSE_PROFILES=llm docker compose -f compose.yaml -f compose.gpu.yaml up -d --build`
+switches to the CUDA build of llama.cpp and offloads all layers.
+
+**Your own model:** put any instruct GGUF in `./models` and set
+`TEMPLATIZE_LLM_MODEL=<file>`. Or point `TEMPLATIZE_LLM_URL` at any llama.cpp server.
+
+| Variable | Default | |
+|---|---|---|
+| `TEMPLATIZE_LLM_URL` | `http://llm:8080` (compose) / unset | llama.cpp server; absent or unreachable means the feature is hidden |
+| `TEMPLATIZE_LLM_MODEL` | `Qwen3-4B-Instruct-2507-Q4_K_M.gguf` | file in `TEMPLATIZE_MODELS_DIR` (`./models`) |
+| `TEMPLATIZE_LLM_CTX` | `16384` | context size; ~5 GB RAM in total with the default model |
+| `TEMPLATIZE_LLM_THREADS` | auto | CPU threads |
+| `TEMPLATIZE_LLM_TIMEOUT` | `300` | seconds per review |
+| `TEMPLATIZE_LLM_MAX_CHARS` | `24000` | longer documents are not sent; heuristics only |
+
+The llm container:
+- uses llama.cpp `server-b11946`, pinned;
+- starts with `--offline` and `--no-slots`, so the prompt state endpoint is off;
+- publishes no host port and runs with a read-only root filesystem;
+- exits with a clear message (code 64) if the model file is missing, and never
+  downloads anything.
+
+llama-server logs timings only; tests check that no document text reaches either
+service's logs. The CLI takes `--llm-url` too: `templatize suggest file --llm-url
+http://127.0.0.1:8090`.
+
+**Measured** on the 4-core Podman VM of an Apple Silicon Mac (CPU only): about 30 s to
+load the model, then 40–110 s per review of the fixture documents. A GPU makes this a few
+seconds.
+
+**Limitations.** The variable/fixed-text verdict from a 4B model is unreliable. An
+earlier prompt flagged correctly on one run and flagged every k8s field on the next. The
+prompt therefore asks for `fixed_text: true` only for format constants and defaults to
+"parameter". The code also ignores the verdicts when more than half the candidates are
+flagged, and a verdict only halves the confidence, never auto-rejects. In practice it
+now rarely flags anything. Naming and missed-parameter detection are the useful parts.
+The MCP server doesn't use the LLM, because its client already is one.
 
 ### MCP server
 
@@ -218,7 +296,13 @@ checker container then:
 5. runs every fixture through `/suggest` → `/build` (round-trip must pass) →
    `/render` (must reproduce the input) → `/download` (zip must be complete).
 
-This must pass before a milestone counts as done.
+This must pass before a milestone counts as done. Without the `llm` profile, the
+checker also verifies that `/suggest/llm` degrades gracefully (`available: false`).
+
+`make offline-test-llm` (needs `make model`) adds the llm service to the isolated stack.
+The checker waits for the model to load, runs a real review of the business letter,
+merges it, and requires the round trip to pass. CI doesn't run it, because the runner
+would download 2.5 GB per run.
 
 The fixtures are baked into a separate `offline-check` image target instead of being
 bind-mounted. That way the test also works on CI runners that drive the host's Docker
