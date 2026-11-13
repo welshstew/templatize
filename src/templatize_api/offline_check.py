@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import re
 import socket
 import sys
 import time
@@ -105,6 +106,54 @@ def check_fixture(base: str, path: Path) -> str | None:
     return None if not variants else f"ok:{len(variants)}"
 
 
+# Same rules as frontend/scripts/check-no-external-urls.mjs.
+_URL_PATTERNS = [
+    re.compile(r"\bhttps?://[^\s\"'`)<>\\]+"),
+    re.compile(r"(?:src|href)\s*=\s*[\"']//[^\"']+"),
+    re.compile(r"url\(\s*[\"']?//[^)]+\)"),
+    re.compile(r"@import\s+(?:url\()?[\"']?(?:https?:)?//"),
+]
+_URL_ALLOWED = re.compile(
+    r"^https?://www\.w3\.org/((1999|2000)/(xhtml|svg|xlink)|1998/Math/MathML|XML/1998/namespace)$"
+)
+_ASSET_REF = re.compile(r"(?:src|href)=\"(/[^\"]+)\"")
+
+
+def _external_refs(text: str) -> list[str]:
+    return [
+        m.group(0)
+        for pat in _URL_PATTERNS
+        for m in pat.finditer(text)
+        if not _URL_ALLOWED.match(m.group(0))
+    ]
+
+
+def check_ui(base: str) -> str | None:
+    """The single-page app is served, loads only same-origin assets, and those assets
+    reference nothing external. Returns an error message or None."""
+    try:
+        with urllib.request.urlopen(base + "/", timeout=10) as resp:
+            html = resp.read().decode("utf-8")
+            csp = resp.headers.get("content-security-policy", "")
+    except urllib.error.HTTPError as exc:
+        return f"GET / -> {exc.code} (frontend not bundled?)"
+    if "default-src 'self'" not in csp:
+        return "index.html is served without the same-origin CSP"
+    problems = _external_refs(html)
+    assets = _ASSET_REF.findall(html)
+    if not any(a.endswith(".js") for a in assets):
+        return "index.html references no JavaScript bundle"
+    for path in assets:
+        try:
+            with urllib.request.urlopen(base + path, timeout=10) as resp:
+                problems += [f"{path}: {u}" for u in _external_refs(resp.read().decode("utf-8"))]
+        except urllib.error.HTTPError as exc:
+            return f"GET {path} -> {exc.code}"
+    if problems:
+        return "external references: " + ", ".join(problems)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     ap.add_argument("--base-url", default="http://app:8000")
@@ -122,6 +171,12 @@ def main(argv: list[str] | None = None) -> int:
 
     wait_healthy(base)
     print(f"PASS {base}/healthz")
+
+    ui_error = check_ui(base)
+    if ui_error:
+        print(f"FAIL web UI: {ui_error}")
+        return 1
+    print("PASS web UI served; all assets same-origin, no external references")
 
     fixtures = sorted(p for p in args.fixtures.iterdir() if p.is_file())
     if not fixtures:

@@ -6,13 +6,23 @@ CHECK_IMAGE ?= templatize:offline-check
 OFFLINE = $(COMPOSE) -f compose.yaml -f compose.offline.yaml
 PLATFORMS ?= linux/amd64,linux/arm64
 
-.PHONY: install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
+PHONY_EXTRA = frontend frontend-dev frontend-test check-all
+.PHONY: $(PHONY_EXTRA) install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
 
 install:
 	uv sync --all-extras
 
-serve:
-	uv run templatize-api
+serve: frontend
+	TEMPLATIZE_STATIC_DIR=frontend/dist uv run templatize-api
+
+frontend:
+	cd frontend && npm ci --no-audit --no-fund && npm run build
+
+frontend-dev:
+	cd frontend && npm run dev
+
+frontend-test:
+	cd frontend && npm test
 
 test:
 	uv run pytest -q
@@ -29,6 +39,8 @@ typecheck:
 	uv run mypy
 
 check: lint typecheck test
+
+check-all: check frontend frontend-test
 
 image:
 	$(CONTAINER) build -f docker/app.Dockerfile --target runtime -t $(IMAGE) .

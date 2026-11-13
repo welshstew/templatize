@@ -12,7 +12,8 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from templatize import __version__
@@ -69,6 +70,30 @@ def _run_build(req: BuildRequest) -> BuildResult:
         raise ApiError(422, _validation_message(exc)) from None
     except (IRValidationError, ValueError) as exc:  # includes UnknownEngineError
         raise ApiError(422, str(exc)) from None
+
+
+def _mount_frontend(app: FastAPI, settings: Settings) -> None:
+    """Serve the built single-page app (frontend/dist) if configured."""
+    static = settings.static_dir
+    if static is None:
+        return
+    index = static / "index.html"
+    if not index.is_file():
+        log.warning("TEMPLATIZE_STATIC_DIR has no index.html; UI not served")
+        return
+    if (static / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    def spa_index() -> FileResponse:
+        return FileResponse(index, media_type="text/html")
+
+    favicon = static / "favicon.svg"
+    if favicon.is_file():
+
+        @app.get("/favicon.svg", include_in_schema=False)
+        def spa_favicon() -> FileResponse:
+            return FileResponse(favicon, media_type="image/svg+xml")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -183,6 +208,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "x-roundtrip": "pass" if result.roundtrip.ok else "fail",
             },
         )
+
+    _mount_frontend(app, settings)
 
     # Outermost first: headers wrap everything, body limit applies before routing.
     app.add_middleware(BodyLimitMiddleware, max_bytes=settings.max_body_bytes)

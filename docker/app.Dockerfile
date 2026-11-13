@@ -2,8 +2,20 @@
 # Build online, run offline: every dependency is resolved from uv.lock at build time.
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.13.8
+ARG NODE_VERSION=24
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
+# ---------------------------------------------------------------------------
+# Frontend: built once on the build platform (output is architecture-independent).
+# `npm run build` type-checks, bundles everything locally and fails if the output
+# references any external URL.
+FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-slim AS frontend
+WORKDIR /fe
+COPY frontend/package.json frontend/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build && npm test
 
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS builder
@@ -28,6 +40,7 @@ LABEL org.opencontainers.image.title="templatize" \
       org.opencontainers.image.description="Turn plain text into templates, offline"
 RUN useradd --system --uid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin app
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=frontend /fe/dist /app/static
 COPY scripts/offline-fixtures.sh /usr/local/bin/offline-fixtures
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -37,7 +50,8 @@ ENV PATH=/app/.venv/bin:$PATH \
     HF_HUB_DISABLE_TELEMETRY=1 \
     DO_NOT_TRACK=1 \
     TEMPLATIZE_HOST=0.0.0.0 \
-    TEMPLATIZE_PORT=8000
+    TEMPLATIZE_PORT=8000 \
+    TEMPLATIZE_STATIC_DIR=/app/static
 USER 10001
 WORKDIR /work
 EXPOSE 8000
