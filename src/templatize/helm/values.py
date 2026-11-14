@@ -69,13 +69,31 @@ def dump(tree: Mapping[str, Any], header: str = "") -> str:
     if header and tree:
         lines.append("")
 
+    def key(raw_key: str) -> str:
+        return f'"{raw_key}"' if raw_key.lower() in _SPECIAL_KEYS else raw_key
+
     def walk(node: Mapping[str, Any], depth: int) -> None:
         for raw_key, v in node.items():
-            k = f'"{raw_key}"' if raw_key.lower() in _SPECIAL_KEYS else raw_key
+            k = key(raw_key)
             pad = "  " * depth
             if isinstance(v, Mapping):
                 lines.append(f"{pad}{k}:")
                 walk(v, depth + 1)
+            elif isinstance(v, list):
+                if not v:
+                    lines.append(f"{pad}{k}: []")
+                    continue
+                lines.append(f"{pad}{k}:")
+                for item in v:  # a loop: strings, or flat mappings of strings
+                    if isinstance(item, Mapping):
+                        if not item:
+                            lines.append(f"{pad}  - {{}}")
+                            continue
+                        for j, (fk, fv) in enumerate(item.items()):
+                            lead = "- " if j == 0 else "  "
+                            lines.append(f"{pad}  {lead}{key(fk)}: {yaml_scalar(fv)}")
+                    else:
+                        lines.append(f"{pad}  - {yaml_scalar(item)}")
             else:
                 lines.append(f"{pad}{k}: {yaml_scalar(v)}")
 

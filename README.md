@@ -377,6 +377,35 @@ API: `POST /chart` (same inputs as `/build`, plus `variants`, `chart_name`,
 release name or re-serialise YAML, so the exact round trip would not hold. The helm create
 style uses them, and is checked by coverage instead.
 
+### Ansible roles
+
+The same template, packaged as an Ansible role that renders the document:
+
+    templatize role nginx.conf --accept-all --name web -o out/    # or --zip web.zip
+    cd out && ansible-playbook playbook.yml -e web_dest=/tmp/nginx.conf
+
+```
+web/
+  defaults/main.yml     # web_server_name, web_servers (a list per loop), web_dest
+  tasks/main.yml        # ansible.builtin.template with byte-exact options
+  templates/nginx.conf.j2
+  meta/main.yml
+  README.md
+  examples/<label>.yml  # per --variant: only the values that differ (-e @...)
+playbook.yml
+```
+
+Variables are prefixed with the role name, the usual Ansible convention; loop item
+variables and fields keep their names. Out of the box Ansible would not reproduce the
+document: the template module trims the newline after block tags (`trim_blocks`
+defaults to true) and Ansible re-templates any string variable. So the task sets
+`trim_blocks: false`, `lstrip_blocks: false` and the document's `newline_sequence`, and
+values containing `{{`, `{%` or `{#` are tagged `!unsafe` in `defaults/main.yml`. The
+round trip renders the template with the vars files as Ansible reads them, and the
+test suite runs real `ansible-playbook` (when installed) on the fixtures, including
+CRLF, mixed line endings and literal `{{`. API: `POST /role` and `POST /role/download`.
+In the UI: the **Ansible role** tab of the output panel.
+
 ### MCP server
 
 The same core library is exposed as an MCP server (official Python SDK, `mcp` 2.x)
@@ -387,6 +416,7 @@ with five read-only tools:
 | `suggest_parameters(text, variants?, min_confidence?)` | Scored candidate variables (spans are code points) |
 | `generate_template(text, variables?, variants?, min_confidence?)` | Template, `.env`, `render.py` and the round-trip verdict. Give variables **by value**, e.g. `[{"name": "db_host", "value": "db01.example.com", "occurrences": "all"}]`, so the model never has to count characters (spans also work). Omit `variables` to accept suggestions automatically |
 | `generate_helm_chart(text, variables?, variants?, chart_name?, variant_labels?, min_confidence?, style?)` | Helm chart from Kubernetes manifests: Chart.yaml, nested values.yaml, templates, and a values file per variant. `style="exact"` checks a byte-for-byte round trip per document; `style="scaffold"` fills in the `helm create` chart and returns a coverage report. Variables take an optional `values_path` |
+| `generate_ansible_role(text, variables?, variants?, role_name?, filename?, dest?, variant_labels?, min_confidence?)` | The template packaged as an Ansible role (defaults, tasks, template, meta, README, a vars file per variant) plus `playbook.yml`, with the round-trip verdict |
 | `render_template(template, values?, newline?)` | Sandboxed render. Errors come back in `error`, not as an exception |
 | `validate_template(template, values?, expected_text?)` | Syntax, referenced, missing and unused variables, renders?, and reproduces `expected_text` byte for byte? |
 
@@ -579,8 +609,13 @@ In the web UI a suggested loop is a bracketed region of the document with a badg
 the loop variable and the fields, and add, remove or edit rows to see the template
 take any number of items in the preview. Accepting a loop sets aside the suggestions
 on its fields (they come back if you remove the loop); variables that sit at the same
-place in every item, such as a tenant id in every row, still work inside it. Helm
-`range` is next; see `docs/design/loops.md`.
+place in every item, such as a tenant id in every row, still work inside it.
+
+In an exact-style Helm chart a loop is a `range` over a list in values.yaml
+(`{{ range $i, $port := .Values.ports }}{{ if $i }}SEP{{ end }}...{{ end }}`; inside it,
+variables are `{{ $.Values.x }}`), and an example with more or fewer items gets its
+list in `values-<label>.yaml`. The helm create style keeps lists as plain text. Design
+notes: `docs/design/loops.md`.
 
 > JavaScript clients index strings in UTF-16 code units, not code points. Convert at the
 > API boundary.

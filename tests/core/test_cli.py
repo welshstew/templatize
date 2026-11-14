@@ -110,3 +110,14 @@ def test_build_with_loops_file(tmp_path: Path) -> None:
     )
     assert (out / "values.yaml").read_text().endswith("names:\n- a\n- b\n")
     assert "{% for name in names %}" in (out / "template.j2").read_text()
+
+
+def test_role_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    out = tmp_path / "role"
+    rc = main(
+        ["role", str(FIXTURES / "nginx.conf"), "--accept-all", "--name", "web", "-o", str(out)]
+    )
+    assert rc == 0
+    assert "round-trip (defaults): PASS" in capsys.readouterr().err
+    assert (out / "web" / "templates" / "nginx.conf.j2").exists()
+    assert (out / "playbook.yml").read_text().count("- web") == 1

@@ -106,6 +106,8 @@ class ChartRequest(BaseModel):
     style: ChartStyle = "exact"
     """``exact``: your manifests as templates. ``scaffold``: the ``helm create`` chart
     filled in from them (needs ``helm`` on the server for the coverage check)."""
+    loops: list[LoopSpec] = Field(default_factory=list, max_length=MAX_LOOPS)
+    """Exact style: lists rendered with ``range`` over values.yaml lists."""
 
 
 class ChartResponse(BaseModel):
@@ -118,6 +120,7 @@ class ChartResponse(BaseModel):
     coverage: list[CoverageReport]
     notes: list[str]
     filled: list[FilledValue] = []
+    loops: list[Loop] = []
     ok: bool
 
 
@@ -139,3 +142,27 @@ class ChartRenderResponse(BaseModel):
     ok: bool
     files: list[EmittedFile] = []
     error: str | None = None
+
+
+class RoleRequest(BaseModel):
+    text: Document
+    variants: list[Document] = Field(default_factory=list, max_length=MAX_VARIANTS)
+    variables: list[VariableSpec] = Field(default_factory=list, max_length=MAX_VARIABLES)
+    loops: list[LoopSpec] = Field(default_factory=list, max_length=MAX_LOOPS)
+    role_name: Annotated[str, Field(max_length=40)] = "config"
+    """Role name; also the prefix of its variables (``config_db_host``)."""
+    filename: Annotated[str, Field(max_length=100)] = "config"
+    """Name of the rendered file (the template is ``templates/<filename>.j2``)."""
+    dest: Annotated[str, Field(max_length=4096)] | None = None
+    """Default for ``<role>_dest``, where the file is written."""
+    variant_labels: list[Annotated[str, Field(max_length=32)]] | None = Field(
+        default=None, max_length=MAX_VARIANTS
+    )
+
+
+class RoleResponse(BaseModel):
+    role_name: str
+    files: list[EmittedFile]
+    roundtrip: RoundTripResult
+    example_roundtrips: list[RoundTripResult]
+    ok: bool

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import zipfile
 
+from templatize.ansible import RoleResult
 from templatize.build import BuildResult
 from templatize.emitters import get_emitter
 from templatize.helm import ChartResult
@@ -109,6 +110,18 @@ def make_chart_zip(result: ChartResult) -> bytes:
             files.append(type(files[0])(path="README.md", content=chart_readme(result)))
         for f in files:
             info = zipfile.ZipInfo(f"{result.chart_name}/{f.path}", date_time=_FIXED_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            zf.writestr(info, f.content.encode("utf-8", "surrogatepass"))
+    return buf.getvalue()
+
+
+def make_role_zip(result: RoleResult) -> bytes:
+    """``<role>/...`` plus ``playbook.yml``: unzip into a directory and run the playbook."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in result.files:
+            info = zipfile.ZipInfo(f.path, date_time=_FIXED_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             zf.writestr(info, f.content.encode("utf-8", "surrogatepass"))

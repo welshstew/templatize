@@ -16,6 +16,7 @@ from templatize.ir import (
     Loop,
     LoopCandidate,
     LoopField,
+    LoopValues,
     Source,
     Span,
     TemplateIR,
@@ -69,6 +70,10 @@ class LoopSpec(BaseModel):
     confidence: float | None = None
     description: str | None = None
     values_path: ValuesPath | None = None
+    """Helm charts only: where the list goes in values.yaml (default: from the name)."""
+    variant_values: list[LoopValues | None] | None = None
+    """The list in each example document (Helm charts write it to the example's values
+    file). Missing or None means "same as in the main text"."""
 
 
 def make_loop(text: str, spec: LoopSpec) -> Loop:
@@ -165,6 +170,7 @@ def specs_from_loop_candidates(loops: Iterable[LoopCandidate]) -> list[LoopSpec]
             sources=lp.sources,
             confidence=lp.confidence,
             description=lp.reason,
+            variant_values=lp.variant_values,
         )
         for lp in loops
     ]

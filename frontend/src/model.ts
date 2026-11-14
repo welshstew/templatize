@@ -588,6 +588,7 @@ export function renameField(loop: LoopItem, from: string, to: string): Partial<L
     fields: loop.fields.map((f) => (f.name === from ? { ...f, name: to } : f)),
     rows: rename(loop.rows),
     previewRows: rename(loop.previewRows),
+    variantValues: loop.variantValues?.map((v) => (v ? rename(v) : v)) ?? null,
   };
 }
 
@@ -609,6 +610,7 @@ export function loopSpecsFor(loops: LoopItem[]): LoopSpec[] {
       fields: l.fields.map((f) => ({ name: f.name, spans: f.spans, type: f.type })),
       scalar: l.scalar,
       sources: l.sources,
+      ...(l.variantValues ? { variant_values: l.variantValues } : {}),
     }));
 }
 

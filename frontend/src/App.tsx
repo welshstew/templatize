@@ -219,7 +219,16 @@ export function App() {
     (signal) => {
       if (mode !== "review" || output !== "helm") return;
       setBuildPending(true);
-      api.chart(text, reviewedVariants.current, specs, { chartName: chartName || null, style: chartStyle }, signal).then(
+      api
+        .chart(
+          text,
+          reviewedVariants.current,
+          specs,
+          { chartName: chartName || null, style: chartStyle },
+          signal,
+          chartStyle === "exact" ? loopSpecs : [],
+        )
+        .then(
         (c) => {
           setChart(c);
           setChartError(null);
@@ -282,7 +291,13 @@ export function App() {
     try {
       const helm = output === "helm";
       const blob = helm
-        ? await api.chartDownload(text, reviewedVariants.current, specs, { chartName: chartName || null, style: chartStyle })
+        ? await api.chartDownload(
+            text,
+            reviewedVariants.current,
+            specs,
+            { chartName: chartName || null, style: chartStyle },
+            chartStyle === "exact" ? loopSpecs : [],
+          )
         : await api.download(text, specs, loopSpecs);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -479,6 +494,7 @@ export function App() {
             onLoopStatus={onLoopStatus}
             onLoopUpdate={onLoopUpdate}
             helm={helm}
+            chartStyle={chartStyle}
           />
           {helm ? (
             <ChartView
@@ -499,6 +515,7 @@ export function App() {
               preview={preview}
               previewChanged={previewChanged(items, loops)}
               original={reviewedText.current}
+              role={{ text, variants: reviewedVariants.current, variables: specs, loops: loopSpecs }}
             />
           )}
         </main>

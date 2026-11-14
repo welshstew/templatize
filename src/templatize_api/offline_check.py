@@ -259,6 +259,7 @@ def check_mcp(base: str, fixture: Path) -> str | None:
             "suggest_parameters",
             "generate_template",
             "generate_helm_chart",
+            "generate_ansible_role",
             "render_template",
             "validate_template",
         }

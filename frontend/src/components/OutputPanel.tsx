@@ -1,8 +1,9 @@
 import { useState } from "preact/hooks";
 
 import type { BuildResponse, RenderResponse } from "../api.ts";
+import { AnsiblePanel, type RoleInput } from "./AnsiblePanel.tsx";
 
-type Tab = "preview" | "template" | "env" | "script";
+type Tab = "preview" | "template" | "env" | "script" | "ansible";
 
 interface Props {
   build: BuildResponse | null;
@@ -10,6 +11,8 @@ interface Props {
   preview: RenderResponse | null;
   previewChanged: boolean;
   original: string;
+  /** What the Ansible role tab packages (the accepted variables and loops). */
+  role: RoleInput;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -32,9 +35,9 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function OutputPanel({ build, buildError, preview, previewChanged, original }: Props) {
+export function OutputPanel({ build, buildError, preview, previewChanged, original, role }: Props) {
   const [tab, setTab] = useState<Tab>("preview");
-  const files: Record<Exclude<Tab, "preview">, { label: string; content: string } | null> = {
+  const files: Record<Exclude<Tab, "preview" | "ansible">, { label: string; content: string } | null> = {
     template: build ? { label: build.template.path, content: build.template.content } : null,
     env: build ? { label: build.env.path, content: build.env.content } : null,
     script: build?.runner[0] ? { label: build.runner[0].path, content: build.runner[0].content } : null,
@@ -44,6 +47,7 @@ export function OutputPanel({ build, buildError, preview, previewChanged, origin
     ["template", files.template?.label ?? "template"],
     ["env", files.env?.label ?? ".env"],
     ["script", "render.py"],
+    ["ansible", "Ansible role"],
   ];
 
   let body;
@@ -51,6 +55,8 @@ export function OutputPanel({ build, buildError, preview, previewChanged, origin
     body = <div class="error-box">{buildError}</div>;
   } else if (!build) {
     body = <p class="hint">Building…</p>;
+  } else if (tab === "ansible") {
+    body = <AnsiblePanel input={role} />;
   } else if (tab === "preview") {
     if (!preview) body = <p class="hint">Rendering…</p>;
     else if (!preview.ok) body = <div class="error-box">Render error: {preview.error}</div>;

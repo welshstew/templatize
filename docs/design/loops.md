@@ -1,6 +1,6 @@
 # Design: repeated blocks as loops
 
-Status: milestones 1 (IR + Jinja2), 2 (detection) and 3 (UI) implemented · Scope: core IR, detectors, Jinja2 + Helm (exact) emitters, UI
+Status: implemented (milestones 1-4: IR + Jinja2, detection, UI, Helm range and the Ansible role) · Scope: core IR, detectors, Jinja2 + Helm (exact) emitters, UI
 
 ## Why
 

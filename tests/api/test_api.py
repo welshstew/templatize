@@ -218,3 +218,24 @@ def test_suggest_returns_loops(client: TestClient) -> None:
     (loop,) = res["loops"]
     assert (loop["name"], loop["item"], len(loop["items"])) == ("users", "user", 2)
     assert [f["name"] for f in loop["fields"]] == ["email", "role"]
+
+
+def test_role_and_download(client: TestClient) -> None:
+    text = "host = db.example.com\nport = 5432\n"
+    i = text.index("db.example.com")
+    body = {
+        "text": text,
+        "variables": [{"name": "host", "spans": [{"start": i, "end": i + 14}]}],
+        "role_name": "db",
+        "filename": "app.ini",
+    }
+    res = client.post("/role", json=body).json()
+    assert res["ok"] is True and res["role_name"] == "db"
+    paths = {f["path"] for f in res["files"]}
+    assert {"db/templates/app.ini.j2", "db/defaults/main.yml", "playbook.yml"} <= paths
+    dl = client.post("/role/download", json=body)
+    assert dl.status_code == 200 and dl.headers["x-roundtrip"] == "pass"
+    with zipfile.ZipFile(io.BytesIO(dl.content)) as zf:
+        assert "db/tasks/main.yml" in zf.namelist()
+    bad = client.post("/role", json={**body, "role_name": "Bad-Name"})
+    assert bad.status_code == 422 and "invalid role name" in bad.json()["detail"]

@@ -81,6 +81,8 @@ export interface LoopSpec {
   fields: { name: string; spans: Span[]; type?: string }[];
   scalar: boolean;
   sources?: string[];
+  /** Each example's list (Helm charts write it to the example's values file). */
+  variant_values?: (LoopRows | null)[] | null;
 }
 
 /** Render values: variables are strings, loops are lists. */
@@ -197,6 +199,19 @@ export interface ChartRenderResponse {
   error: string | null;
 }
 
+export interface RoleOptions {
+  roleName: string;
+  filename: string;
+}
+
+export interface RoleResponse {
+  role_name: string;
+  files: EmittedFile[];
+  roundtrip: RoundTrip;
+  example_roundtrips: RoundTrip[];
+  ok: boolean;
+}
+
 export interface ChartOptions {
   chartName?: string | null;
   variantLabels?: string[] | null;
@@ -284,13 +299,21 @@ export const api = {
     post<BuildResponse>("/build", { text, variables, loops }, signal),
   render: (template: string, values: RenderValues, signal?: AbortSignal) =>
     post<RenderResponse>("/render", { template, values }, signal),
-  chart: (text: string, variants: string[], variables: VariableSpec[], opts: ChartOptions, signal?: AbortSignal) =>
+  chart: (
+    text: string,
+    variants: string[],
+    variables: VariableSpec[],
+    opts: ChartOptions,
+    signal?: AbortSignal,
+    loops: LoopSpec[] = [],
+  ) =>
     post<ChartResponse>(
       "/chart",
       {
         text,
         variants,
         variables,
+        loops,
         chart_name: opts.chartName || null,
         variant_labels: opts.variantLabels ?? null,
         style: opts.style ?? "exact",
@@ -318,7 +341,13 @@ export const api = {
         : { templates, values_yaml: valuesYaml, overlay_yaml: overlayYaml },
       signal,
     ),
-  chartDownload: async (text: string, variants: string[], variables: VariableSpec[], opts: ChartOptions): Promise<Blob> => {
+  chartDownload: async (
+    text: string,
+    variants: string[],
+    variables: VariableSpec[],
+    opts: ChartOptions,
+    loops: LoopSpec[] = [],
+  ): Promise<Blob> => {
     const resp = await fetch("/chart/download", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -326,10 +355,39 @@ export const api = {
         text,
         variants,
         variables,
+        loops,
         chart_name: opts.chartName || null,
         variant_labels: opts.variantLabels ?? null,
         style: opts.style ?? "exact",
       }),
+    });
+    if (!resp.ok) throw await errorFrom(resp);
+    return await resp.blob();
+  },
+  role: (
+    text: string,
+    variants: string[],
+    variables: VariableSpec[],
+    loops: LoopSpec[],
+    opts: RoleOptions,
+    signal?: AbortSignal,
+  ) =>
+    post<RoleResponse>(
+      "/role",
+      { text, variants, variables, loops, role_name: opts.roleName, filename: opts.filename },
+      signal,
+    ),
+  roleDownload: async (
+    text: string,
+    variants: string[],
+    variables: VariableSpec[],
+    loops: LoopSpec[],
+    opts: RoleOptions,
+  ): Promise<Blob> => {
+    const resp = await fetch("/role/download", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text, variants, variables, loops, role_name: opts.roleName, filename: opts.filename }),
     });
     if (!resp.ok) throw await errorFrom(resp);
     return await resp.blob();

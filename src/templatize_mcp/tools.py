@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from templatize.ansible import RoleError, build_role
 from templatize.build import (
     LoopSpec,
     VariableInput,
@@ -196,15 +197,25 @@ def generate_helm_chart(
     variants = variants or []
     try:
         check_limits(text, variants)
+        loops: list[LoopSpec] = []
         if variables is None:
-            cands = [
-                c for c in _suggest(text, variants).candidates if c.confidence >= min_confidence
-            ]
-            specs = specs_from_candidates(cands)
+            res = _suggest(text, variants)
+            cands = [c for c in res.candidates if c.confidence >= min_confidence]
+            if style == "exact":
+                found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+                specs, loops = accept_suggestions(cands, found)
+            else:
+                specs = specs_from_candidates(cands)
         else:
             specs = resolve_inputs(text, variables)
         result = build_helm_chart(
-            style, text, specs, variants, chart_name=chart_name, variant_labels=variant_labels
+            style,
+            text,
+            specs,
+            variants,
+            chart_name=chart_name,
+            variant_labels=variant_labels,
+            loops=loops,
         )
     except (VariableResolutionError, IRValidationError, ChartError, ValueError) as exc:
         raise ToolInputError(str(exc)) from None
@@ -317,3 +328,57 @@ __all__ = [
     "suggest_parameters",
     "validate_template",
 ]
+
+
+class GenerateAnsibleRoleResult(BaseModel):
+    role_name: str
+    files: list[ChartFile]
+    """<role>/defaults/main.yml, tasks/main.yml, templates/<file>.j2, meta/main.yml,
+    README.md, examples/<label>.yml per variant, and playbook.yml."""
+    roundtrip: RoundTripResult
+    """ok=true: rendering the role's template with defaults/main.yml (as Ansible reads
+    it, with byte-exact template options) reproduces the input."""
+    example_roundtrips: list[RoundTripResult]
+    used_suggestions: bool
+
+
+def generate_ansible_role(
+    text: str,
+    variables: list[VariableInput] | None = None,
+    variants: list[str] | None = None,
+    role_name: str = "config",
+    filename: str = "config",
+    dest: str | None = None,
+    variant_labels: list[str] | None = None,
+    min_confidence: float = 0.5,
+) -> GenerateAnsibleRoleResult:
+    variants = variants or []
+    try:
+        check_limits(text, variants)
+        loops: list[LoopSpec] = []
+        if variables is None:
+            res = _suggest(text, variants)
+            cands = [c for c in res.candidates if c.confidence >= min_confidence]
+            found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+            specs, loops = accept_suggestions(cands, found)
+        else:
+            specs = resolve_inputs(text, variables)
+        result = build_role(
+            text,
+            specs,
+            loops,
+            role_name=role_name,
+            filename=filename,
+            dest=dest,
+            variants=variants,
+            variant_labels=variant_labels,
+        )
+    except (VariableResolutionError, IRValidationError, RoleError, ValueError) as exc:
+        raise ToolInputError(str(exc)) from None
+    return GenerateAnsibleRoleResult(
+        role_name=result.role_name,
+        files=[ChartFile(path=f.path, content=f.content) for f in result.files],
+        roundtrip=result.roundtrip,
+        example_roundtrips=result.example_roundtrips,
+        used_suggestions=variables is None,
+    )

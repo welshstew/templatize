@@ -37,11 +37,12 @@ async def _call(client: Client, name: str, args: dict[str, Any]) -> Any:
     return res
 
 
-def test_lists_five_read_only_tools() -> None:
+def test_lists_six_read_only_tools() -> None:
     async def main() -> None:
         async with Client(create_server()) as c:
             listed = (await c.list_tools()).tools
             assert sorted(t.name for t in listed) == [
+                "generate_ansible_role",
                 "generate_helm_chart",
                 "generate_template",
                 "render_template",
@@ -183,7 +184,7 @@ def test_stdio_transport() -> None:
 
     async def main() -> None:
         async with Client(params) as c:
-            assert len((await c.list_tools()).tools) == 5
+            assert len((await c.list_tools()).tools) == 6
             gen = await c.call_tool(
                 "generate_template",
                 {"text": TEXT, "variables": [{"name": "port", "value": "5432"}]},
@@ -226,7 +227,7 @@ def test_streamable_http_on_api_app(http_server: str) -> None:
 
     async def main() -> None:
         async with Client(f"{http_server}/mcp") as c:
-            assert len((await c.list_tools()).tools) == 5
+            assert len((await c.list_tools()).tools) == 6
             gen = await c.call_tool(
                 "generate_template",
                 {"text": TEXT, "variables": [{"name": "db_host", "value": "db01.example.com"}]},
@@ -274,3 +275,13 @@ def test_tools_suggest_and_generate_loops() -> None:
     gen = tools.generate_template(text)
     assert gen.roundtrip.ok and gen.values_filename == "values.yaml"
     assert "{% for broker in brokers %}" in gen.template
+
+
+def test_tools_generate_ansible_role() -> None:
+    text = 'BROKERS = ["10.0.0.1:9092", "10.0.0.2:9092"]\nREGION = "eu-west-2"\n'
+    res = tools.generate_ansible_role(text, role_name="kafka", filename="settings.py")
+    assert res.roundtrip.ok
+    paths = {f.path for f in res.files}
+    assert {"kafka/templates/settings.py.j2", "kafka/defaults/main.yml", "playbook.yml"} <= paths
+    defaults = next(f.content for f in res.files if f.path == "kafka/defaults/main.yml")
+    assert "kafka_brokers:\n- 10.0.0.1:9092\n" in defaults

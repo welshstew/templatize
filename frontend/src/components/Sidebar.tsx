@@ -18,6 +18,7 @@ interface Props {
   onLoopUpdate?: (id: string, patch: Partial<LoopItem>) => void;
   /** Helm chart output: show and edit each variable's values.yaml path. */
   helm?: boolean;
+  chartStyle?: "exact" | "scaffold";
 }
 
 /** values.yaml key for an item: its own path, or derived from the name like the server does. */
@@ -257,6 +258,7 @@ export function Sidebar({
   onLoopStatus = () => undefined,
   onLoopUpdate = () => undefined,
   helm = false,
+  chartStyle = "exact",
 }: Props) {
   const [showRejected, setShowRejected] = useState(false);
   const liveLoops = loops
@@ -278,9 +280,11 @@ export function Sidebar({
             Lists <span class="count">{liveLoops.filter((l) => l.status === "accepted").length}</span>
           </h2>
           <p class="hint">
-            {helm
-              ? "Lists are not part of Helm charts yet: in the chart their text stays as it is."
-              : "Repeated blocks. As a loop, the template takes any number of items."}
+            {!helm
+              ? "Repeated blocks. As a loop, the template takes any number of items."
+              : chartStyle === "exact"
+                ? "In the chart a list is a range loop over a list in values.yaml."
+                : "The helm create style keeps lists as plain text; use Exact for range loops."}
           </p>
           <ul class="list">
             {liveLoops.map((l) => (

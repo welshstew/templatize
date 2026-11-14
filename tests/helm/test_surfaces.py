@@ -200,3 +200,31 @@ def test_mcp_scaffold_style() -> None:
     assert r.style == "scaffold" and r.roundtrips == []
     assert any(f.path == "templates/_helpers.tpl" for f in r.files)
     assert r.coverage and r.notes
+
+
+def test_api_chart_with_loops(client: TestClient) -> None:
+    text = (
+        "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hosts\ndata:\n"
+        "  hosts: |\n    a.example\n    b.example\n"
+        "---\napiVersion: v1\nkind: Service\nmetadata:\n  name: web\nspec:\n  ports:\n"
+        "    - port: 80\n      name: http\n    - port: 443\n      name: https\n"
+    )
+    sug = client.post("/suggest", json={"text": text}).json()
+    loop = next(lp for lp in sug["loops"] if lp["name"] == "ports")
+    spec = {k: loop[k] for k in ("name", "item", "items", "fields", "scalar")}
+    res = client.post("/chart", json={"text": text, "loops": [spec]}).json()
+    assert res["ok"], res["roundtrips"]
+    assert [lp["values_path"] for lp in res["loops"]] == [["ports"]]
+    files = {f["path"]: f["content"] for f in res["files"]}
+    assert "{{ range $i, $port := .Values.ports }}" in files["templates/service.yaml"]
+    assert 'ports:\n  - port: 80\n    name: "http"\n' in files["values.yaml"]
+    # The live preview renders range with edited values.
+    templates = [{"path": p, "content": c} for p, c in files.items() if p.startswith("templates/")]
+    edited = files["values.yaml"].replace('  - port: 443\n    name: "https"\n', "")
+    out = client.post("/chart/render", json={"templates": templates, "values_yaml": edited}).json()
+    assert out["ok"], out
+    service = next(f["content"] for f in out["files"] if f["path"] == "templates/service.yaml")
+    assert "443" not in service and "- port: 80" in service
+    # The helm create style keeps lists as text and says so.
+    scaffold = client.post("/chart", json={"text": text, "loops": [spec], "style": "scaffold"})
+    assert scaffold.status_code == 422  # no Deployment: the scaffold needs one
