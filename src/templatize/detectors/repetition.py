@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span, VarType
-from templatize.naming import infer_type, snake_case, type_name
+from templatize.naming import infer_type, is_file_name, snake_case, type_name
 
 _TOKEN = re.compile(r"[\w](?:[\w.\-:/@]*[\w])?")
 _KEY_AFTER = re.compile(r"[ \t]*[:=]")
@@ -198,6 +198,8 @@ class RepetitionDetector:
             tok = m.group(0)
             if not _non_trivial(tok) or in_phrase[m.start()]:
                 continue
+            if is_file_name(tok) and "/" not in tok:
+                continue  # requirements.txt, config.yaml: a file the document uses
             if text[max(0, m.start() - 2) : m.start()].endswith(("<", "</")):
                 continue  # a markup tag name (<VirtualHost>, </Directory>)
             if _KEY_AFTER.match(text, m.end()) and not text.startswith("://", m.end()):

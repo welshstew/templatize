@@ -29,6 +29,22 @@ _SPACED_MIN_SHARE = 0.6
 # are left to the patterns, which find their parts.
 _SPACED_LOWER = re.compile(r"^[ \t]*([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*)[ \t]+([^\s#;{}]+)[ \t]*$")
 _PROSE_END = re.compile(r"[.!?,]$")
+# Dockerfile instructions whose arguments are values.
+_DOCKER_FIRST = re.compile(
+    r"\A(?:\s*(?:#[^\n]*)?\n)*\s*(?:ARG\s+\S+\s*\n(?:\s*\n|\s*#[^\n]*\n|\s*ARG\s[^\n]*\n)*\s*)?FROM\s",
+    re.IGNORECASE,
+)
+_DOCKER_LINE = re.compile(
+    r"^[ \t]*(FROM|ARG|ENV|LABEL|EXPOSE|USER|WORKDIR)[ \t]+(.*?)[ \t]*\\?[ \t]*$", re.IGNORECASE
+)
+_DOCKER_CONT = re.compile(r"^[ \t]+(.*?)[ \t]*\\?[ \t]*$")
+_DOCKER_PAIR = re.compile(r"([A-Za-z_][\w.-]*)=(\"(?:[^\"\\]|\\.)*\"|'[^']*'|[^\s\\]+)")
+# Ansible INI inventory host lines: "web-01 ansible_host=10.0.0.1 ansible_port=2222".
+_INVENTORY_HOST = re.compile(r"^[ \t]*[^\s=#;\[]+((?:[ \t]+[A-Za-z_]\w*=\S+)+)[ \t]*$")
+_INLINE_PAIR = re.compile(r"([A-Za-z_]\w*)=(\S+)")
+# "Daniel Kim (daniel.kim@example.com)", "checkout-api (eu-west-1)": the value before
+# the parentheses is the key's value; the detail inside is left to the patterns.
+_WITH_DETAIL = re.compile(r"^(.*?\S)[ \t]+\(([^()]+)\)$")
 _TOP_API = re.compile(r"^apiVersion:[ \t]*\S", re.MULTILINE)
 _TOP_KIND = re.compile(r"^kind:[ \t]*\S", re.MULTILINE)
 # A value made of key=value pairs: "Server=db;Database=Payroll;User Id=svc;" (ADO.NET,
@@ -167,6 +183,8 @@ class KeyValueDetector:
     def detect(self, ctx: DetectionContext) -> DetectorResult:
         if _VCAL_START.match(ctx.text):
             return DetectorResult(candidates=self._vcal(ctx.text))
+        if _DOCKER_FIRST.match(ctx.text):
+            return DetectorResult(candidates=self._dockerfile(ctx.text))
         out: list[Candidate] = []
         content = [
             ln for _, ln in _lines(ctx.text) if ln.strip() and not ln.lstrip().startswith("#")
@@ -200,6 +218,20 @@ class KeyValueDetector:
                         line_start + s,
                         line_start + e,
                         "kv.json",
+                        0.7,
+                    )
+                continue
+
+            if section is not None and (hm := _INVENTORY_HOST.match(line)) and not _ENV.match(line):
+                for pm in _INLINE_PAIR.finditer(line, hm.start(1)):
+                    self._add(
+                        out,
+                        ctx.text,
+                        pm.group(1),
+                        None,
+                        line_start + pm.start(2),
+                        line_start + pm.end(2),
+                        "kv.inventory",
                         0.7,
                     )
                 continue
@@ -320,6 +352,89 @@ class KeyValueDetector:
         camel = any(sum(c.isupper() for c in k) >= 2 for k in keys)
         return camel or len(set(keys)) < len(keys)
 
+    def _dockerfile(self, text: str) -> list[Candidate]:
+        """FROM image, ARG/ENV/LABEL name=value (continuation lines too), EXPOSE ports,
+        USER and WORKDIR. RUN/CMD/COPY are commands, not values."""
+        out: list[Candidate] = []
+        instruction: str | None = None
+        for line_start, line in _lines(text):
+            m = _DOCKER_LINE.match(line)
+            if m:
+                instruction, args, args_at = m.group(1).upper(), m.group(2), m.start(2)
+            elif instruction in ("ENV", "ARG", "LABEL") and (c := _DOCKER_CONT.match(line)):
+                args, args_at = c.group(1), c.start(1)
+            else:
+                instruction = None if not line.rstrip().endswith("\\") else instruction
+                continue
+            continues = line.rstrip().endswith("\\")
+            if instruction == "FROM":
+                image = args.split()[0] if args.split() else ""
+                if image and image.lower() != "scratch" and "$" not in image:
+                    self._add(
+                        out,
+                        text,
+                        "base_image",
+                        None,
+                        line_start + args_at,
+                        line_start + args_at + len(image),
+                        "kv.dockerfile",
+                        0.75,
+                    )
+            elif instruction in ("ARG", "ENV", "LABEL"):
+                pairs = list(_DOCKER_PAIR.finditer(args))
+                if pairs:
+                    for pm in pairs:
+                        value, s = _unquote(pm.group(2), pm.start(2))
+                        self._add(
+                            out,
+                            text,
+                            pm.group(1),
+                            None,
+                            line_start + args_at + s,
+                            line_start + args_at + s + len(value),
+                            "kv.dockerfile",
+                            0.75,
+                        )
+                elif instruction == "ENV" and len(args.split(None, 1)) == 2:  # ENV KEY value
+                    key, value = args.split(None, 1)
+                    s = args.index(value, len(key))
+                    self._add(
+                        out,
+                        text,
+                        key,
+                        None,
+                        line_start + args_at + s,
+                        line_start + args_at + s + len(value),
+                        "kv.dockerfile",
+                        0.7,
+                    )
+            elif instruction == "EXPOSE":
+                for pm in re.finditer(r"\d{2,5}", args):
+                    self._add(
+                        out,
+                        text,
+                        "port",
+                        None,
+                        line_start + args_at + pm.start(),
+                        line_start + args_at + pm.end(),
+                        "kv.dockerfile",
+                        0.75,
+                    )
+            elif instruction in ("USER", "WORKDIR") and args and "$" not in args:
+                self._add(
+                    out,
+                    text,
+                    instruction.lower(),
+                    None,
+                    line_start + args_at,
+                    line_start + args_at + len(args),
+                    "kv.dockerfile",
+                    0.7,
+                )
+            if not continues:
+                instruction = None
+        return out
+
     def _vcal(self, text: str) -> list[Candidate]:
         """iCalendar / vCard properties: the value of each (mailto: dropped), the CN=
         name of an organizer or attendee, the parts of a vCard address."""
@@ -414,6 +529,9 @@ class KeyValueDetector:
             trail = len(value) - len(value.rstrip())
             start, end = start + lead, end - trail
             value = text[start:end]
+        if (dm := _WITH_DETAIL.match(value)) and len(dm.group(1)) < 60:
+            end = start + len(dm.group(1))
+            value = dm.group(1)
         if detector != "kv.pairs" and (_PAIRS_SEMI.match(value) or _PAIRS_SPACE.match(value)):
             sep = ";" if ";" in value else " "
             pos = start

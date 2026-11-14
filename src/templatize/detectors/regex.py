@@ -559,6 +559,14 @@ def _drop_inner(found: list[Candidate]) -> list[Candidate]:
 _LINE_LABEL = re.compile(r"[ \t]*([A-Z][A-Za-z]*(?:[ -][A-Za-z]+){0,3})[ \t]*:[ \t]")
 
 
+_PROSE_WORD = re.compile(r"\b[a-z]{3,}\b")
+_ACCESS_WORDS = re.compile(
+    r"\b(?:pin|passcode|pass code|access code|meeting id|conference id|participant code|"
+    r"verification code|security code|one-time code|otp|confirmation code|is)\b",
+    re.IGNORECASE,
+)
+
+
 def _line_labels(text: str, found: list[Candidate]) -> list[Candidate]:
     """Phones and access codes after a line label are named after it: ``dial_in_phone``,
     ``dial_in_pin``, ``support_phone``."""
@@ -571,7 +579,8 @@ def _line_labels(text: str, found: list[Candidate]) -> list[Candidate]:
         s = c.spans[0]
         line_start = text.rfind("\n", 0, s.start) + 1
         m = _LINE_LABEL.match(text, line_start, s.start)
-        if m is None:
+        between = text[m.end() : s.start] if m else ""
+        if m is None or _PROSE_WORD.search(_ACCESS_WORDS.sub("", between)):
             out.append(c)
             continue
         label = snake_case(m.group(1))

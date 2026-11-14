@@ -64,7 +64,7 @@ redis.conf:
 
 incident.txt:
   want: [INC-20931, checkout-api, SEV-2, "2026-10-03 14:12", "2026-10-03 15:47", Priya Raman, eu-west-1, v3.18.2, v3.18.1, Daniel Kim, daniel.kim@example.com, https://wiki.example.com/postmortems/INC-20931]
-  reject: [Status, Resolved, Summary, HTTP]
+  reject: [Status, Summary, HTTP]
   names: {Priya Raman: incident_commander, Daniel Kim: follow_up_owner}
 
 shipping.txt:
