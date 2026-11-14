@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from collections.abc import Sequence
 
 from pydantic import BaseModel
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 from templatize.compose import compose_profile
 from templatize.detectors import DetectionContext, Detector, default_detectors
 from templatize.detectors.k8s import split_spans
-from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice
+from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice, Span
 from templatize.k8s import DocumentProfile, detect_profile, structural_spans
 from templatize.loops import detect_loops, explained_notices
 from templatize.merge import compose_candidates, merge_candidates
@@ -49,9 +50,15 @@ def _outside_template_syntax(text: str, raw: list[Candidate]) -> list[Candidate]
     ]
     if not exprs:
         return raw
+    starts = [a for a, _ in exprs]  # disjoint and sorted: finditer does not overlap
+
+    def inside(s: Span) -> bool:
+        i = bisect_right(starts, s.start) - 1
+        return i >= 0 and s.end <= exprs[i][1]
+
     out = []
     for c in raw:
-        kept = [s for s in c.spans if not any(a <= s.start and s.end <= b for a, b in exprs)]
+        kept = [s for s in c.spans if not inside(s)]
         if kept:
             out.append(c if len(kept) == len(c.spans) else c.model_copy(update={"spans": kept}))
     return out
