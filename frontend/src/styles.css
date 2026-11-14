@@ -520,3 +520,9 @@ pre.doc .dl.loop-first::before {
   user-select: none;
   pointer-events: none;
 }
+
+/* Chart notes (e.g. what the Docker Compose conversion added or changed) */
+.chart-notes { padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.chart-notes summary { cursor: pointer; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.chart-notes ul { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
+.chart-notes .hint { margin: 4px 0 0; }

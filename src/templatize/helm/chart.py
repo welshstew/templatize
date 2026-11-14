@@ -103,6 +103,10 @@ class ChartResult(BaseModel):
     """Things the user should know (e.g. what the scaffold cannot express)."""
     loops: list[Loop] = []
     """Exact style: lists rendered with ``range``, with their final ``values_path``."""
+    converted_from: Literal["compose"] | None = None
+    """The input was a Docker Compose file, converted to manifests with Kompose."""
+    documents: list[str] = []
+    """When converted: the manifests the chart reproduces (input, then examples)."""
     filled: list[FilledValue] = []
     """Scaffold style: values that differ from the ``helm create`` defaults."""
 

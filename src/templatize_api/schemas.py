@@ -84,6 +84,8 @@ class InfoResponse(BaseModel):
     optional_detectors: dict[str, bool]
     helm: bool
     """``helm`` is installed: the helm create chart style can be checked and previewed."""
+    kompose: bool = False
+    """``kompose`` is installed: Docker Compose files can be converted to Helm charts."""
     mcp_http: str | None
     """Path of the MCP streamable HTTP endpoint, if enabled."""
     limits: Limits
@@ -121,6 +123,10 @@ class ChartResponse(BaseModel):
     notes: list[str]
     filled: list[FilledValue] = []
     loops: list[Loop] = []
+    converted_from: Literal["compose"] | None = None
+    """The input was a Docker Compose file, converted with Kompose."""
+    documents: list[str] = []
+    """When converted: the manifests the chart reproduces (input, then examples)."""
     ok: bool
 
 

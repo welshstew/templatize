@@ -63,6 +63,12 @@ function isAbort(e: unknown): boolean {
   return e instanceof DOMException && e.name === "AbortError";
 }
 
+function describeServices(profile: DocumentProfile): string {
+  const names = profile.services ?? [];
+  const shown = names.slice(0, 5).join(", ");
+  return names.length > 5 ? `${shown} and ${names.length - 5} more` : shown;
+}
+
 function describeResources(profile: DocumentProfile): string {
   const shown = profile.resources.slice(0, 4).map((r) => `${r.kind} ${r.name}`);
   const more = profile.resources.length - shown.length;
@@ -330,7 +336,8 @@ export function App() {
 
   const acceptedCount = accepted(items).length;
   const listCount = loops.filter((l) => l.status === "accepted").length;
-  const isK8s = profile?.format === "kubernetes";
+  // Kubernetes manifests, or a Docker Compose file (converted with Kompose).
+  const isK8s = profile?.format === "kubernetes" || profile?.format === "compose";
   const helm = output === "helm";
   const folded = helm && !docOpen;
   // One badge for the chart: the first failing round trip, or the input's.
@@ -418,9 +425,19 @@ export function App() {
       {mode === "review" && profile?.helm_suggested && !helm && !helmDismissed ? (
         <div class="banner helm" role="status">
           <span>
-            <b>Kubernetes manifests detected</b>: {describeResources(profile)}. Turn them into a Helm chart with a
-            values.yaml{reviewedVariants.current.length ? " and a values file per example" : ""}?
-          </span>
+            {profile.format === "compose" ? (
+              <>
+                <b>Docker Compose file detected</b>: services {describeServices(profile)}. Convert it to a Helm
+                chart (Kompose turns services into Deployments, Services and volume claims) with a values.yaml
+                {reviewedVariants.current.length ? " and a values file per example" : ""}?
+              </>
+            ) : (
+              <>
+                <b>Kubernetes manifests detected</b>: {describeResources(profile)}. Turn them into a Helm chart with a
+                values.yaml{reviewedVariants.current.length ? " and a values file per example" : ""}?
+              </>
+            )}
+</span>
           <span class="row">
             <button class="primary" onClick={() => setOutput("helm")}>
               Build Helm chart
@@ -518,7 +535,7 @@ export function App() {
               chart={chart}
               error={chartError}
               pending={buildPending}
-              documents={[reviewedText.current, ...reviewedVariants.current]}
+              documents={chart?.documents?.length ? chart.documents : [reviewedText.current, ...reviewedVariants.current]}
               chartName={chartName}
               onChartName={setChartName}
               chartStyle={chartStyle}

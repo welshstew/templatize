@@ -491,6 +491,27 @@ export function ChartView({
         </button>
       </div>
 
+      {chart && (chart.converted_from === "compose" || (chart.style === "exact" && chart.notes.length)) ? (
+        <details class="chart-notes" open={chart.converted_from === "compose"}>
+          <summary>
+            {chart.converted_from === "compose"
+              ? "Converted from Docker Compose with Kompose"
+              : "Notes"}
+            {chart.notes.length ? <span class="count">{chart.notes.length}</span> : null}
+          </summary>
+          {chart.converted_from === "compose" ? (
+            <p class="hint">
+              The templates are Kompose's Kubernetes manifests with your variables in values.yaml; the round trip
+              checks the chart against those manifests.
+            </p>
+          ) : null}
+          <ul>
+            {chart.notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
       <div class="ide">
         <nav class="explorer" aria-label="Chart files">
           <div class="explorer-section">Explorer</div>
