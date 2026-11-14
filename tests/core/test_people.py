@@ -129,7 +129,11 @@ def test_recipient_last_name_with_honorifics() -> None:
 
 def test_recipient_full_name_in_the_greeting() -> None:
     assert recipient("Sarah Okafor", "Sarah Okafor") == {"recipient_name": ("Sarah Okafor", 2)}
-    assert recipient("Mary J. Okafor", "Mary") == {"recipient_name": ("Mary J. Okafor", 1)}
+    # A three-word name stays whole; the greeting's first name is its own value.
+    assert recipient("Mary J. Okafor", "Mary") == {
+        "recipient_name": ("Mary J. Okafor", 1),
+        "recipient_first_name": ("Mary", 1),
+    }
 
 
 def test_one_line_after_the_name_is_a_title_or_a_company() -> None:
@@ -159,12 +163,12 @@ def test_no_greeting_or_no_name_no_recipient() -> None:
 @pytest.mark.parametrize("date", ["3 March 2026", "March 3, 2026", "2026-03-03", "03/03/2026"])
 def test_letter_date(date: str) -> None:
     text = f"Northwind Ltd\n\n{date}\n\nDear Sarah,\n\nSee you on 9 July 2026.\n"
-    assert people(text) == {"letter_date": date}
+    assert people(text) == {"letter_date": date, "recipient_first_name": "Sarah"}
 
 
 def test_no_letter_date_without_a_greeting_or_in_prose() -> None:
     assert people("3 March 2026\n\nRelease notes\n") == {}
-    assert people("Sent on 3 March 2026.\n\nDear Sarah,\n") == {}
+    assert people("Sent on 3 March 2026.\n\nDear Sarah,\n") == {"recipient_first_name": "Sarah"}
 
 
 @pytest.mark.parametrize(
@@ -186,3 +190,21 @@ def test_labelled_phones_and_access_codes(text: str, expected: dict[str, str]) -
     cands = RegexDetector().detect(DetectionContext(text=text)).candidates
     found = {c.name: c.value for c in cands if c.type in (VarType.PHONE, VarType.STRING)}
     assert found == expected
+
+
+def test_greeting_without_a_recipient_block() -> None:
+    assert people("Hi Priya,\n\nWelcome aboard.\n") == {"recipient_first_name": "Priya"}
+    assert people("Hi Zoë,\n") == {"recipient_first_name": "Zoë"}
+    assert people("Hi all,\n") == {}
+    assert people("Dear Team,\n") == {}
+
+
+def test_email_names_with_accents_and_repeats() -> None:
+    text = "Your admin, Tomás García (tomas.garcia@example.com).\nAsk Tomás García.\n"
+    found = PeopleDetector().detect(DetectionContext(text=text)).candidates
+    assert [(c.name, c.value, len(c.spans)) for c in found] == [("contact_name", "Tomás García", 2)]
+
+
+def test_signature_wins_over_contact() -> None:
+    text = "Call me at jordan.hale@example.com.\n\nSincerely,\n\nJordan Hale\nPartner\n"
+    assert people(text) == {"sender_name": "Jordan Hale", "sender_title": "Partner"}

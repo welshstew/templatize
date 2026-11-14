@@ -26,6 +26,8 @@ CONFIDENCE = 0.7
 _EMAIL = re.compile(r"(?<![\w.+-])([A-Za-z]+(?:[._-][A-Za-z]+){1,2})@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # "Patel", "O'Brien", "McDonald", "Smith-Jones" (\u2019 is a typographic apostrophe).
 _NAME_WORD = r"(?:[A-Z]['\u2019])?[A-Z][a-z]+(?:[A-Z][a-z]+)?(?:-[A-Z]?[a-z]+)*"
+# One name word in any script: "Priya", "Zoë", "Ólafur".
+_NAME_WORD_U = r"[^\W\d_](?:[^\W\d_]|['\u2019-](?=[^\W\d_]))+"
 _FULL_NAME = re.compile(rf"^{_NAME_WORD}(?: (?:[A-Z]\.|{_NAME_WORD})){{1,3}}$")
 _TITLE = re.compile(r"^[A-Z][A-Za-z&/,'-]*(?: [A-Za-z&/,'-]+){0,5}$")
 _CLOSING = re.compile(
@@ -68,6 +70,86 @@ def _stripped(text: str, start: int, end: int) -> Span:
     return Span(start=start + lead, end=start + len(line.rstrip()))
 
 
+_ACCENTS = {
+    "a": "aàáâãäåā",
+    "c": "cçć",
+    "e": "eèéêëē",
+    "i": "iìíîïī",
+    "n": "nñń",
+    "o": "oòóôõöøō",
+    "s": "sśš",
+    "u": "uùúûüū",
+    "y": "yýÿ",
+    "z": "zźżž",
+}
+
+
+def _accented(part: str) -> str:
+    """A pattern for a name word spelled in an email without accents: tomas -> Tomás."""
+    out = []
+    for i, ch in enumerate(part.lower()):
+        chars = _ACCENTS.get(ch, ch)
+        if i == 0:
+            chars = chars.upper()
+        out.append(f"[{re.escape(chars)}]" if len(chars) > 1 else re.escape(chars))
+    return "".join(out)
+
+
+def _elsewhere(text: str, c: Candidate) -> Candidate:
+    """The same name or company written again later ("represent Keystone Freight Inc.
+    in the matter"): one variable for every place."""
+    pattern = r"(?<![\w@./-])" + re.escape(c.value) + r"(?![\w@-]|\.\w)"
+    spans = list(c.spans)
+    for m in re.finditer(pattern, text):
+        s = Span(start=m.start(), end=m.end())
+        if not any(s.overlaps(o) for o in spans):
+            spans.append(s)
+    if len(spans) == len(c.spans):
+        return c
+    return c.model_copy(update={"spans": sorted(spans, key=lambda x: x.start)})
+
+
+_NOT_NAMES = frozenset(
+    [
+        "all",
+        "team",
+        "everyone",
+        "everybody",
+        "there",
+        "sir",
+        "madam",
+        "friends",
+        "folks",
+        "colleagues",
+        "customer",
+        "customers",
+        "member",
+        "members",
+        "user",
+        "users",
+        "guys",
+        "both",
+    ]
+)
+
+
+def _greeting_only(text: str, taken: list[Span]) -> list[Candidate]:
+    """ "Hi Priya," with no recipient block above it: the greeting's name."""
+    m = _GREETING.search(text)
+    if m is None:
+        return []
+    g = Span(start=m.start(1), end=m.end(1))
+    value = text[g.start : g.end]
+    if (
+        any(g.overlaps(t) for t in taken)
+        or not re.fullmatch(_NAME_WORD_U, value)
+        or not value[0].isupper()
+        or value.lower() in _NOT_NAMES
+    ):
+        return []
+    return [_candidate(text, g, "recipient_first_name", "the name in the greeting")]
+
+
 def _names_from_emails(text: str) -> list[Candidate]:
     out: list[Candidate] = []
     seen: set[str] = set()
@@ -75,7 +157,7 @@ def _names_from_emails(text: str) -> list[Candidate]:
         parts = re.split(r"[._-]", m.group(1))
         if any(len(p) < 2 for p in parts):
             continue
-        pattern = r"(?<![\w@.])" + r" ".join(p.capitalize() for p in parts) + r"(?![\w@])"
+        pattern = r"(?<![\w@.])" + r" ".join(_accented(p) for p in parts) + r"(?![\w@])"
         for n in re.finditer(pattern, text):
             if n.group(0) in seen:
                 continue
@@ -268,6 +350,10 @@ class PeopleDetector:
             if not any(sp.overlaps(t) for sp in c.spans for t in taken)
         ]
         companies = [c for c in _companies(text) if not any(sp in taken for sp in c.spans)]
-        return DetectorResult(
-            candidates=[*contacts, *_signature(text), *companies, *recipient, *_letter_date(text)]
-        )
+        signature = _signature(text)
+        # A name that signs the letter is the sender, even when its email is there too.
+        signed = {c.value for c in signature}
+        contacts = [c for c in contacts if c.value not in signed]
+        greeting = _greeting_only(text, taken)
+        named = [_elsewhere(text, c) for c in [*contacts, *signature, *companies]]
+        return DetectorResult(candidates=[*named, *recipient, *greeting, *_letter_date(text)])

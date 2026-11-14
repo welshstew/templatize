@@ -530,6 +530,12 @@ class KeyValueDetector:
             start, end = start + lead, end - trail
             value = text[start:end]
         if (dm := _WITH_DETAIL.match(value)) and len(dm.group(1)) < 60:
+            # "Business (25 seats)": a count in the detail is a value named by its unit.
+            if cm := re.fullmatch(r"(\d+) ([a-z]+)", dm.group(2)):
+                cs = start + dm.start(2)
+                KeyValueDetector._add(
+                    out, text, cm.group(2), None, cs, cs + len(cm.group(1)), "kv.pairs", 0.6
+                )
             end = start + len(dm.group(1))
             value = dm.group(1)
         if detector != "kv.pairs" and (_PAIRS_SEMI.match(value) or _PAIRS_SPACE.match(value)):
