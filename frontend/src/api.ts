@@ -36,8 +36,10 @@ export interface ResourceInfo {
 }
 
 export interface DocumentProfile {
-  format: "kubernetes" | null;
+  format: "kubernetes" | "compose" | null;
   resources: ResourceInfo[];
+  /** Docker Compose: service names (converted with Kompose for a chart). */
+  services?: string[];
   helm_suggested: boolean;
   reason: string | null;
 }
@@ -198,6 +200,10 @@ export interface ChartResponse {
   /** helm create style: values.yaml entries filled in from the manifests. */
   filled?: FilledValue[];
   ok: boolean;
+  /** "compose": converted to manifests with Kompose first. */
+  converted_from?: "compose" | null;
+  /** When converted: the manifests the chart reproduces (input, then examples). */
+  documents?: string[];
 }
 
 export interface ChartRenderResponse {
@@ -252,6 +258,7 @@ export interface Info {
   detectors: string[];
   optional_detectors: Record<string, boolean>;
   helm?: boolean;
+  kompose?: boolean;
   limits: { max_input_chars: number; max_variants: number; max_variables: number };
 }
 

@@ -23,6 +23,7 @@ from templatize import __version__
 from templatize.ansible import RoleError, RoleResult, build_role
 from templatize.build import BuildResult, build
 from templatize.bundle import make_chart_zip, make_role_zip, make_zip
+from templatize.compose import kompose_binary
 from templatize.detectors import HEURISTIC_DETECTORS, Detector, default_detectors
 from templatize.detectors import ner as ner_detector
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, check_health, review_candidates
@@ -251,6 +252,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             detectors=list(HEURISTIC_DETECTORS),
             optional_detectors={"ner": ner_health.ok(), "llm": llm_health.ok()},
             helm=helm_coverage.helm_binary() is not None,
+            kompose=kompose_binary() is not None,
             mcp_http="/mcp" if mcp_routes else None,
             limits=Limits(
                 max_input_chars=MAX_INPUT_CHARS,

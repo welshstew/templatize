@@ -92,6 +92,7 @@ def test_api_suggest_profile_absent_for_plain_text(client: TestClient) -> None:
     assert res["profile"] == {
         "format": None,
         "resources": [],
+        "services": [],
         "helm_suggested": False,
         "reason": None,
     }

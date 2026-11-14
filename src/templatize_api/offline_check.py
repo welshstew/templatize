@@ -142,7 +142,9 @@ def check_chart(base: str, text: str, variants: list[str], cands: list[Any]) -> 
     rendered = json.loads(body)
     if status != 200 or not rendered["ok"]:
         return f"/chart/render failed: {rendered.get('error')}"
-    if "".join(f["content"] for f in rendered["files"]) != text:
+    # A Docker Compose file is converted with Kompose: the chart reproduces those manifests.
+    expected = chart["documents"][0] if chart.get("converted_from") == "compose" else text
+    if "".join(f["content"] for f in rendered["files"]) != expected:
         return "/chart/render did not reproduce the input"
     status, body, headers = _post(base, "/chart/download", payload)
     if status != 200 or headers.get("x-roundtrip", headers.get("X-Roundtrip")) != "pass":

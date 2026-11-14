@@ -42,6 +42,13 @@ ARG TARGETARCH
 COPY scripts/fetch-helm.py /tmp/fetch-helm.py
 RUN python /tmp/fetch-helm.py /opt/helm "${TARGETARCH}"
 
+# Kompose, to convert Docker Compose files to Kubernetes manifests for a Helm chart.
+# Pinned and checksum-verified at build time; runs offline.
+FROM python:${PYTHON_VERSION}-slim AS kompose
+ARG TARGETARCH
+COPY scripts/fetch-kompose.py /tmp/fetch-kompose.py
+RUN python /tmp/fetch-kompose.py /opt/kompose "${TARGETARCH}"
+
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
 LABEL org.opencontainers.image.title="templatize" \
@@ -50,6 +57,7 @@ RUN useradd --system --uid 10001 --no-create-home --home-dir /nonexistent --shel
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=frontend /fe/dist /app/static
 COPY --from=helm /opt/helm/helm /usr/local/bin/helm
+COPY --from=kompose /opt/kompose/kompose /usr/local/bin/kompose
 COPY scripts/offline-fixtures.sh /usr/local/bin/offline-fixtures
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \

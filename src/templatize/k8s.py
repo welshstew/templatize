@@ -45,8 +45,10 @@ class ResourceInfo(BaseModel):
 
 
 class DocumentProfile(BaseModel):
-    format: Literal["kubernetes"] | None = None
+    format: Literal["kubernetes", "compose"] | None = None
     resources: list[ResourceInfo] = []
+    services: list[str] = []
+    """Docker Compose: the service names (converted to manifests with Kompose)."""
     helm_suggested: bool = False
     reason: str | None = None
     """Why a chart is (not) suggested, for display."""

@@ -377,6 +377,24 @@ API: `POST /chart` (same inputs as `/build`, plus `variants`, `chart_name`,
 release name or re-serialise YAML, so the exact round trip would not hold. The helm create
 style uses them, and is checked by coverage instead.
 
+### Helm charts from Docker Compose
+
+A Docker Compose file (`services:` with images) is recognised too, and the UI offers
+**Build Helm chart**. It is converted with [Kompose](https://kompose.io) (pinned and
+checksum-verified in the image, like Helm; `kompose` on PATH, or `TEMPLATIZE_KOMPOSE`,
+otherwise), and the resulting Deployments, Services and volume claims go through
+the same chart builder: your variables carry over by value (an image, a password,
+the `DATABASE_URL` parts), and an example compose file (staging) becomes
+`values-<label>.yaml`. The round trip checks the chart against Kompose's manifests.
+
+Kompose alone does not make a runnable chart from most compose files: services reach
+each other on the compose network without published ports, so a database with only
+`image:` gets no Service. Before converting, a service that others use (`@db:5432`
+in a URL, `REDIS_HOST: cache`, `depends_on`) gets an `expose:` port, from the
+reference or the image's well-known port (postgres 5432, redis 6379, ...). What was
+added, and what Kompose changed or dropped (host paths, restart policies), is listed
+above the chart. CLI: `templatize chart docker-compose.yml --accept-all -o out/`.
+
 ### Ansible roles
 
 The same template, packaged as an Ansible role that renders the document:

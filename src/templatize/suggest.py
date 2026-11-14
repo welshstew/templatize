@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel
 
+from templatize.compose import compose_profile
 from templatize.detectors import DetectionContext, Detector, default_detectors
 from templatize.detectors.k8s import split_spans
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice
@@ -50,6 +51,8 @@ def suggest(
         raw.extend(res.candidates)
         notices.extend(res.notices)
     profile = detect_profile(text)
+    if profile.format is None:
+        profile = compose_profile(text) or profile
     if profile.format == "kubernetes":
         # apiVersion/kind and mapping keys are structure, never parameters; whole
         # images are superseded by their repository/tag parts.
