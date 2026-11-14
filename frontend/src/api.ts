@@ -70,6 +70,9 @@ export interface LoopCandidate {
   map?: boolean;
   /** False when "accept all" should leave it (maps): offered only. */
   auto_accept?: boolean;
+  /** Nested lists inside each item, and (for those) items per parent item. */
+  children?: LoopCandidate[];
+  groups?: number[] | null;
   sources: string[];
   detectors: string[];
   confidence: number;
@@ -91,6 +94,8 @@ export interface LoopSpec {
   fields: { name: string; spans: Span[]; type?: string; align?: "left" | "right" | null }[];
   scalar: boolean;
   map?: boolean;
+  children?: LoopSpec[];
+  groups?: number[] | null;
   sources?: string[];
   /** Each example's list (Helm charts write it to the example's values file). */
   variant_values?: (LoopValue | null)[] | null;

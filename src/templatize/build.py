@@ -78,9 +78,19 @@ class LoopSpec(BaseModel):
     variant_values: list[LoopValues | None] | None = None
     """The list in each example document (Helm charts write it to the example's values
     file). Missing or None means "same as in the main text"."""
+    children: list[LoopSpec] = Field(default_factory=list)
+    """Nested lists inside each item (one level): their ``name`` is a key of this
+    loop's rows, and ``groups`` says how many of their items each of ours holds."""
+    groups: list[int] | None = None
+    """For a nested list: items per parent item, in order."""
 
 
-def make_loop(text: str, spec: LoopSpec) -> Loop:
+def make_loops(text: str, spec: LoopSpec) -> list[Loop]:
+    """The loop and its nested lists (flattened, children pointing at the parent)."""
+    return [make_loop(text, spec)] + [make_loop(text, c, parent=spec.name) for c in spec.children]
+
+
+def make_loop(text: str, spec: LoopSpec, parent: str | None = None) -> Loop:
     items = sorted(spec.items, key=lambda s: s.start)
     fields = spec.fields
     if spec.scalar and not fields:
@@ -104,6 +114,8 @@ def make_loop(text: str, spec: LoopSpec) -> Loop:
         fields=out,
         scalar=spec.scalar,
         map=spec.map,
+        parent=parent,
+        groups=spec.groups,
         sources=spec.sources,
         confidence=spec.confidence,
         description=spec.description,
@@ -151,7 +163,9 @@ def make_ir(text: str, specs: Sequence[VariableSpec], loops: Sequence[LoopSpec] 
                 values_path=spec.values_path,
             )
         )
-    return TemplateIR(text=text, variables=variables, loops=[make_loop(text, lp) for lp in loops])
+    return TemplateIR(
+        text=text, variables=variables, loops=[x for lp in loops for x in make_loops(text, lp)]
+    )
 
 
 def specs_from_candidates(candidates: Iterable[Candidate]) -> list[VariableSpec]:
@@ -174,6 +188,8 @@ def specs_from_candidates(candidates: Iterable[Candidate]) -> list[VariableSpec]
 def specs_from_loop_candidates(loops: Iterable[LoopCandidate]) -> list[LoopSpec]:
     return [
         LoopSpec(
+            children=specs_from_loop_candidates(lp.children),
+            groups=lp.groups,
             name=lp.name,
             item=lp.item,
             items=lp.items,

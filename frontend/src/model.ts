@@ -449,10 +449,14 @@ export function segments(map: OffsetMap, items: Item[], loops: LoopItem[] = []):
   }
   for (const loop of loops) {
     if (loop.status !== "accepted") continue;
-    for (const f of loop.fields) {
+    const all = [
+      ...loop.fields.map((f) => ({ f, name: f.name })),
+      ...loop.children.flatMap((c) => c.fields.map((f) => ({ f, name: `${c.name}[].${f.name}` }))),
+    ];
+    for (const { f, name } of all) {
       for (const s of f.spans) {
         const u = map.rangeToU16(s.start, s.end);
-        marks.push({ start: u.start, end: u.end, item: null, field: { loop, name: f.name } });
+        marks.push({ start: u.start, end: u.end, item: null, field: { loop, name } });
       }
     }
   }
@@ -518,6 +522,18 @@ export interface LoopItem {
   /** Variables and suggestions this loop replaced when it was accepted, with their
    * status then (restored if the loop is removed). */
   absorbed: { id: string; status: Status }[];
+  /** Nested lists inside each item (one level); their values are in ``rows``. */
+  children: LoopChild[];
+}
+
+export interface LoopChild {
+  name: string;
+  item: string;
+  items: Span[];
+  fields: LoopField[];
+  scalar: boolean;
+  /** Items per parent item. */
+  groups: number[];
 }
 
 /** What the template renders from: rows, or for a map loop a key -> value mapping. */
@@ -545,16 +561,40 @@ function cellOf(map: OffsetMap, f: LoopField, i: number): string {
   return raw;
 }
 
-export function rowsOf(map: OffsetMap, loop: { scalar: boolean; items: Span[]; fields: LoopField[] }): LoopRows {
+type RowSource = { scalar: boolean; items: Span[]; fields: LoopField[]; children?: LoopChild[] };
+
+function groupIndexes(groups: number[], g: number): number[] {
+  const start = groups.slice(0, g).reduce((a, b) => a + b, 0);
+  return Array.from({ length: groups[g] ?? 0 }, (_, k) => start + k);
+}
+
+export function rowsOf(map: OffsetMap, loop: RowSource, which?: number[]): LoopRows {
+  const idx = which ?? loop.items.map((_, i) => i);
   const first = loop.fields[0];
-  if (loop.scalar) return first ? loop.items.map((_, i) => cellOf(map, first, i)) : [];
-  return loop.items.map((_, i) => Object.fromEntries(loop.fields.map((f) => [f.name, cellOf(map, f, i)])));
+  if (loop.scalar && !loop.children?.length) return first ? idx.map((i) => cellOf(map, first, i)) : [];
+  return idx.map((i) => {
+    const row: Record<string, unknown> = Object.fromEntries(loop.fields.map((f) => [f.name, cellOf(map, f, i)]));
+    for (const c of loop.children ?? []) row[c.name] = rowsOf(map, c, groupIndexes(c.groups, i));
+    return row;
+  }) as LoopRows;
+}
+
+function childFrom(c: LoopCandidate): LoopChild {
+  return {
+    name: c.name,
+    item: c.item,
+    items: c.items,
+    fields: c.fields.map((f) => ({ name: f.name, type: f.type, spans: f.spans, align: f.align ?? null })),
+    scalar: c.scalar,
+    groups: c.groups ?? [],
+  };
 }
 
 export function loopsFromCandidates(cands: LoopCandidate[], map: OffsetMap): LoopItem[] {
   return cands.map((c) => {
     const fields = c.fields.map((f) => ({ name: f.name, type: f.type, spans: f.spans, align: f.align ?? null }));
-    const rows = rowsOf(map, { scalar: c.scalar, items: c.items, fields });
+    const children = (c.children ?? []).map(childFrom);
+    const rows = rowsOf(map, { scalar: c.scalar, items: c.items, fields, children });
     return {
       id: c.id,
       name: c.name,
@@ -571,6 +611,7 @@ export function loopsFromCandidates(cands: LoopCandidate[], map: OffsetMap): Loo
       rows,
       previewRows: rows,
       absorbed: [],
+      children,
     };
   });
 }
@@ -600,7 +641,10 @@ export function fitsLoop(spans: Span[], loop: LoopItem): boolean {
   if (inside.length !== loop.items.length) return false;
   let fields = fieldIndexes.get(loop);
   if (!fields) {
-    fields = new SpanIndex(loop.fields.flatMap((f) => f.spans));
+    fields = new SpanIndex([
+      ...loop.fields.flatMap((f) => f.spans),
+      ...loop.children.flatMap((c) => c.fields.flatMap((f) => f.spans)),
+    ]);
     fieldIndexes.set(loop, fields);
   }
   const offsets = new Set<string>();
@@ -716,6 +760,18 @@ export function loopSpecsFor(loops: LoopItem[]): LoopSpec[] {
       fields: l.fields.map((f) => ({ name: f.name, spans: f.spans, type: f.type, ...(f.align ? { align: f.align } : {}) })),
       scalar: l.scalar,
       ...(l.map ? { map: true } : {}),
+      ...(l.children.length
+        ? {
+            children: l.children.map((c) => ({
+              name: c.name,
+              item: c.item,
+              items: c.items,
+              fields: c.fields.map((f) => ({ name: f.name, spans: f.spans, type: f.type, ...(f.align ? { align: f.align } : {}) })),
+              scalar: c.scalar,
+              groups: c.groups,
+            })),
+          }
+        : {}),
       sources: l.sources,
       ...(l.variantValues ? { variant_values: l.variantValues } : {}),
     }));

@@ -15,8 +15,9 @@ import hashlib
 import itertools
 import keyword
 import re
+from collections.abc import Iterable
 from enum import StrEnum
-from typing import Annotated, Final, Literal
+from typing import Annotated, Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -184,7 +185,8 @@ class LoopFieldCandidate(BaseModel):
     """A padded table column (see :class:`LoopField`)."""
 
 
-LoopValues = list[dict[str, str]] | list[str] | dict[str, str]
+LoopValues = list[dict[str, Any]] | list[str] | dict[str, str]
+"""A loop's values: rows (with nested lists inside), strings, or a mapping."""
 
 
 class LoopCandidate(BaseModel):
@@ -194,10 +196,15 @@ class LoopCandidate(BaseModel):
     name: str
     item: str
     items: list[Span] = Field(min_length=1)
-    fields: list[LoopFieldCandidate] = Field(min_length=1)
+    fields: list[LoopFieldCandidate] = Field(default_factory=list)
+    """Empty only when the items differ just in their nested lists."""
     scalar: bool = False
     map: bool = False
     """Key/value entries (see :class:`Loop`)."""
+    children: list[LoopCandidate] = []
+    """Nested lists inside each item (one level)."""
+    groups: list[int] | None = None
+    """For a nested list: items per parent item."""
     auto_accept: bool = True
     """False for loops that change the shape of the output a lot (maps): offered,
     but not taken by "accept all"."""
@@ -290,7 +297,8 @@ class Loop(BaseModel):
     name: str
     item: str
     items: list[Span] = Field(min_length=1, max_length=MAX_LOOP_ITEMS)
-    fields: list[LoopField] = Field(min_length=1)
+    fields: list[LoopField] = Field(default_factory=list)
+    """Empty only for a loop whose items differ just in their nested lists."""
     scalar: bool = False
     map: bool = False
     """Items are key/value entries (``LABEL: value``): two fields, the key then the
@@ -300,13 +308,36 @@ class Loop(BaseModel):
     confidence: float | None = None
     description: str | None = None
     values_path: ValuesPath | None = None
+    parent: str | None = None
+    """Nested list: the loop whose items contain this one; ``name`` is then a key of
+    the parent's rows (``server.ports``) rather than a template variable."""
+    groups: list[int] | None = None
+    """Nested list: how many of ``items`` belong to each parent item, in order (>= 1)."""
 
     @property
     def region(self) -> Span:
         return Span(start=self.items[0].start, end=self.items[-1].end)
 
+    def group_ranges(self) -> list[range]:
+        """Item indexes per parent item (one range covering all items if not nested)."""
+        if self.groups is None:
+            return [range(len(self.items))]
+        out, pos = [], 0
+        for n in self.groups:
+            out.append(range(pos, pos + n))
+            pos += n
+        return out
+
+    def group_region(self, g: int) -> Span:
+        r = self.group_ranges()[g]
+        return Span(start=self.items[r[0]].start, end=self.items[r[-1]].end)
+
     def separator(self, text: str) -> str:
-        return text[self.items[0].end : self.items[1].start] if len(self.items) > 1 else ""
+        """The text between consecutive items (within one parent item, if nested)."""
+        for r in self.group_ranges():
+            if len(r) > 1:
+                return text[self.items[r[0]].end : self.items[r[1]].start]
+        return ""
 
     def rows_of(self, text: str) -> list[dict[str, str]] | list[str]:
         """One dict per item (or one string, if scalar); a map's entries as
@@ -346,14 +377,34 @@ class TemplateIR(BaseModel):
         occ.sort(key=lambda p: p[0].start)
         return occ
 
-    def values(self) -> dict[str, str | list[dict[str, str]] | list[str] | dict[str, str]]:
+    def values(self) -> dict[str, Any]:
         """Render context that reproduces the text: variables and loop lists."""
-        out: dict[str, str | list[dict[str, str]] | list[str] | dict[str, str]] = {
-            v.name: v.value for v in self.variables
-        }
+        out: dict[str, Any] = {v.name: v.value for v in self.variables}
         for lp in self.loops:
-            out[lp.name] = lp.values_of(self.text)
+            if lp.parent is None:
+                out[lp.name] = self.loop_value(lp)
         return out
+
+    def children(self, lp: Loop) -> list[Loop]:
+        return [c for c in self.loops if c.parent == lp.name]
+
+    def loop_rows(self, lp: Loop, which: Iterable[int] | None = None) -> list[Any]:
+        """Rows of ``lp`` (all items, or ``which``), nested lists included as fields."""
+        idx = list(range(len(lp.items)) if which is None else which)
+        kids = self.children(lp)
+        if lp.scalar and not kids:
+            return [lp.fields[0].value_at(self.text, i) for i in idx]
+        rows: list[Any] = []
+        for i in idx:
+            row: dict[str, Any] = {f.name: f.value_at(self.text, i) for f in lp.fields}
+            for c in kids:
+                row[c.name] = self.loop_rows(c, c.group_ranges()[i])
+            rows.append(row)
+        return rows
+
+    def loop_value(self, lp: Loop) -> Any:
+        """What ``lp`` renders from: its rows, or a mapping for a map loop."""
+        return lp.values_of(self.text) if lp.map else self.loop_rows(lp)
 
 
 def validate_name(name: str) -> None:
@@ -411,14 +462,46 @@ def validate_ir(ir: TemplateIR) -> None:
 
 def _validate_loops(ir: TemplateIR, names: set[str], var_spans: list[Span]) -> None:
     regions: list[tuple[Span, str]] = []
+    by_name = {lp.name: lp for lp in ir.loops if lp.parent is None}
+    for lp in ir.loops:  # nested lists' groups first: parents' shapes depend on them
+        if lp.parent is not None and lp.groups is not None and sum(lp.groups) != len(lp.items):
+            raise IRValidationError(f"nested loop {lp.name!r}: groups do not add up")
     for lp in ir.loops:
-        for n in (lp.name, lp.item):
+        parent = by_name.get(lp.parent) if lp.parent is not None else None
+        if lp.parent is not None:
+            if parent is None or parent.parent is not None:
+                raise IRValidationError(
+                    f"nested loop {lp.name!r}: its parent {lp.parent!r} must be a top-level loop"
+                )
+            if not VALUES_KEY_RE.match(lp.name) or lp.name in {f.name for f in parent.fields}:
+                raise IRValidationError(f"invalid nested list name {lp.name!r} in {parent.name!r}")
+            groups = lp.groups or []
+            if len(groups) != len(parent.items) or any(n < 1 for n in groups):
+                raise IRValidationError(
+                    f"nested loop {lp.name!r} needs >= 1 item in each of the "
+                    f"{len(parent.items)} items of {parent.name!r}"
+                )
+            if sum(groups) != len(lp.items):
+                raise IRValidationError(f"nested loop {lp.name!r}: groups do not add up")
+            for g, r in enumerate(lp.group_ranges()):
+                if not all(parent.items[g].contains(lp.items[i]) for i in r):
+                    raise IRValidationError(
+                        f"nested loop {lp.name!r}: items must lie in their {parent.item!r}"
+                    )
+            to_check: tuple[str, ...] = (lp.item,)
+        else:
+            if lp.groups is not None:
+                raise IRValidationError(f"loop {lp.name!r}: groups need a parent loop")
+            to_check = (lp.name, lp.item)
+        for n in to_check:
             validate_name(n)
             if n in names:
                 raise IRValidationError(f"loop name {n!r} is already used")
             names.add(n)
         if lp.values_path is not None:
             validate_values_path(lp.values_path)
+        if not lp.fields and not ir.children(lp):
+            raise IRValidationError(f"loop {lp.name!r} has no fields")
         if lp.scalar and len(lp.fields) != 1:
             raise IRValidationError(f"scalar loop {lp.name!r} must have exactly one field")
         if lp.map:
@@ -436,7 +519,11 @@ def _validate_loops(ir: TemplateIR, names: set[str], var_spans: list[Span]) -> N
                 raise IRValidationError(f"items of loop {lp.name!r} overlap or are out of order")
         if lp.items[-1].end > len(ir.text):
             raise IRValidationError(f"loop {lp.name!r} is outside the text")
-        seps = {ir.text[a.end : b.start] for a, b in itertools.pairwise(lp.items)}
+        seps = {
+            ir.text[lp.items[a].end : lp.items[b].start]
+            for r in lp.group_ranges()
+            for a, b in itertools.pairwise(r)
+        }
         if len(seps) > 1:
             raise IRValidationError(
                 f"loop {lp.name!r}: the text between items differs ({sorted(seps)!r})"
@@ -466,8 +553,11 @@ def _validate_loops(ir: TemplateIR, names: set[str], var_spans: list[Span]) -> N
                 raise IRValidationError(
                     f"scalar loop {lp.name!r}: the field must cover each whole item"
                 )
+        group_regions = [lp.group_region(g) for g in range(len(lp.group_ranges()))]
         for sp in var_spans:
-            if lp.region.overlaps(sp) and not any(it.contains(sp) for it in lp.items):
+            if any(r.overlaps(sp) for r in group_regions) and not any(
+                it.contains(sp) for it in lp.items
+            ):
                 raise IRValidationError(
                     f"a variable at {sp.start}-{sp.end} crosses the items of loop {lp.name!r}"
                 )
@@ -476,7 +566,8 @@ def _validate_loops(ir: TemplateIR, names: set[str], var_spans: list[Span]) -> N
             raise IRValidationError(
                 f"items of loop {lp.name!r} do not have the same shape outside their fields"
             )
-        regions.append((lp.region, lp.name))
+        if lp.parent is None:
+            regions.append((lp.region, lp.name))
     regions.sort(key=lambda p: p[0].start)
     for (a, an), (b, bn) in itertools.pairwise(regions):
         if a.overlaps(b):
@@ -487,8 +578,14 @@ def _skeleton(ir: TemplateIR, lp: Loop, i: int) -> tuple[tuple[str, ...], tuple[
     """Item ``i`` as (literal pieces, hole names): equal for every item of a valid loop."""
     item = lp.items[i]
     holes: list[tuple[Span, str]] = [(f.spans[i], "." + f.name) for f in lp.fields]
+    nested = [(c.group_region(i), "." + c.name) for c in ir.children(lp)]
+    holes += nested
     for v in ir.variables:
-        holes += [(sp, v.name) for sp in v.spans if item.contains(sp)]
+        holes += [
+            (sp, v.name)
+            for sp in v.spans
+            if item.contains(sp) and not any(r.contains(sp) for r, _ in nested)
+        ]
     holes.sort(key=lambda h: h[0].start)
     for (a, an), (b, bn) in itertools.pairwise(holes):
         if a.overlaps(b):

@@ -629,6 +629,14 @@ take any number of items in the preview. Accepting a loop sets aside the suggest
 on its fields (they come back if you remove the loop); variables that sit at the same
 place in every item, such as a tenant id in every row, still work inside it.
 
+**Nested loops.** A YAML list of mappings with the same keys, where some keys hold a
+list in every item (`servers[].ports[]`, a Deployment's `containers[].ports[]`), is
+one loop with nested lists: `{% for server in servers %}...{% for port in
+server.ports %}...{% endfor %}{% endfor %}`, Helm `{{ range $j, $port :=
+$server.ports }}`, and each row of the values holds its own list, of any length. One
+level of nesting; inner items are scalars or flat mappings. In the UI a nested list
+is a read-only column of the list's table.
+
 **Table loops.** Rows of a table with aligned columns (an invoice's line items, a
 hosts list) are a loop whose fields are padded slots: a column whose cells share a
 start is left-aligned, one whose cells share an end (or numbers of one width) is
