@@ -81,8 +81,10 @@ offer:
   reject: []
 
 meeting:
-  want: [Amira Haddad, https://meet.example.com/j/8841-2207-553]
-  reject: ["30", Amira, Haddad]
+  # The date and start time are in the subject line and the body: one variable each.
+  want: [Amira Haddad, https://meet.example.com/j/8841-2207-553, Thursday 9 July, "14:00", "15:30"]
+  reject: ["30", Amira, Haddad, Thursday, July]
+  occurrences: {Thursday 9 July: 2, "14:00": 2}
 
 release:
   want: []

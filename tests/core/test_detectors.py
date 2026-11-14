@@ -45,6 +45,12 @@ def values(cands: list[Candidate], vtype: VarType | None = None) -> list[str]:
         ("due 31/12/2024", VarType.DATE, "31/12/2024"),
         ("on 3 March 2025", VarType.DATE, "3 March 2025"),
         ("on March 3, 2025", VarType.DATE, "March 3, 2025"),
+        ("on Thursday 9 July from", VarType.DATE, "Thursday 9 July"),
+        ("due 9 July.", VarType.DATE, "9 July"),
+        ("Thu, July 9, 2026 at", VarType.DATE, "Thu, July 9, 2026"),
+        ("at 14:00 BST", VarType.TIME, "14:00"),
+        ("at 9:30 a.m. sharp", VarType.TIME, "9:30 a.m."),
+        ("at 7:05pm.", VarType.TIME, "7:05pm"),
         ("release v1.2.3-rc.1+b5", VarType.SEMVER, "v1.2.3-rc.1+b5"),
         ("listen 8080;", VarType.PORT, "8080"),
         ("api.example.com:8443/x", VarType.PORT, "8443"),
@@ -69,6 +75,10 @@ def test_regex_positive(text: str, vtype: VarType, expected: str) -> None:
         ("file nginx.conf", VarType.HOSTNAME),
         ("version 1.2.3.4", VarType.SEMVER),
         ("single /tmp", VarType.PATH),
+        ("in May 2026", VarType.DATE),
+        ("2 Marbles", VarType.DATE),
+        ("ports: 8080:80 and 1.2:30", VarType.TIME),
+        ('ports:\n  - "22:22"\n  - 21:21\n', VarType.TIME),
     ],
 )
 def test_regex_negative(text: str, vtype: VarType) -> None:
@@ -240,6 +250,21 @@ def repetition(text: str) -> dict[str, int]:
 def test_port_after_host_is_not_a_clock_time() -> None:
     text = "from 14:00 to 15:30, db.example.com:5432 and 127.0.0.1:6379, 8080:80"
     assert values(regex(text), VarType.PORT) == ["5432", "6379", "80"]
+
+
+def test_date_and_time_ranges_name_their_ends() -> None:
+    text = "from 14:00 to 15:30, 9 July - 12 July, between 9:00 and 10:00; 8:00, 8:30"
+    names = {c.value: c.name for c in regex(text) if c.type in (VarType.DATE, VarType.TIME)}
+    assert names == {
+        "14:00": "start_time",
+        "15:30": "end_time",
+        "9 July": "start_date",
+        "12 July": "end_date",
+        "9:00": "start_time",
+        "10:00": "end_time",
+        "8:00": "time",
+        "8:30": "time",
+    }
 
 
 def test_repetition_skips_line_start_keywords() -> None:

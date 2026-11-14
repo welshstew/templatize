@@ -30,6 +30,7 @@ TYPE_NAMES: dict[VarType, str] = {
     VarType.UUID: "uuid",
     VarType.DATE: "date",
     VarType.DATETIME: "timestamp",
+    VarType.TIME: "time",
     VarType.SEMVER: "version",
     VarType.PATH: "path",
     VarType.MAC: "mac_address",
@@ -93,10 +94,22 @@ _MONTH = (
     r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|"
     r"Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
 )
-_TEXT_DATE = re.compile(
-    rf"^(?:\d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTH}\.?,?\s+\d{{4}}"
-    rf"|{_MONTH}\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}})$"
+_WEEKDAY = (
+    r"(?:Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?|Thu(?:r(?:s(?:day)?)?)?|"
+    r"Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)"
 )
+_DAY = r"\d{1,2}(?:st|nd|rd|th)?"
+# "9 July", "Thursday 9 July", "2 October 2026", "Thu, July 9, 2026": a day and a
+# month name, with an optional weekday before and year after.
+TEXT_DATE = (
+    rf"(?:{_WEEKDAY}\.?,?[ \t]+)?"
+    rf"(?:{_DAY}[ \t]+{_MONTH}(?:\.(?=,?\s+\d{{4}}))?|{_MONTH}\.?[ \t]+{_DAY}(?![\d:]))"
+    r"(?:,?\s+\d{4})?"
+)
+# 24-hour or 12-hour clock times: "14:00", "9:30 am", "23:59:59".
+TIME = r"(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:[ ]?(?:[AaPp]\.[Mm]\.|[AaPp][Mm])(?!\w))?"
+_TEXT_DATE = re.compile(rf"^{TEXT_DATE}$")
+_TIME = re.compile(rf"^{TIME}$")
 _NUM_DATE = re.compile(r"^\d{1,2}([/.-])\d{1,2}\1\d{4}$")
 _SEMVER = re.compile(r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 _PATH = re.compile(r"^(?:~|\.{1,2})?/[^\s]*$|^[A-Za-z]:\\[^\s]*$")
@@ -145,6 +158,8 @@ def infer_type(value: str) -> VarType:
         return VarType.DATE
     if _ISO_DT.match(v):
         return VarType.DATETIME
+    if _TIME.match(v):
+        return VarType.TIME
     if _SEMVER.match(v):
         return VarType.SEMVER
     if _PATH.match(v):

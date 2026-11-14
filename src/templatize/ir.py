@@ -110,6 +110,7 @@ class VarType(StrEnum):
     UUID = "uuid"
     DATE = "date"
     DATETIME = "datetime"
+    TIME = "time"
     SEMVER = "semver"
     PATH = "path"
     MAC = "mac"
