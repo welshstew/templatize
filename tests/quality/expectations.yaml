@@ -3,6 +3,7 @@
 #   want:   values that must be suggested, each as one whole candidate value
 #   reject: values that must not be suggested (format keywords, split names,
 #           times mistaken for ports, block openers, ...)
+#   occurrences: value -> how many places its candidate covers
 #   loops:  the repeated blocks that must be suggested, name -> number of items;
 #           any other loop fails the test (default: none)
 #
@@ -22,8 +23,11 @@ k8s-stack:
   reject: [ConfigMap, Ingress, networking.k8s.io/v1]
 
 compose:
-  want: [ghcr.io/acme/storefront:4.2.1, "postgres://shop:s3cretPass@db:5432/storefront", shop.example.com, s3cretPass, postgres:16.4]
-  reject: [services]
+  # DATABASE_URL is built from POSTGRES_USER/PASSWORD/DB: suggested as those parts.
+  want: [ghcr.io/acme/storefront:4.2.1, shop.example.com, s3cretPass, postgres:16.4]
+  reject: [services, "postgres://shop:s3cretPass@db:5432/storefront"]
+  # ...and its host (also the db service name and depends_on entry) and port.
+  occurrences: {shop: 2, s3cretPass: 2, storefront: 2, db: 3, "5432": 1}
 
 dotenv:
   want: [production, https://app.example.com, db-prod-01.internal.example.com, orders, sk_live_EXAMPLE0000000000000000]

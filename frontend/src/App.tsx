@@ -21,6 +21,7 @@ import { Sidebar } from "./components/Sidebar.tsx";
 import {
   acceptLoop,
   accepted,
+  applyPrefix,
   addManual,
   applyReview,
   type Item,
@@ -196,6 +197,16 @@ export function App() {
   useDebouncedEffect(
     (signal) => {
       if (mode !== "review" || output === "helm") return;
+      if (specs.length > limits.max_variables) {
+        setBuildError(
+          `${specs.length.toLocaleString()} variables is more than the ${limits.max_variables.toLocaleString()} a template can have. ` +
+            (loops.some((l) => l.status !== "rejected")
+              ? "Accept the suggested lists first: a list replaces one variable per row."
+              : "Remove some, or keep repeated values as one variable."),
+        );
+        setBuild(null);
+        return;
+      }
       setBuildPending(true);
       api.build(text, specs, loopSpecs, signal).then(
         (b) => {
@@ -267,6 +278,11 @@ export function App() {
     const r = status === "accepted" ? acceptLoop(items, loops, id) : releaseLoop(items, loops, id, status);
     setItems(r.items);
     setLoops(r.loops);
+  };
+  const onPrefix = (ids: string[], prefix: string): string | null => {
+    const r = applyPrefix(items, new Set(ids), prefix, loops);
+    if (!r.error) setItems(r.items);
+    return r.error;
   };
   const onLoopUpdate = useCallback((id: string, patch: Partial<LoopItem>) => {
     setLoops((cur) => updateLoop(cur, id, patch));
@@ -491,6 +507,7 @@ export function App() {
             onStatus={onStatus}
             onUpdate={onUpdate}
             loops={loops}
+            onPrefix={onPrefix}
             onLoopStatus={onLoopStatus}
             onLoopUpdate={onLoopUpdate}
             helm={helm}

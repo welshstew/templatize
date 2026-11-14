@@ -2,7 +2,15 @@ import { useState } from "preact/hooks";
 
 import type { LlmStatus } from "../App.tsx";
 import type { Notice } from "../api.ts";
-import { canAccept, type Item, type LoopItem, parseValuesPath, VAR_TYPES, validateName } from "../model.ts";
+import {
+  canAccept,
+  commonPrefix,
+  type Item,
+  type LoopItem,
+  parseValuesPath,
+  VAR_TYPES,
+  validateName,
+} from "../model.ts";
 import { LoopCard } from "./LoopCard.tsx";
 
 interface Props {
@@ -14,6 +22,8 @@ interface Props {
   onStatus: (ids: string[], status: Item["status"]) => void;
   onUpdate: (id: string, patch: Partial<Item>) => void;
   loops?: LoopItem[];
+  /** Rename the given variables with a common prefix; returns an error or null. */
+  onPrefix?: (ids: string[], prefix: string) => string | null;
   onLoopStatus?: (id: string, status: LoopItem["status"]) => void;
   onLoopUpdate?: (id: string, patch: Partial<LoopItem>) => void;
   /** Helm chart output: show and edit each variable's values.yaml path. */
@@ -57,6 +67,21 @@ function ValuesPathField({ item, onUpdate }: { item: Item; onUpdate: Props["onUp
   );
 }
 
+/** Rows drawn per list before "show all": thousands of cards make the page sluggish. */
+const SHOWN = 200;
+
+function ShowAll({ total, shown, onShow }: { total: number; shown: number; onShow: () => void }) {
+  if (total <= shown) return null;
+  return (
+    <p class="hint">
+      Showing the first {shown} of {total}.{" "}
+      <button class="link" onClick={onShow}>
+        Show all
+      </button>
+    </p>
+  );
+}
+
 const SOURCE_LABEL: Record<string, string> = {
   diff: "examples",
   key_value: "key",
@@ -84,11 +109,67 @@ function Sources({ item }: { item: Item }) {
   );
 }
 
-function VariableRow({ item, items, loops, selected, onSelect, onStatus, onUpdate, helm }: {
+function PrefixBar({
+  names,
+  onApply,
+  onClear,
+}: {
+  names: string[];
+  onApply: (prefix: string) => string | null;
+  onClear: () => void;
+}) {
+  const shared = commonPrefix(names);
+  const [draft, setDraft] = useState(shared);
+  const [error, setError] = useState<string | null>(null);
+  const apply = () => setError(onApply(draft));
+  return (
+    <div class="prefix-bar" role="group" aria-label="Rename selected variables">
+      <span>
+        {names.length} selected
+      </span>
+      <label>
+        prefix
+        <input
+          value={draft}
+          placeholder="db_"
+          spellcheck={false}
+          aria-label="Prefix for the selected variables"
+          onInput={(e) => {
+            setDraft((e.target as HTMLInputElement).value);
+            setError(null);
+          }}
+          onKeyDown={(e) => e.key === "Enter" && apply()}
+        />
+      </label>
+      <button class="primary" onClick={apply}>
+        Apply
+      </button>
+      <button class="link" onClick={onClear}>
+        clear
+      </button>
+      <div class="prefix-hint muted">
+        {error ? (
+          <span class="field-error">{error}</span>
+        ) : shared ? (
+          <>
+            replaces <code>{shared}</code>
+            {draft.trim() ? null : " (empty removes it)"}
+          </>
+        ) : (
+          "added in front of each name"
+        )}
+      </div>
+    </div>
+  );
+}
+
+function VariableRow({ item, items, loops, selected, checked, onCheck, onSelect, onStatus, onUpdate, helm }: {
   item: Item;
   items: Item[];
   loops: LoopItem[];
   selected: boolean;
+  checked: boolean;
+  onCheck: (on: boolean) => void;
 } & Pick<Props, "onSelect" | "onStatus" | "onUpdate" | "helm">) {
   const [draft, setDraft] = useState(item.name);
   const error = draft === item.name ? null : validateName(draft, items, item.id, loops);
@@ -97,8 +178,18 @@ function VariableRow({ item, items, loops, selected, onSelect, onStatus, onUpdat
     else if (error) setDraft(item.name);
   };
   return (
-    <li class={`var ${selected ? "selected" : ""}`} onClick={() => onSelect(item.id)}>
+    <li class={`var ${selected ? "selected" : ""} ${checked ? "checked" : ""}`} onClick={() => onSelect(item.id)}>
       <div class="row">
+        <input
+          type="checkbox"
+          class="pick"
+          checked={checked}
+          aria-label={`Select ${item.name}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCheck((e.target as HTMLInputElement).checked);
+          }}
+        />
         <input
           class="name"
           value={draft}
@@ -255,12 +346,16 @@ export function Sidebar({
   onStatus,
   onUpdate,
   loops = [],
+  onPrefix = () => null,
   onLoopStatus = () => undefined,
   onLoopUpdate = () => undefined,
   helm = false,
   chartStyle = "exact",
 }: Props) {
   const [showRejected, setShowRejected] = useState(false);
+  const [allVars, setAllVars] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [allSugs, setAllSugs] = useState(false);
   const liveLoops = loops
     .filter((l) => l.status !== "rejected")
     .sort((a, b) => (a.status === b.status ? (b.confidence ?? 0) - (a.confidence ?? 0) : a.status === "accepted" ? -1 : 1));
@@ -270,6 +365,7 @@ export function Sidebar({
     .filter((i) => i.status === "suggested")
     .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
   const rej = items.filter((i) => i.status === "rejected");
+  const livePicked = acc.filter((i) => picked.has(i.id)).map((i) => i.id);
 
   return (
     <aside class="sidebar" aria-label="Variables and suggestions">
@@ -306,16 +402,39 @@ export function Sidebar({
         <h2>
           Variables <span class="count">{acc.length}</span>
         </h2>
+        {livePicked.length > 0 ? (
+          <PrefixBar
+            key={livePicked.join(",")}
+            names={acc.filter((i) => picked.has(i.id)).map((i) => i.name)}
+            onApply={(prefix) => {
+              const err = onPrefix(livePicked, prefix);
+              if (!err) setPicked(new Set());
+              return err;
+            }}
+            onClear={() => setPicked(new Set())}
+          />
+        ) : acc.length > 1 ? (
+          <p class="hint">Tick variables to give them a common prefix (db_host, db_port…).</p>
+        ) : null}
         {acc.length === 0 ? (
           <p class="hint">Accept suggestions below, or select any text in the document to make it a variable.</p>
         ) : (
           <ul class="list">
-            {acc.map((i) => (
+            {(allVars ? acc : acc.slice(0, SHOWN)).map((i) => (
               <VariableRow
-                key={i.id}
+                key={`${i.id}:${i.name}`}
                 item={i}
                 items={items}
                 loops={loops}
+                checked={picked.has(i.id)}
+                onCheck={(on) =>
+                  setPicked((cur) => {
+                    const next = new Set(cur);
+                    if (on) next.add(i.id);
+                    else next.delete(i.id);
+                    return next;
+                  })
+                }
                 selected={i.id === selectedId}
                 onSelect={onSelect}
                 onStatus={onStatus}
@@ -325,6 +444,7 @@ export function Sidebar({
             ))}
           </ul>
         )}
+        {!allVars ? <ShowAll total={acc.length} shown={SHOWN} onShow={() => setAllVars(true)} /> : null}
       </section>
 
       <section>
@@ -339,7 +459,7 @@ export function Sidebar({
         </h2>
         {sug.length === 0 ? <p class="hint">No pending suggestions.</p> : null}
         <ul class="list">
-          {sug.map((i) => (
+          {(allSugs ? sug : sug.slice(0, SHOWN)).map((i) => (
             <SuggestionRow
               key={i.id}
               item={i}
@@ -352,6 +472,7 @@ export function Sidebar({
             />
           ))}
         </ul>
+        {!allSugs ? <ShowAll total={sug.length} shown={SHOWN} onShow={() => setAllSugs(true)} /> : null}
       </section>
 
       {notices.length > 0 ? (
