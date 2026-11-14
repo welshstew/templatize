@@ -14,10 +14,12 @@ pair of words alone is as often a product, a place or a heading.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 from templatize.detectors.address import address_roles, find_addresses
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span, VarType
+from templatize.naming import infer_type
 
 CONFIDENCE = 0.7
 
@@ -37,13 +39,13 @@ _COMPANY = re.compile(
 )
 
 
-def _candidate(text: str, s: Span, name: str, reason: str) -> Candidate:
+def _candidate(text: str, s: Span, name: str, reason: str, also: Sequence[Span] = ()) -> Candidate:
     return Candidate(
         name=name,
         name_origin="context",
         type=VarType.STRING,
         value=text[s.start : s.end],
-        spans=[s],
+        spans=[s, *also],
         sources=[Source.REGEX],
         detectors=["people"],
         confidence=CONFIDENCE,
@@ -134,11 +136,138 @@ def _companies(text: str) -> list[Candidate]:
     return out
 
 
+_GREETING = re.compile(
+    r"^[ \t]*(?:Dear|Hi|Hello)[ \t]+([^,\r\n]+?)[ \t]*[,:!]?[ \t]*\r?$", re.MULTILINE
+)
+_HONORIFIC = re.compile(r"^(?:(?:Mr|Mrs|Ms|Miss|Mx|Dr|Prof|Sir|Dame)\.?[ ]+)")
+_JOB_WORDS = re.compile(
+    r"\b(?:Manager|Director|Head|Officer|Lead|Engineer|Partner|Chief|President|Consultant|"
+    r"Coordinator|Specialist|Administrator|Analyst|Executive|Secretary|Assistant|Advisor|"
+    r"Adviser|Accountant|Buyer|Controller|Supervisor|Founder|Owner|Architect|Principal)\b"
+)
+_CONTACT_LINE = re.compile(r"@|\+?\d[\d ()-]{6,}$|^\d|^(?:Unit|Suite|Flat|PO Box)\b")
+
+
+def _paragraph_before(text: str, pos: int) -> list[Span]:
+    """The lines of the block of text ending before the blank line(s) above ``pos``."""
+    lines: list[Span] = []
+    end = pos
+    seen_text = False
+    while end > 0:
+        start, line_end = _line_at(text, end - 1)
+        if text[start:line_end].strip():
+            seen_text = True
+            lines.insert(0, _stripped(text, start, line_end))
+        elif seen_text:
+            break
+        end = start
+        if end == 0 or len(lines) > 8:
+            break
+    return lines
+
+
+def _recipient(text: str) -> list[Candidate]:
+    """The block above "Dear ...,": the recipient's name (split into first and last name
+    when the greeting uses one of them), job title and company."""
+    m = _GREETING.search(text)
+    if m is None:
+        return []
+    block = _paragraph_before(text, m.start())
+    if not block:
+        return []
+    first = block[0]
+    line = text[first.start : first.end]
+    hon = _HONORIFIC.match(line)
+    name = Span(start=first.start + (hon.end() if hon else 0), end=first.end)
+    full = text[name.start : name.end]
+    if not _FULL_NAME.match(full):
+        return []
+    greeting = Span(start=m.start(1), end=m.end(1))
+    g = text[greeting.start : greeting.end]
+    g_hon = _HONORIFIC.match(g)
+    if g_hon:
+        greeting = Span(start=greeting.start + g_hon.end(), end=greeting.end)
+        g = g[g_hon.end() :]
+    out: list[Candidate] = []
+    words = full.split(" ")
+    if g not in (full, words[0], words[-1]):
+        return []  # "Dear Sir or Madam" under "Accounts Payable": not a person's name
+    if g == full or len(words) != 2:
+        also = [greeting] if g == full else []
+        out.append(_candidate(text, name, "recipient_name", "the letter's recipient", also))
+    else:
+        cut = name.start + len(words[0])
+        first_sp = Span(start=name.start, end=cut)
+        last_sp = Span(start=cut + 1, end=name.end)
+        out.append(
+            _candidate(
+                text,
+                first_sp,
+                "recipient_first_name",
+                "the recipient's first name",
+                [greeting] if g == words[0] else [],
+            )
+        )
+        out.append(
+            _candidate(
+                text,
+                last_sp,
+                "recipient_last_name",
+                "the recipient's last name",
+                [greeting] if g == words[1] else [],
+            )
+        )
+    # Job title and company: the lines after the name, up to the address or contact lines.
+    rest: list[Span] = []
+    addresses = find_addresses(text)
+    for sp in block[1:]:
+        value = text[sp.start : sp.end]
+        if _CONTACT_LINE.search(value) or any(a.start <= sp.start < a.end for a in addresses):
+            break
+        rest.append(sp)
+    if len(rest) > 2:
+        return out
+    roles: list[str] = []
+    if len(rest) == 2:
+        roles = ["title", "company"]
+    elif len(rest) == 1:
+        roles = ["title" if _JOB_WORDS.search(text[rest[0].start : rest[0].end]) else "company"]
+    for sp, role in zip(rest, roles, strict=True):
+        if role == "title" and not _TITLE.match(text[sp.start : sp.end]):
+            continue
+        out.append(_candidate(text, sp, f"recipient_{role}", f"the recipient's {role}"))
+    return out
+
+
+def _letter_date(text: str) -> list[Candidate]:
+    """A date alone on its line above "Dear ...," is the letter's date."""
+    m = _GREETING.search(text)
+    if m is None:
+        return []
+    for line in re.finditer(r"[^\r\n]+", text[: m.start()]):
+        value = line.group(0).strip()
+        if value and infer_type(value) in (VarType.DATE, VarType.DATETIME):
+            start = line.start() + line.group(0).index(value)
+            span = Span(start=start, end=start + len(value))
+            c = _candidate(text, span, "letter_date", "the date of the letter")
+            return [c.model_copy(update={"type": infer_type(value)})]
+    return []
+
+
 class PeopleDetector:
     name = "people"
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
         text = ctx.text
+        recipient = _recipient(text)
+        taken = [sp for c in recipient for sp in c.spans]
+        # The recipient's name also matching their email is the recipient, not a contact.
+        contacts = [
+            c
+            for c in _names_from_emails(text)
+            if not any(sp.overlaps(t) for sp in c.spans for t in taken)
+        ]
+        companies = [c for c in _companies(text) if not any(sp in taken for sp in c.spans)]
         return DetectorResult(
-            candidates=[*_names_from_emails(text), *_signature(text), *_companies(text)]
+            candidates=[*contacts, *_signature(text), *companies, *recipient, *_letter_date(text)]
         )
