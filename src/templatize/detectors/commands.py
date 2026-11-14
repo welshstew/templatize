@@ -23,7 +23,7 @@ SSH_CONFIDENCE = 0.9
 
 _LONG_FLAG = re.compile(
     r"(?<![\w-])--([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:=|[ \t]+)(?![-$'\"{])"
-    r"([A-Za-z0-9.~/@][\w.:/@~+-]*[\w/])(?=[\s;|&)'\"`]|$)",
+    r"([A-Za-z0-9.~/@](?:[\w.:/@~+-]*[\w/])?)(?=[.,]?(?:[\s;|&)'\"`]|$))",
     re.MULTILINE,
 )
 # Flags that are switches: what follows them is a positional argument, not their value.

@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: payments
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://git.example.com/platform/deployments.git
+    targetRevision: release-42
+    path: apps/payments/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: payments-prod

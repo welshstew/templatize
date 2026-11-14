@@ -61,6 +61,14 @@ _XML_SKIP_ATTRS = frozenset(
 )
 _XML_START = re.compile(r"\A\s*<(?:\?xml|[A-Za-z_][\w.:-]*[\s>])")
 _STRING_ARRAY = re.compile(r'^\[[ \t]*"[^"\n]*"(?:[ \t]*,[ \t]*"[^"\n]*")*[ \t]*,?[ \t]*\]$')
+# Makefile assignments: APP := x, VERSION ?= 1.2, FLAGS += -O2
+_MAKE_ASSIGN = re.compile(r"^([A-Za-z_][\w.-]*)[ \t]*(?::=|::=|\?=|\+=|!=)[ \t]*(.*?)[ \t]*$")
+# supervisord: environment=A="x",B="y"
+_QUOTED_PAIRS = re.compile(r'^[A-Za-z_]\w*="[^"]*"(?:,[A-Za-z_]\w*="[^"]*")+$')
+# Groovy/Jenkins DSL and HCL blocks with one string: label 'linux-docker', path "secret/*" {
+_DSL_STRING = re.compile(
+    r"\b(label|image|credentialsId|url|branch|dir|path|registry|cloud|node)[ \t]*\(?[ \t]*(['\"])([^'\"\n]+)\2"
+)
 _TOP_API = re.compile(r"^apiVersion:[ \t]*\S", re.MULTILINE)
 _TOP_APPVERSION = re.compile(r"^(?:appVersion|version):[ \t]*\S", re.MULTILINE)
 _TOP_KIND = re.compile(r"^kind:[ \t]*\S", re.MULTILINE)
@@ -264,6 +272,35 @@ class KeyValueDetector:
                         0.7,
                     )
                 continue
+
+            if mm := _MAKE_ASSIGN.match(line):
+                value = mm.group(2)
+                if value and "$(" not in value:
+                    self._add(
+                        out,
+                        ctx.text,
+                        mm.group(1),
+                        None,
+                        line_start + mm.start(2),
+                        line_start + mm.start(2) + len(value),
+                        "kv.equals",
+                        0.7,
+                    )
+                continue
+
+            if dm_ := _DSL_STRING.search(line):
+                lead = line[: dm_.start()].strip()
+                if lead in ("", "{", "agent {") or lead.endswith("{"):
+                    self._add(
+                        out,
+                        ctx.text,
+                        dm_.group(1),
+                        None,
+                        line_start + dm_.start(3),
+                        line_start + dm_.end(3),
+                        "kv.dsl",
+                        0.65,
+                    )
 
             if tm := _TOML_INLINE.match(line):
                 for pm in _TOML_INLINE_PAIR.finditer(tm.group(2)):
@@ -657,6 +694,20 @@ class KeyValueDetector:
                 )
             end = start + len(dm.group(1))
             value = dm.group(1)
+        if detector != "kv.pairs" and _QUOTED_PAIRS.match(value):
+            for pm in re.finditer(r'([A-Za-z_]\w*)="([^"]*)"', value):
+                if pm.group(2):
+                    KeyValueDetector._add(
+                        out,
+                        text,
+                        pm.group(1),
+                        None,
+                        start + pm.start(2),
+                        start + pm.end(2),
+                        "kv.pairs",
+                        0.75,
+                    )
+            return
         if detector != "kv.pairs" and (_PAIRS_SEMI.match(value) or _PAIRS_SPACE.match(value)):
             sep = ";" if ";" in value else " "
             pos = start

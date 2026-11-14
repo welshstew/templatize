@@ -136,6 +136,15 @@ def _valid_cidr(v: str) -> bool:
         return False
 
 
+def _valid_iban(v: str) -> bool:
+    """ISO 13616 check digits (mod 97)."""
+    s = v.replace(" ", "")
+    if not 15 <= len(s) <= 34:
+        return False
+    digits = "".join(str(int(ch, 36)) for ch in s[4:] + s[:4])
+    return int(digits) % 97 == 1
+
+
 def _valid_endpoint(v: str) -> bool:
     host, _, port = v.rpartition(":")
     if not _valid_port(port):
@@ -276,13 +285,31 @@ PATTERNS: list[Pattern] = [
         VarType.STRING,
         # AWS (eu-west-2, ap-southeast-1) and GCP (europe-west4, us-central1) regions.
         re.compile(
-            r"(?<![\w-])(?:(?:us|eu|ap|sa|ca|me|af|il|mx)(?:-gov)?-(?:north|south|east|west|central|"
+            r"(?<![\w.-])(?:(?:us|eu|ap|sa|ca|me|af|il|mx)(?:-gov)?-(?:north|south|east|west|central|"
             r"northeast|southeast|northwest|southwest)-\d"
             r"|(?:us|europe|asia|australia|northamerica|southamerica|me|africa)-(?:north|south|east|west|"
-            r"central|northeast|southeast|northwest|southwest)\d)(?![\w-])"
+            r"central|northeast|southeast|northwest|southwest)\d)(?![\w-]|\.\w)"
         ),
         0.8,
         name="region",
+    ),
+    Pattern(
+        "regex.duration",
+        VarType.INT,
+        # "14 days overdue", "expires in 10 minutes", "a 30-day trial": named by the unit.
+        re.compile(
+            r"(?<![\w.,:/-])(\d{1,4})[ -](?=(?:second|minute|hour|day|week|month|year)s?\b)"
+        ),
+        0.4,  # weak: a key's whole value ("28 days plus public holidays") wins
+        group=1,
+    ),
+    Pattern(
+        "regex.iban",
+        VarType.STRING,
+        re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){3,7}(?:[ ]?[A-Z0-9]{1,3})?\b"),
+        0.8,
+        _valid_iban,
+        name="iban",
     ),
     Pattern(
         "regex.reference",
@@ -465,6 +492,9 @@ class RegexDetector:
                 if pat.validate is not None and not pat.validate(value):
                     continue
                 name = pat.name or type_name(pat.type)
+                if pat.detector == "regex.duration":
+                    unit = re.match(r"[ -]([a-z]+?)s?\b", text[end : end + 12])
+                    name = f"{unit.group(1)}s" if unit else "duration"
                 if pat.detector == "regex.access_code":
                     name = snake_case(m.group(1))
                 out.append(

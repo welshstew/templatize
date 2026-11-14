@@ -164,6 +164,12 @@ def _greeting_only(text: str, taken: list[Span]) -> list[Candidate]:
         return []
     g = Span(start=m.start(1), end=m.end(1))
     value = text[g.start : g.end]
+    role = "recipient_first_name"
+    if hon := _HONORIFIC.match(value):
+        # "Dear Ms. Alvarez,": the honorific stays text, the name is the last name.
+        g = Span(start=g.start + hon.end(), end=g.end)
+        value = text[g.start : g.end]
+        role = "recipient_last_name"
     if (
         any(g.overlaps(t) for t in taken)
         or not re.fullmatch(_NAME_WORD_U, value)
@@ -171,7 +177,7 @@ def _greeting_only(text: str, taken: list[Span]) -> list[Candidate]:
         or value.lower() in _NOT_NAMES
     ):
         return []
-    return [_candidate(text, g, "recipient_first_name", "the name in the greeting")]
+    return [_candidate(text, g, role, "the name in the greeting")]
 
 
 def _names_from_emails(text: str) -> list[Candidate]:

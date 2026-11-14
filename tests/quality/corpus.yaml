@@ -122,8 +122,8 @@ kubeconfig:
   occurrences: {prod-eu: 4, ci-deployer: 2}
 
 sms.txt:
-  want: ["482913", 0800 555 0199, Larkspur Bank]
-  reject: ["10"]
+  want: ["482913", 0800 555 0199, Larkspur Bank, "10"]
+  reject: []
   names: {"482913": verification_code}
 
 welcome_email.txt:
@@ -234,3 +234,68 @@ table.md:
 gitconfig:
   want: [Sam Rivera, sam.rivera@example.com, 3AA5C34371567BD2, vim, https://github.example.com/]
   reject: [user, core]
+
+# --- third batch ----------------------------------------------------------------------
+
+cronjob.yaml:
+  want: [nightly-report, reporting, "30 3 * * *", registry.example.com/reporting/nightly, 1.8.0, s3://acme-reports]
+  reject: [CronJob, OnFailure]
+
+kustomization.yaml:
+  want: [checkout-prod, checkout-api, 123456789012.dkr.ecr.eu-west-1.amazonaws.com/checkout-api, 2026.11.3, "6"]
+  reject: [Kustomization]
+
+argocd-app.yaml:
+  want: [payments, argocd, platform, https://git.example.com/platform/deployments.git, release-42, apps/payments/overlays/prod, payments-prod]
+  reject: [Application]
+
+alerts.yml:
+  want: [HighErrorRate, 10m, page, payments, https://runbooks.example.com/api/high-error-rate]
+  reject: [groups, rules]
+
+Jenkinsfile:
+  want: [linux-docker, registry.example.com, orders/web, orders-staging]
+  reject: [pipeline, stages, steps]
+
+Makefile:
+  want: [billing-worker, 1.12.0, ghcr.io/acme, "9090"]
+  reject: [build]
+  names: {billing-worker: app, 1.12.0: version}
+
+my.cnf:
+  want: [10.4.0.15, "3307", /data/mysql, "500", 12G, backup, b4ckup!Pass]
+  reject: [mysqld, client]
+
+supervisord.conf:
+  want: [/opt/app, app, /var/log/worker.out.log, "redis://cache.internal:6379/2", production, "8", emails]
+  reject: [program]
+
+packer.pkr.hcl:
+  want: [eu-west-1, t3.small, ami-0abcdef1234567890, ubuntu, acme-base-2026-11]
+  reject: [amazon-ebs, source]
+
+vault-policy.hcl:
+  want: [secret/data/payments/*, database/creds/payments-ro]
+  reject: [path, capabilities]
+
+mongod.conf:
+  want: [/var/lib/mongodb, "27018", 10.5.0.8, rs-orders, /etc/mongo/keyfile]
+  reject: [storage, net]
+
+traefik.toml:
+  want: [certs@example.com, /letsencrypt/acme.json]
+  reject: [entryPoints, web]
+
+release_email.txt:
+  want: [4.3.0, Wednesday 19 November at 09:00, 4.2.7, production, Lukas Weber]
+  reject: [Highlights, team]
+  occurrences: {4.2.7: 2}
+
+invoice_reminder.txt:
+  want: [Alvarez, INV-88213, "3,240.00", 1 October 2026, "14", DE89 3704 0044 0532 0130 00, Brightwater Supplies GmbH]
+  reject: [Dear, Kind]
+
+k8s-service.yaml:
+  want: [search-api, search, LoadBalancer, 34.89.12.201, "80", "8080"]
+  reject: [Service, TCP, v1]
+  occurrences: {search-api: 3}

@@ -1,0 +1,9 @@
+[entryPoints]
+  [entryPoints.web]
+    address = ":80"
+  [entryPoints.websecure]
+    address = ":443"
+
+[certificatesResolvers.le.acme]
+  email = "certs@example.com"
+  storage = "/letsencrypt/acme.json"

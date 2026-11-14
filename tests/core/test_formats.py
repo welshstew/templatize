@@ -294,3 +294,58 @@ def test_company_name_without_its_suffix() -> None:
     text = "Thanks for applying to Fernleaf.\n\nBest regards,\n\nRachel Green\nTalent Partner, Fernleaf Ltd\n"
     found = {c.value: (c.name, len(c.spans)) for c in suggest(text).candidates}
     assert found["Fernleaf"] == ("sender_company", 2)
+
+
+@pytest.mark.parametrize(
+    ("text", "name", "value"),
+    [
+        ("APP      := billing-worker\nVERSION  ?= 1.12.0\n", "app", "billing-worker"),
+        ("agent { label 'linux-docker' }\n", "label", "linux-docker"),
+        (
+            'path "secret/data/payments/*" {\n  capabilities = ["read"]\n}\n',
+            "path",
+            "secret/data/payments/*",
+        ),
+        (
+            'environment=REDIS_URL="redis://c:6379/2",SENTRY_ENV="production"\n',
+            "sentry_env",
+            "production",
+        ),
+    ],
+)
+def test_round_three_formats(text: str, name: str, value: str) -> None:
+    assert kv(text).get(name) == value
+
+
+@pytest.mark.parametrize(
+    ("text", "name", "value"),
+    [
+        ("pay to IBAN DE89 3704 0044 0532 0130 00 now", "iban", "DE89 3704 0044 0532 0130 00"),
+        ("it is now 14 days overdue", "days", "14"),
+        ("celery worker --concurrency=8 --queues=emails", None, None),
+    ],
+)
+def test_round_three_patterns(text: str, name: str | None, value: str | None) -> None:
+    if name:
+        assert regex_named(text).get(name) == value
+    else:
+        assert cmds(text) == {"concurrency": "8", "queues": "emails"}
+
+
+def test_iban_needs_valid_check_digits() -> None:
+    assert "iban" not in regex_named("IBAN DE00 3704 0044 0532 0130 00")
+
+
+def test_greeting_with_an_honorific_is_the_last_name() -> None:
+    assert (
+        values("Dear Ms. Alvarez,\n\nYour invoice is overdue.\n")["Alvarez"]
+        == "recipient_last_name"
+    )
+
+
+def test_kubernetes_enums_are_structure() -> None:
+    text = (
+        "apiVersion: v1\nkind: Service\nmetadata:\n  name: api\nspec:\n  ports:\n"
+        "    - port: 80\n      protocol: TCP\n"
+    )
+    assert "TCP" not in values(text)

@@ -170,7 +170,7 @@ def _value_span(node: Node | None) -> Span | None:
     return Span(start=start, end=end) if end > start else None
 
 
-_ENUM_KEYS = frozenset({"pathType"})
+_ENUM_KEYS = frozenset({"pathType", "restartPolicy", "protocol", "concurrencyPolicy"})
 
 
 def structural_spans(text: str) -> list[Span]:

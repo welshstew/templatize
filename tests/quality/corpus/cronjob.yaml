@@ -1,0 +1,16 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-report
+  namespace: reporting
+spec:
+  schedule: "30 3 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: report
+              image: registry.example.com/reporting/nightly:1.8.0
+              args: ["--date", "yesterday", "--bucket", "s3://acme-reports"]
+          restartPolicy: OnFailure
