@@ -19,7 +19,7 @@ To add an engine (e.g. Go ``text/template`` for Helm):
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -44,8 +44,9 @@ class Emitter(Protocol):
         """Return template source for ``ir``."""
         ...
 
-    def render(self, template: str, values: Mapping[str, str], newline: str | None = None) -> str:
-        """Render ``template`` with ``values``; raise :class:`TemplateRenderError` on failure."""
+    def render(self, template: str, values: Mapping[str, Any], newline: str | None = None) -> str:
+        """Render ``template`` with ``values`` (strings; loops: lists of dicts or strings);
+        raise :class:`TemplateRenderError` on failure."""
         ...
 
     def variables_in(self, template: str) -> set[str]:

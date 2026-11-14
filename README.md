@@ -532,7 +532,9 @@ runtime image (`--target runtime`) contains no test data.
 ```python
 class Span:      start: int; end: int            # half-open, Unicode code points (Python str indices)
 class Variable:  name; type: VarType; value: str; spans: list[Span]; sources; confidence; description
-class TemplateIR: ir_version = 1; text: str; variables: list[Variable]
+class LoopField: name; type; spans: list[Span]   # one per item
+class Loop:      name; item; items: list[Span]; fields: list[LoopField]; scalar: bool
+class TemplateIR: ir_version = 2; text: str; variables: list[Variable]; loops: list[Loop]
 class Candidate: id; name; name_origin; type; value; spans; sources; detectors; confidence; reason;
                  variant_values   # what this region contains in each variant document
 ```
@@ -545,6 +547,22 @@ Invariants (checked on construction):
 
 Values are always the exact source substring. `VarType` is metadata for naming and UI
 hints, so `port: 0080` stays `0080`.
+
+**Loops** (repeated blocks: SQL rows, list items, host blocks). A loop's items share
+one shape and are joined by the same separator; each item's holes are the loop's
+fields (`user.email`) or variables with a span at the same place in every item
+(`tenant_id`). Jinja2 renders it as
+
+```jinja
+{% for user in users %}{% if not loop.first %},
+{% endif %}  ('{{ tenant_id }}', '{{ user.email }}', '{{ user.role }}'){% endfor %}
+```
+
+and the values go to `values.yaml` instead of `.env` (lists of mappings, or of strings
+for a scalar loop), which `render.py` reads. Add or remove items there to change the
+output. Loops are accepted by `POST /build` (`loops`), `templatize build --loops
+loops.json`, and lists are accepted as values by `/render` and the MCP render/validate
+tools. Detection, the UI and Helm `range` are next; see `docs/design/loops.md`.
 
 > JavaScript clients index strings in UTF-16 code units, not code points. Convert at the
 > API boundary.

@@ -43,6 +43,10 @@ def _suggest(text: str, variants: list[str]) -> SuggestResult:
     return suggest(text, variants, detectors=detectors)
 
 
+RenderValue = str | list[str] | list[dict[str, str]]
+"""A variable's string, or a loop's list (strings, or one mapping per item)."""
+
+
 class ToolInputError(ValueError):
     """Raised for bad arguments; the SDK reports it to the client as a tool error."""
 
@@ -229,7 +233,7 @@ def generate_template(
 
 def render_template(
     template: str,
-    values: dict[str, str] | None = None,
+    values: dict[str, RenderValue] | None = None,
     newline: Newline | None = None,
     engine: str = "jinja2",
 ) -> RenderTemplateResult:
@@ -252,7 +256,7 @@ def render_template(
 
 def validate_template(
     template: str,
-    values: dict[str, str] | None = None,
+    values: dict[str, RenderValue] | None = None,
     expected_text: str | None = None,
     engine: str = "jinja2",
 ) -> ValidateTemplateResult:

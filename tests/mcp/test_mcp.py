@@ -110,6 +110,14 @@ def test_render_and_validate() -> None:
             assert r.structured_content["ok"] is False and not r.is_error
             r = await c.call_tool("render_template", {"template": "a\nb", "newline": "\r\n"})
             assert r.structured_content["output"] == "a\r\nb"
+            r = await c.call_tool(
+                "render_template",
+                {
+                    "template": "{% for u in users %}{{ u.name }};{% endfor %}{{ n }}",
+                    "values": {"users": [{"name": "a"}, {"name": "b"}], "n": "1"},
+                },
+            )
+            assert r.structured_content["output"] == "a;b;1"
 
             v = await c.call_tool(
                 "validate_template",

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+import yaml
 from pydantic import BaseModel
 
 from templatize.emitters import Emitter, TemplateRenderError
 from templatize.envfile import parse_env, serialize_env
 from templatize.ir import TemplateIR
+from templatize.valuesfile import parse_values, serialize_values
 
 EXCERPT_RADIUS = 40
 
@@ -30,16 +34,25 @@ def _encode(s: str) -> bytes:
 def check_roundtrip(
     ir: TemplateIR, emitter: Emitter, template: str | None = None
 ) -> RoundTripResult:
-    """Emit (unless ``template`` is given), serialise and re-parse the ``.env``, render, compare.
+    """Emit (unless ``template`` is given), serialise and re-parse the values (``.env``,
+    or ``values.yaml`` when there are loops), render, compare.
 
-    Going through the real ``.env`` serialiser/parser is deliberate: quoting bugs
-    would otherwise slip past an in-memory comparison.
+    Going through the real serialiser/parser is deliberate: quoting bugs would
+    otherwise slip past an in-memory comparison.
     """
     expected = _encode(ir.text)
     if template is None:
         template = emitter.emit(ir)
-    env_values = parse_env(serialize_env(ir))
-    values = {k.lower(): v for k, v in env_values.items()}
+    values: dict[str, Any]
+    try:
+        if ir.loops:  # lists live in values.yaml
+            values = parse_values(serialize_values(ir))
+        else:
+            values = {k.lower(): v for k, v in parse_env(serialize_env(ir)).items()}
+    except (ValueError, yaml.YAMLError) as exc:
+        return RoundTripResult(
+            ok=False, engine=emitter.engine, expected_bytes=len(expected), error=str(exc)
+        )
     try:
         rendered = emitter.render(template, values)
     except TemplateRenderError as exc:

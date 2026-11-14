@@ -72,3 +72,28 @@ def test_build_reports_invalid_vars(tmp_path: Path, capsys: pytest.CaptureFixtur
     spec.write_text(json.dumps([{"name": "Bad Name", "spans": [{"start": 0, "end": 1}]}]))
     assert main(["build", str(src), "--vars", str(spec)]) == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_build_with_loops_file(tmp_path: Path) -> None:
+    doc = tmp_path / "hosts.txt"
+    doc.write_text("[a, b]\n")
+    loops = tmp_path / "loops.json"
+    loops.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "names",
+                    "scalar": True,
+                    "items": [{"start": 1, "end": 2}, {"start": 4, "end": 5}],
+                }
+            ]
+        )
+    )
+    vars_ = tmp_path / "vars.json"
+    vars_.write_text("[]")
+    out = tmp_path / "out"
+    assert (
+        main(["build", str(doc), "--vars", str(vars_), "--loops", str(loops), "-o", str(out)]) == 0
+    )
+    assert (out / "values.yaml").read_text().endswith("names:\n- a\n- b\n")
+    assert "{% for name in names %}" in (out / "template.j2").read_text()

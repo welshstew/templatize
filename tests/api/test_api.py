@@ -187,3 +187,24 @@ def test_unhandled_errors_log_type_only(
     assert r.status_code == 500 and r.json() == {"detail": "internal error"}
     assert "RuntimeError" in caplog.text
     assert SECRET not in caplog.text and SECRET not in r.text
+
+
+def test_build_with_loops_and_render_lists(client: TestClient) -> None:
+    text = "hosts:\n- a.example\n- b.example\n"
+    a, b = text.index("a.example"), text.index("b.example")
+    loop = {
+        "name": "hosts",
+        "items": [{"start": a, "end": a + 9}, {"start": b, "end": b + 9}],
+        "scalar": True,
+    }
+    built = client.post("/build", json={"text": text, "loops": [loop]}).json()
+    assert built["roundtrip"]["ok"] is True
+    assert built["env"]["path"] == "values.yaml"
+    assert built["loops"][0]["item"] == "host"
+    rendered = client.post(
+        "/render",
+        json={"template": built["template"]["content"], "values": {"hosts": ["x", "y", "z"]}},
+    ).json()
+    assert rendered == {"ok": True, "output": "hosts:\n- x\n- y\n- z\n", "error": None}
+    bad = client.post("/build", json={"text": text, "loops": [{**loop, "name": "for"}]})
+    assert bad.status_code == 422 and "reserved" in bad.json()["detail"]

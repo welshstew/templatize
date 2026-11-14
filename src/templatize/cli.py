@@ -17,7 +17,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from templatize.build import BuildResult, VariableSpec, build, specs_from_candidates
+from templatize.build import BuildResult, LoopSpec, VariableSpec, build, specs_from_candidates
 from templatize.bundle import make_chart_zip, make_zip
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, apply_review, review_candidates
 from templatize.emitters import EMITTERS
@@ -101,7 +101,12 @@ def cmd_build(args: argparse.Namespace) -> int:
     else:
         res = _suggest(text, [_read(v) for v in args.variant], args.llm_url)
         specs = specs_from_candidates(_select(res, args.min_confidence))
-    result = build(text, specs, engine=args.engine)
+    loops = (
+        TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())
+        if args.loops
+        else []
+    )
+    result = build(text, specs, engine=args.engine, loops=loops)
     _write_outputs(result, args.output, args.zip)
 
     if args.json:
@@ -199,6 +204,10 @@ def make_parser() -> argparse.ArgumentParser:
     sel = b.add_mutually_exclusive_group(required=True)
     sel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
     sel.add_argument("--vars", help="JSON file with a list of variable specs")
+    b.add_argument(
+        "--loops",
+        help="JSON file with a list of loop specs (repeated blocks; values go to values.yaml)",
+    )
     b.add_argument("--min-confidence", type=float, default=0.0)
     b.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
     b.add_argument("--engine", default="jinja2", choices=sorted(EMITTERS))

@@ -1,6 +1,6 @@
 # Design: repeated blocks as loops
 
-Status: proposed · Scope: core IR, detectors, Jinja2 + Helm (exact) emitters, UI
+Status: milestone 1 (IR + Jinja2) implemented · Scope: core IR, detectors, Jinja2 + Helm (exact) emitters, UI
 
 ## Why
 
@@ -48,8 +48,7 @@ text.
 class LoopField(BaseModel):
     name: str                      # "email": a key of each item
     type: VarType = VarType.STRING
-    values: list[str]              # one per item
-    offsets: list[Span]            # hole position in each item, relative to the item
+    spans: list[Span]              # absolute, one per item (values are text[span])
 
 class Loop(BaseModel):
     name: str                      # list variable: "users"

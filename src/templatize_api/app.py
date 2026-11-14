@@ -78,7 +78,7 @@ def _validation_message(exc: ValidationError) -> str:
 
 def _run_build(req: BuildRequest) -> BuildResult:
     try:
-        return build(req.text, req.variables, engine=req.engine)
+        return build(req.text, req.variables, engine=req.engine, loops=req.loops)
     except InputLimitError as exc:
         raise ApiError(413, str(exc)) from None
     except ValidationError as exc:
@@ -297,6 +297,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             env=result.env,
             runner=result.runner,
             variables=result.ir.variables,
+            loops=result.ir.loops,
             roundtrip=result.roundtrip,
         )
 

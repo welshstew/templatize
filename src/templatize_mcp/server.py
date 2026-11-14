@@ -192,8 +192,14 @@ def create_server() -> MCPServer:
     def render_template(
         template: Annotated[str, Field(description="Jinja2 template source.")],
         values: Annotated[
-            dict[str, str] | None,
-            Field(description="Values by variable name (or .env key; case-insensitive)."),
+            dict[str, tools.RenderValue] | None,
+            Field(
+                description=(
+                    "Values by variable name (or .env key; case-insensitive). A loop "
+                    "(`{% for user in users %}`) takes a list: of strings, or of objects "
+                    '(`[{"email": "a@x", "role": "admin"}]`).'
+                )
+            ),
         ] = None,
         newline: Annotated[
             Literal["\n", "\r\n", "\r"] | None,
@@ -209,7 +215,8 @@ def create_server() -> MCPServer:
     def validate_template(
         template: Annotated[str, Field(description="Jinja2 template source.")],
         values: Annotated[
-            dict[str, str] | None, Field(description="Values by variable name.")
+            dict[str, tools.RenderValue] | None,
+            Field(description="Values by variable name; loops take lists (see render_template)."),
         ] = None,
         expected_text: Annotated[
             str | None,

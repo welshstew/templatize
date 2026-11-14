@@ -13,6 +13,8 @@ from templatize.envfile import serialize_env
 from templatize.ir import (
     Candidate,
     IRValidationError,
+    Loop,
+    LoopField,
     Source,
     Span,
     TemplateIR,
@@ -23,6 +25,7 @@ from templatize.ir import (
 from templatize.naming import infer_type
 from templatize.roundtrip import RoundTripResult, check_roundtrip
 from templatize.suggest import check_limits
+from templatize.valuesfile import serialize_values
 
 
 class VariableSpec(BaseModel):
@@ -43,6 +46,60 @@ class VariableSpec(BaseModel):
     them to per-example values files). Missing means "same as in the main text"."""
 
 
+class LoopFieldSpec(BaseModel):
+    name: str
+    spans: list[Span] = Field(min_length=1)
+    """One per item, in item order."""
+    type: VarType | None = None
+
+
+class LoopSpec(BaseModel):
+    """A repeated block chosen by a user/client (see :class:`templatize.ir.Loop`)."""
+
+    name: str
+    item: str | None = None
+    """Loop variable; defaults to the singular of ``name`` (``users`` -> ``user``)."""
+    items: list[Span] = Field(min_length=1)
+    fields: list[LoopFieldSpec] = Field(default_factory=list)
+    scalar: bool = False
+    """Items are single values: a list of strings. ``fields`` may be omitted."""
+    sources: list[Source] = Field(default_factory=lambda: [Source.MANUAL])
+    confidence: float | None = None
+    description: str | None = None
+    values_path: ValuesPath | None = None
+
+
+def singular(name: str) -> str:
+    if name.endswith("ies") and len(name) > 4:
+        return name[:-3] + "y"
+    if name.endswith("s") and not name.endswith("ss") and len(name) > 3:
+        return name[:-1]
+    return f"{name}_item"
+
+
+def make_loop(text: str, spec: LoopSpec) -> Loop:
+    items = sorted(spec.items, key=lambda s: s.start)
+    fields = spec.fields
+    if spec.scalar and not fields:
+        fields = [LoopFieldSpec(name="value", spans=items)]
+    out: list[LoopField] = []
+    for f in fields:
+        spans = sorted(f.spans, key=lambda s: s.start)
+        first = text[spans[0].start : spans[0].end] if spans[0].end <= len(text) else ""
+        out.append(LoopField(name=f.name, type=f.type or infer_type(first), spans=spans))
+    return Loop(
+        name=spec.name,
+        item=spec.item or singular(spec.name),
+        items=items,
+        fields=out,
+        scalar=spec.scalar,
+        sources=spec.sources,
+        confidence=spec.confidence,
+        description=spec.description,
+        values_path=spec.values_path,
+    )
+
+
 class BuildResult(BaseModel):
     engine: str
     ir: TemplateIR
@@ -56,7 +113,7 @@ class BuildResult(BaseModel):
         return [self.template, self.env, *self.runner]
 
 
-def make_ir(text: str, specs: Sequence[VariableSpec]) -> TemplateIR:
+def make_ir(text: str, specs: Sequence[VariableSpec], loops: Sequence[LoopSpec] = ()) -> TemplateIR:
     check_limits(text)
     variables: list[Variable] = []
     for spec in specs:
@@ -83,7 +140,7 @@ def make_ir(text: str, specs: Sequence[VariableSpec]) -> TemplateIR:
                 values_path=spec.values_path,
             )
         )
-    return TemplateIR(text=text, variables=variables)
+    return TemplateIR(text=text, variables=variables, loops=[make_loop(text, lp) for lp in loops])
 
 
 def specs_from_candidates(candidates: Iterable[Candidate]) -> list[VariableSpec]:
@@ -110,14 +167,23 @@ def build_ir(ir: TemplateIR, engine: str = "jinja2") -> BuildResult:
         engine=engine,
         ir=ir,
         template=EmittedFile(path=emitter.template_filename, content=template),
-        env=EmittedFile(path=".env", content=serialize_env(ir)),
+        env=(
+            EmittedFile(path="values.yaml", content=serialize_values(ir))
+            if ir.loops
+            else EmittedFile(path=".env", content=serialize_env(ir))
+        ),
         runner=emitter.runner_files(ir),
         roundtrip=check_roundtrip(ir, emitter, template),
     )
 
 
-def build(text: str, variables: Sequence[VariableSpec], engine: str = "jinja2") -> BuildResult:
-    return build_ir(make_ir(text, variables), engine)
+def build(
+    text: str,
+    variables: Sequence[VariableSpec],
+    engine: str = "jinja2",
+    loops: Sequence[LoopSpec] = (),
+) -> BuildResult:
+    return build_ir(make_ir(text, variables, loops), engine)
 
 
 _WORDISH = re.compile(r"\w")
