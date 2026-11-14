@@ -6,6 +6,7 @@ fetched from the network.
 
 from __future__ import annotations
 
+import os
 from typing import Literal
 
 from pydantic import BaseModel
@@ -17,14 +18,25 @@ from templatize.build import (
     resolve_inputs,
     specs_from_candidates,
 )
+from templatize.detectors import Detector, default_detectors
+from templatize.detectors import ner as ner_detector
 from templatize.emitters import TemplateRenderError, get_emitter
 from templatize.emitters.jinja2 import Jinja2Emitter
 from templatize.ir import MAX_INPUT_CHARS, Candidate, IRValidationError, Notice, VarType
 from templatize.roundtrip import RoundTripResult
-from templatize.suggest import check_limits, suggest
+from templatize.suggest import SuggestResult, check_limits, suggest
 from templatize.validate import validate_template as core_validate
 
 Newline = Literal["\n", "\r\n", "\r"]
+
+
+def _suggest(text: str, variants: list[str]) -> SuggestResult:
+    """Heuristics, plus the optional NER service when TEMPLATIZE_NER_URL is set and up."""
+    url = os.environ.get("TEMPLATIZE_NER_URL", "").strip()
+    detectors: list[Detector] = default_detectors()
+    if url and ner_detector.check_health(url):
+        detectors.append(ner_detector.NerDetector(ner_detector.NerConfig(url=url)))
+    return suggest(text, variants, detectors=detectors)
 
 
 class ToolInputError(ValueError):
@@ -88,7 +100,7 @@ def suggest_parameters(
 ) -> SuggestParametersResult:
     variants = variants or []
     try:
-        res = suggest(text, variants)
+        res = _suggest(text, variants)
     except ValueError as exc:
         raise ToolInputError(str(exc)) from None
     return SuggestParametersResult(
@@ -109,7 +121,7 @@ def generate_template(
         check_limits(text, variants)
         if variables is None:
             cands = [
-                c for c in suggest(text, variants).candidates if c.confidence >= min_confidence
+                c for c in _suggest(text, variants).candidates if c.confidence >= min_confidence
             ]
             specs = specs_from_candidates(cands)
         else:

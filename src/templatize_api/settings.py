@@ -39,6 +39,8 @@ class Settings:
     static_dir: Path | None = None
     # Optional services (later milestones). Absent/unreachable => features hidden.
     ner_url: str | None = None
+    ner_timeout: float = 30.0
+    ner_max_chars: int = 200_000
     llm_url: str | None = None
     llm_timeout: float = 300.0
     llm_max_chars: int = 24_000
@@ -59,6 +61,8 @@ class Settings:
             ),
             static_dir=Path(static) if static else None,
             ner_url=_opt("TEMPLATIZE_NER_URL"),
+            ner_timeout=float(os.environ.get("TEMPLATIZE_NER_TIMEOUT", "30")),
+            ner_max_chars=int(os.environ.get("TEMPLATIZE_NER_MAX_CHARS", "200000")),
             llm_url=_opt("TEMPLATIZE_LLM_URL"),
             llm_timeout=float(os.environ.get("TEMPLATIZE_LLM_TIMEOUT", "300")),
             llm_max_chars=int(os.environ.get("TEMPLATIZE_LLM_MAX_CHARS", "24000")),

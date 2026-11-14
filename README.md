@@ -13,8 +13,8 @@ extracted values must reproduce the input **byte for byte**.
 
 Everything runs offline. No external services, API keys, telemetry or update checks.
 
-> Status: milestone 5 (core library, CLI, web API, web UI, MCP server, optional local
-> LLM detector). The optional NER detector follows.
+> Status: all milestones complete: core library, CLI, web API, web UI, MCP server, and
+> optional NER (GLiNER) and LLM (llama.cpp) detectors.
 
 ## Quick start
 
@@ -111,6 +111,79 @@ Configuration (environment variables):
 | `TEMPLATIZE_MCP_ALLOWED_HOSTS` | (none) | extra allowed `Host` values for `/mcp`, comma-separated, e.g. `myhost.ts.net:*` |
 | `TEMPLATIZE_NER_URL`, `TEMPLATIZE_LLM_URL` | empty | optional services (later milestones) |
 
+### Optional NER detector (GLiNER on ONNX Runtime, CPU)
+
+A small named-entity model finds values that regexes can't: person and company names,
+locations, street addresses, phone numbers, money amounts, job titles and products.
+Labels map to variable names, e.g. `person` → `person_name` and `money` → `amount`. It
+is fast (well under a second for the business-letter fixture on CPU), so it runs inside
+`/suggest` itself, and its candidates are merged like any other detector's (labelled
+**NER** in the UI).
+
+```sh
+make up-ner    # app + ner (COMPOSE_PROFILES=ner docker compose up -d --build)
+```
+
+**Model:** [GLiNER small v2.1](https://huggingface.co/urchade/gliner_small-v2.1)
+(Apache-2.0), using the full-precision (fp32) ONNX export from
+[`onnx-community/gliner_small-v2.1`](https://huggingface.co/onnx-community/gliner_small-v2.1)
+pinned to revision `8142fb00`. That repo has no licence field of its own; it's a format
+conversion of the Apache-2.0 model. `scripts/download-ner-model.sh` downloads the model
+**at image build time** and checks each file's SHA-256, so the image runs offline. To use
+another span-mode GLiNER model, mount it and set `TEMPLATIZE_NER_MODEL_DIR`.
+
+**ONNX Runtime instead of PyTorch.** The `gliner` package needs PyTorch even for ONNX
+inference. `templatize_ner/gliner_onnx.py` therefore reimplements GLiNER's span-mode
+pre- and post-processing on `onnxruntime` + `tokenizers` + `numpy` (about 200 lines):
+- the word splitter;
+- the `<<ENT>> label … <<SEP>>` prompt;
+- the first-subtoken word mask;
+- span enumeration and masking;
+- sigmoid, threshold and greedy non-overlapping decoding;
+- overlapping windows for long texts.
+
+The trade-off:
+
+| | ONNX Runtime (this) | PyTorch (`gliner` package) |
+|---|---|---|
+| Image | **~960 MB** (611 MB model, 63 MB onnxruntime, 67 MB numpy, base OS) | ~2.5 GB (CPU torch wheel ~700 MB+, transformers, the same 611 MB of weights) |
+| Startup / latency | ~1 s load, well under 1 s per short document | slower start, similar inference |
+| Risk | our own pre/post-processing could drift from upstream | reference implementation |
+
+**Why fp32 and not the 3× smaller int8 export.** In the same repo, int8 is measurably
+worse. Against fp32 it changes the detected spans in 11 of 15 test cases, with a mean
+score shift of 0.14. On the business letter it misses `Contoso Pharmaceuticals` and
+`Head of Sales` and mislabels the street address. It's also CPU-dependent: ARM and x86
+runners gave different results, which is how CI caught it. fp32 behaves the same on
+both.
+
+The reimplementation risk is covered by a **parity test**. `scripts/dev/gliner_golden.py` runs the
+reference `gliner` 0.2.30, in a throwaway environment with torch, on the **same ONNX
+file** across all fixtures plus edge cases (hyphenated and apostrophe names, phone and
+address, emoji and CJK). It stores the results in `tests/ner/golden.json`. Our
+implementation matches them: identical spans and labels, with scores equal within
+0.005. A span within 0.02 of the threshold may flip between CPUs and is tolerated. To regenerate:
+`uv run --no-project --python 3.12 --with gliner==0.2.30 --with onnxruntime scripts/dev/gliner_golden.py MODEL_DIR > tests/ner/golden.json`.
+
+ONNX Runtime ships a telemetry component, which is turned off: `ORT_DISABLE_TELEMETRY=1`
+plus `onnxruntime.disable_telemetry_events()`, and a test checks both. The service
+(`templatize-ner`, stdlib HTTP) never logs requests and reports only the type of an
+inference error. It publishes no host port and runs as non-root with a read-only root
+filesystem.
+
+| Variable | Default | |
+|---|---|---|
+| `TEMPLATIZE_NER_URL` | `http://ner:8081` (compose) / unset | absent or unreachable: no NER candidates, nothing else changes |
+| `TEMPLATIZE_NER_TIMEOUT` | `30` | seconds |
+| `TEMPLATIZE_NER_MAX_CHARS` | `200000` | longer documents skip NER |
+| `TEMPLATIZE_NER_THREADS` | auto | ONNX Runtime intra-op threads |
+
+RAM: about 1 GB for the NER service with the fp32 model.
+
+**Limits.** GLiNER small sometimes tags short generic tokens (for example a single
+lowercase word as an `organization` in config files). Its confidence (0.45 + 0.4 × score) keeps
+it below the strong heuristics. The LLM review, if enabled, sees NER candidates too.
+
 ### Optional LLM detector (llama.cpp, fully local)
 
 A local model reviews the heuristic suggestions. It runs on CPU by default, or on a GPU
@@ -176,6 +249,11 @@ The llm container:
 llama-server logs timings only; tests check that no document text reaches either
 service's logs. The CLI takes `--llm-url` too: `templatize suggest file --llm-url
 http://127.0.0.1:8090`.
+
+**Memory:** the default model with a 16k context uses about 5 GB of RAM. Make sure the
+Docker or Podman VM has that free. Running a second copy, for example
+`make offline-test-llm` while `make up-llm` is running, needs double, and on an 11 GB VM
+the kernel OOM-kills one of them.
 
 **Measured** on the 4-core Podman VM of an Apple Silicon Mac (CPU only): about 30 s to
 load the model, then 40–110 s per review of the fixture documents. A GPU makes this a few
@@ -296,8 +374,10 @@ checker container then:
 5. runs every fixture through `/suggest` → `/build` (round-trip must pass) →
    `/render` (must reproduce the input) → `/download` (zip must be complete).
 
-This must pass before a milestone counts as done. Without the `llm` profile, the
-checker also verifies that `/suggest/llm` degrades gracefully (`available: false`).
+This must pass before a milestone counts as done. It runs the app **with the NER
+service**: the checker waits for NER, requires NER candidates in `/suggest`, and requires
+the round trip to pass. Without the `llm` profile it also verifies that `/suggest/llm`
+degrades gracefully (`available: false`).
 
 `make offline-test-llm` (needs `make model`) adds the llm service to the isolated stack.
 The checker waits for the model to load, runs a real review of the business letter,
@@ -320,6 +400,8 @@ runtime image (`--target runtime`) contains no test data.
              │                                         roundtrip.py ◄── render    │    PASS/FAIL
              └────────────────────────────────────────────────────────────────────┘
                   ▲ CLI    ▲ templatize_api (FastAPI) ◄── frontend/ (Preact UI)   ▲ templatize_mcp (stdio, /mcp)
+   optional services (compose profiles):  ner ── templatize_ner (GLiNER, ONNX Runtime)
+                                          llm ── llama.cpp server (Qwen3-4B GGUF)
 ```
 
 | Module | Role |

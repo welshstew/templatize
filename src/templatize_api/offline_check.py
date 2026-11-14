@@ -252,10 +252,36 @@ def check_llm(base: str, fixture: Path, expect: bool, wait: float = 900.0) -> tu
     )
 
 
+def check_ner(base: str, fixture: Path, wait: float = 120.0) -> tuple[bool, str]:
+    """The NER service must come up and contribute candidates to /suggest, and the
+    merged suggestions must still round-trip."""
+    deadline = time.monotonic() + wait
+    while not _get_json(base, "/info")["optional_detectors"]["ner"]:
+        if time.monotonic() > deadline:
+            return False, f"NER did not become available within {wait:.0f}s"
+        time.sleep(2)
+    text = fixture.read_bytes().decode("utf-8")
+    status, body, _ = _post(base, "/suggest", {"text": text, "variants": []})
+    if status != 200:
+        return False, f"/suggest -> {status}"
+    cands = json.loads(body)["candidates"]
+    ner = [c for c in cands if "ner" in c["sources"]]
+    if not ner:
+        return False, "no NER candidates in /suggest"
+    specs = [{"name": c["name"], "spans": c["spans"], "type": c["type"]} for c in cands]
+    status, body, _ = _post(base, "/build", {"text": text, "variables": specs})
+    if status != 200 or not json.loads(body)["roundtrip"]["ok"]:
+        return False, "round-trip failed with NER candidates"
+    return True, f"NER contributes {len(ner)} candidate(s) to /suggest; round-trip ok"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     ap.add_argument("--base-url", default="http://app:8000")
     ap.add_argument("--fixtures", type=Path, default=Path("/fixtures"))
+    ap.add_argument(
+        "--expect-ner", action="store_true", help="require a working NER service (ner profile)"
+    )
     ap.add_argument(
         "--expect-llm", action="store_true", help="require a working LLM service (llm profile)"
     )
@@ -286,6 +312,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAIL MCP over streamable HTTP: {mcp_error}")
             return 1
         print("PASS MCP over streamable HTTP: 4 tools; generate_template round-trips")
+
+    if args.expect_ner or os.environ.get("TEMPLATIZE_OFFLINE_EXPECT_NER") == "1":
+        ok, msg = check_ner(base, args.fixtures / "business_letter.txt")
+        print(f"{'PASS' if ok else 'FAIL'} {msg}")
+        if not ok:
+            return 1
 
     expect_llm = args.expect_llm or os.environ.get("TEMPLATIZE_OFFLINE_EXPECT_LLM") == "1"
     llm_fixture = args.fixtures / "business_letter.txt"
