@@ -29,6 +29,24 @@ _SPACED_MIN_SHARE = 0.6
 # are left to the patterns, which find their parts.
 _SPACED_LOWER = re.compile(r"^[ \t]*([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*)[ \t]+([^\s#;{}]+)[ \t]*$")
 _PROSE_END = re.compile(r"[.!?,]$")
+# A value made of key=value pairs: "Server=db;Database=Payroll;User Id=svc;" (ADO.NET,
+# ODBC) or "host=db port=5432 dbname=app" (libpq). Its parts are the values.
+_PAIRS_SEMI = re.compile(r"^(?:[A-Za-z][\w ]*=[^;]*;)+(?:[A-Za-z][\w ]*=[^;]*)?$")
+_PAIRS_SPACE = re.compile(r"^[a-z_]+=\S+(?: [a-z_]+=\S+)+$")
+# iCalendar / vCard: "DTSTART:20261120T140000Z", "ORGANIZER;CN=Lena Fischer:mailto:...".
+_VCAL_START = re.compile(r"\A\s*BEGIN:(?:VCALENDAR|VCARD)\r?$", re.MULTILINE)
+_VCAL_LINE = re.compile(r"^([A-Z][A-Z0-9-]*)((?:;[^:\r\n]*)?):(.*?)\r?$")
+_VCAL_PARAM = re.compile(r";(CN)=(\"[^\"]*\"|[^;:]*)")
+_VCAL_FIXED = frozenset({"BEGIN", "END", "VERSION", "PRODID", "CALSCALE", "METHOD", "N"})
+_VCAL_NAMES = {
+    "FN": "full_name",
+    "ORG": "organization",
+    "TEL": "phone",
+    "ORGANIZER": "organizer",
+    "ATTENDEE": "attendee",
+}
+# vCard ADR: post-office box; extended; street; locality; region; postal code; country.
+_ADR_PARTS = (None, None, "street", "city", "region", "postcode", "country")
 _NGINX = re.compile(r"^[ \t]*([a-z_][a-z0-9_]*)[ \t]+([^;{}#\r\n]+?)[ \t]*;[ \t]*(?:#.*)?$")
 
 _GENERIC_KEYS = frozenset(
@@ -143,6 +161,8 @@ class KeyValueDetector:
     name = "key_value"
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
+        if _VCAL_START.match(ctx.text):
+            return DetectorResult(candidates=self._vcal(ctx.text))
         out: list[Candidate] = []
         content = [
             ln for _, ln in _lines(ctx.text) if ln.strip() and not ln.lstrip().startswith("#")
@@ -293,6 +313,62 @@ class KeyValueDetector:
         camel = any(sum(c.isupper() for c in k) >= 2 for k in keys)
         return camel or len(set(keys)) < len(keys)
 
+    def _vcal(self, text: str) -> list[Candidate]:
+        """iCalendar / vCard properties: the value of each (mailto: dropped), the CN=
+        name of an organizer or attendee, the parts of a vCard address."""
+        out: list[Candidate] = []
+        for line_start, line in _lines(text):
+            m = _VCAL_LINE.match(line)
+            if m is None or m.group(1) in _VCAL_FIXED:
+                continue
+            key = m.group(1)
+            name = _VCAL_NAMES.get(key, key.lower())
+            for pm in _VCAL_PARAM.finditer(m.group(2)):
+                value, s = _unquote(pm.group(2), m.start(2) + pm.start(2))
+                self._add(
+                    out,
+                    text,
+                    f"{name}_name",
+                    None,
+                    line_start + s,
+                    line_start + s + len(value),
+                    "kv.vcal",
+                    0.7,
+                )
+            vstart = m.start(3)
+            value = m.group(3)
+            if key == "ADR":
+                pos = vstart
+                for part, field in zip(_ADR_PARTS, value.split(";"), strict=False):
+                    if part and field:
+                        self._add(
+                            out,
+                            text,
+                            f"address_{part}",
+                            None,
+                            line_start + pos,
+                            line_start + pos + len(field),
+                            "kv.vcal",
+                            0.7,
+                        )
+                    pos += len(field) + 1
+                continue
+            if value.lower().startswith("mailto:"):
+                vstart += len("mailto:")
+                value = value[len("mailto:") :]
+                name = f"{name}_email"
+            self._add(
+                out,
+                text,
+                name,
+                None,
+                line_start + vstart,
+                line_start + vstart + len(value),
+                "kv.vcal",
+                0.7,
+            )
+        return out
+
     @staticmethod
     def _lower_spaced_format(content: list[str]) -> bool:
         """A "keyword value" config with lowercase keywords (redis.conf, haproxy.cfg)?
@@ -331,6 +407,18 @@ class KeyValueDetector:
             trail = len(value) - len(value.rstrip())
             start, end = start + lead, end - trail
             value = text[start:end]
+        if detector != "kv.pairs" and (_PAIRS_SEMI.match(value) or _PAIRS_SPACE.match(value)):
+            sep = ";" if ";" in value else " "
+            pos = start
+            for field in value.split(sep):
+                k, eq, v = field.partition("=")
+                if eq and v:
+                    vs = pos + len(k) + 1
+                    KeyValueDetector._add(
+                        out, text, k.strip(), None, vs, vs + len(v), "kv.pairs", 0.75
+                    )
+                pos += len(field) + 1
+            return
         name = snake_case(key)
         if parent and name in _GENERIC_KEYS:
             name = snake_case(f"{parent}_{key}")

@@ -77,7 +77,7 @@ receipt.txt:
   reject: [Subtotal, Total]
 
 invite.ics:
-  want: [7d1b2c4e-9f0a-4b3c-8d2e-1f6a5b4c3d2e, 20261120T140000Z, 20261120T150000Z, Quarterly architecture review, "Room 4.12, Harbour House", Lena Fischer, lena.fischer@acme.example.com, Tom Baker, tom.baker@acme.example.com]
+  want: [7d1b2c4e-9f0a-4b3c-8d2e-1f6a5b4c3d2e@acme.example.com, 20261120T140000Z, 20261120T150000Z, Quarterly architecture review, "Room 4.12, Harbour House", Lena Fischer, lena.fischer@acme.example.com, Tom Baker, tom.baker@acme.example.com]
   reject: [VEVENT, VCALENDAR, BEGIN]
   names: {20261120T140000Z: dtstart, Quarterly architecture review: summary}
 
