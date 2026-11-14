@@ -19,6 +19,9 @@ _ENV = re.compile(r"^[ \t]*(?:export[ \t]+)?([A-Za-z_][\w.-]*)[ \t]*=[ \t]*(.*?)
 _YAML = re.compile(
     r"^([ \t]*)(-[ \t]+)?([A-Za-z_][\w.\-/]*(?: [A-Za-z][\w.\-/]*){0,3})[ \t]*:(?:[ \t]+(.*?))?[ \t]*$"
 )
+# ssh_config / Apache style "Keyword value" (CamelCase keyword, no separator).
+_SPACED = re.compile(r"^[ \t]*([A-Z][a-z]+(?:[A-Z][a-z0-9]*)*)[ \t]+([^\s#][^#\r\n]*?)[ \t]*$")
+_SPACED_MIN_SHARE = 0.6
 _NGINX = re.compile(r"^[ \t]*([a-z_][a-z0-9_]*)[ \t]+([^;{}#\r\n]+?)[ \t]*;[ \t]*(?:#.*)?$")
 
 _GENERIC_KEYS = frozenset(
@@ -103,6 +106,10 @@ class KeyValueDetector:
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
         out: list[Candidate] = []
+        content = [
+            ln for _, ln in _lines(ctx.text) if ln.strip() and not ln.lstrip().startswith("#")
+        ]
+        spaced_ok = self._spaced_format(content)
         stack: list[tuple[int, str]] = []  # YAML (indent, key) parents
         last_name: tuple[int, str, str] | None = None  # (indent, name value, candidate id)
         for line_start, line in _lines(ctx.text):
@@ -131,6 +138,8 @@ class KeyValueDetector:
             em = _ENV.match(line)
             if em and ":" not in line[: em.start(2)]:
                 value = _strip_comment(em.group(2)) if em.group(2)[:1] not in "\"'" else em.group(2)
+                if value in ("{", "[", "(", "<<EOF", "<<-EOF"):  # a block opens: no value
+                    continue
                 value, s = _unquote(value, em.start(2))
                 self._add(
                     out,
@@ -181,6 +190,21 @@ class KeyValueDetector:
                 last_name = (indent, value, out[-1].id) if is_name and len(out) > before else None
                 continue
 
+            sm = _SPACED.match(line) if spaced_ok else None
+            if sm:
+                value, s = _unquote(sm.group(2), sm.start(2))
+                self._add(
+                    out,
+                    ctx.text,
+                    sm.group(1),
+                    None,
+                    line_start + s,
+                    line_start + s + len(value),
+                    "kv.spaced",
+                    0.6,
+                )
+                continue
+
             nm = _NGINX.match(line)
             if nm:
                 value = nm.group(2)
@@ -196,6 +220,19 @@ class KeyValueDetector:
                     0.55,
                 )
         return DetectorResult(candidates=out)
+
+    @staticmethod
+    def _spaced_format(content: list[str]) -> bool:
+        """Is this a "Keyword value" config (ssh_config, Apache)? Most lines must look
+        like one, and the keywords must look like config, not an address block: a
+        CamelCase keyword (``HostName``) or one that repeats (``Host`` per block)."""
+        if len(content) < 3:
+            return False
+        keys = [m.group(1) for ln in content if (m := _SPACED.match(ln))]
+        if len(keys) / len(content) < _SPACED_MIN_SHARE:
+            return False
+        camel = any(sum(c.isupper() for c in k) >= 2 for k in keys)
+        return camel or len(set(keys)) < len(keys)
 
     @staticmethod
     def _add(

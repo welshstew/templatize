@@ -9,7 +9,7 @@ NER_IMAGE ?= templatize-ner:dev
 OFFLINE = $(COMPOSE) -p templatize-offline -f compose.yaml -f compose.offline.yaml
 PLATFORMS ?= linux/amd64,linux/arm64
 
-PHONY_EXTRA = frontend frontend-dev frontend-test check-all up-llm up-llm-gpu up-llm-gpu-large model model-large llm-image offline-test-llm ner-image ner-model up-ner
+PHONY_EXTRA = samples frontend frontend-dev frontend-test check-all up-llm up-llm-gpu up-llm-gpu-large model model-large llm-image offline-test-llm ner-image ner-model up-ner
 .PHONY: $(PHONY_EXTRA) install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
 
 install:
@@ -26,6 +26,10 @@ frontend-dev:
 
 frontend-test:
 	cd frontend && npm test
+
+# Refresh tests/quality/samples.json from the editor's samples (frontend/src/sample.ts).
+samples:
+	cd frontend && node scripts/export-samples.mjs
 
 test:
 	uv run pytest -q

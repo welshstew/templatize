@@ -227,3 +227,98 @@ def test_diff_candidates_have_top_confidence_after_merge() -> None:
     (c,) = [c for c in res.candidates if c.value == "alpha.example.com"]
     assert c.confidence >= 0.95
     assert "diff" in c.sources
+
+
+# --- quality rules --------------------------------------------------------------
+
+
+def repetition(text: str) -> dict[str, int]:
+    found = RepetitionDetector().detect(DetectionContext(text=text)).candidates
+    return {c.value: len(c.spans) for c in found}
+
+
+def test_port_after_host_is_not_a_clock_time() -> None:
+    text = "from 14:00 to 15:30, db.example.com:5432 and 127.0.0.1:6379, 8080:80"
+    assert values(regex(text), VarType.PORT) == ["5432", "6379", "80"]
+
+
+def test_repetition_skips_line_start_keywords() -> None:
+    text = "Host a\n  User me\nHost b\n  User me\n"
+    assert "Host" not in repetition(text) and "User" not in repetition(text)
+    # A name that also appears mid-line is data, even if it starts a line too.
+    assert repetition("Thanks for joining, Amira.\nAmira\n")["Amira"] == 2
+
+
+def test_repetition_merges_repeated_names() -> None:
+    found = repetition("-- Bluewater Logistics\nVALUES ('Bluewater Logistics');\nBluewater\n")
+    assert found == {"Bluewater Logistics": 2}  # the lone "Bluewater" no longer repeats
+
+
+def test_repetition_ignores_sql_keywords() -> None:
+    found = repetition("insert stuff\n x INSERT INTO a VALUES (1);\n y INSERT INTO b VALUES (2);\n")
+    assert "INSERT" not in found and "VALUES" not in found
+
+
+def test_kv_spaced_keyword_format() -> None:
+    ssh = "Host bastion\n    HostName 203.0.113.10\n    User jmorgan\n"
+    assert kv(ssh) == {"host": "bastion", "host_name": "203.0.113.10", "user": "jmorgan"}
+    # An address block is not a "Keyword value" config.
+    assert kv("Sarah Okafor\nProcurement Manager\nLeeds LS10 1AB\n") == {}
+
+
+def test_kv_block_opener_is_not_a_value() -> None:
+    assert kv('tags = {\n  team = "x"\n}\n') == {"team": "x"}
+
+
+def test_diff_keeps_changed_phrases_whole() -> None:
+    cands, _ = diff(
+        "Procurement Manager\nDear Sarah,\nSarah Okafor\n",
+        "Head of Operations\nDear Tomasz,\nTomasz Nowak\n",
+    )
+    assert sorted(c.value for c in cands) == ["Okafor", "Procurement Manager", "Sarah"]
+    by_value = {c.value: c for c in cands}
+    assert len(by_value["Sarah"].spans) == 2 and by_value["Okafor"].variant_values == ["Nowak"]
+
+
+def test_diff_does_not_swallow_column_padding_neighbours() -> None:
+    cands, _ = diff("Website redesign      1  4,200.00\n", "Brand identity package  1  2,750.00\n")
+    assert all(not c.value.rstrip().endswith(" 1") for c in cands)
+
+
+# --- sql ------------------------------------------------------------------------
+
+
+def sql(text: str) -> list[tuple[str, str]]:
+    from templatize.detectors.sql import SqlDetector
+
+    return [(c.name, c.value) for c in SqlDetector().detect(DetectionContext(text=text)).candidates]
+
+
+def test_sql_insert_pairs_values_with_columns() -> None:
+    text = (
+        "INSERT INTO tenants (id, slug, plan) VALUES ('t1', 'blue''water', 'pro');\n"
+        "INSERT INTO users (email, role) VALUES\n  ('a@x.example', 'admin'),\n  ('b@x.example', 'member');\n"
+    )
+    assert sql(text) == [
+        ("tenant_id", "t1"),
+        ("slug", "blue''water"),
+        ("plan", "pro"),
+        ("email", "a@x.example"),
+        ("role", "admin"),
+        ("email", "b@x.example"),
+        ("role", "member"),
+    ]
+
+
+def test_sql_skips_expressions_and_keywords() -> None:
+    text = "INSERT INTO t (a, b, c, d) VALUES (now(), NULL, lower('X'), 42);\n"
+    assert sql(text) == [("d", "42")]
+
+
+def test_sql_update_set_and_where() -> None:
+    text = "UPDATE tenants SET seat_limit = 150, plan = 'pro' WHERE slug = 'blue';\n"
+    assert sql(text) == [("seat_limit", "150"), ("plan", "pro"), ("slug", "blue")]
+
+
+def test_sql_no_statements_no_candidates() -> None:
+    assert sql("SELECT 1;\n-- INSERT INTO is in a comment without a column list\n") == []

@@ -554,9 +554,12 @@ hints, so `port: 0080` stays `0080`.
 | Detector | What it finds | Confidence |
 |---|---|---|
 | `regex` | IPv4/IPv6, CIDR, email, URL, hostname/FQDN, port, UUID, ISO/numeric/text dates, semver, paths, MAC | 0.6–0.9 |
-| `key_value` | values in `key: value`, `key = value`, `KEY=value`, `"key": "value"`, `directive value;`. Names come from the key, YAML parents qualify generic keys (`database_host`), and k8s `name:`/`value:` pairs are recognised | 0.45–0.7 |
-| `repetition` | identical non-trivial tokens appearing ≥2 times → one variable covering all occurrences | 0.5–0.7 |
-| `diff` | regions that differ between the document and its variants | 0.95 |
+| `key_value` | values in `key: value`, `key = value`, `KEY=value`, `"key": "value"`, `directive value;`, and ssh_config/Apache-style `Keyword value` lines. Names come from the key, YAML parents qualify generic keys (`database_host`), and k8s `name:`/`value:` pairs are recognised | 0.45–0.7 |
+| `sql` | literals in `INSERT … (cols) VALUES (…)` rows, `UPDATE … SET col = …` and `WHERE col = …`, named after their column | 0.7–0.75 |
+| `repetition` | identical non-trivial tokens (or multi-word names such as `Bluewater Logistics`) appearing ≥2 times → one variable covering all occurrences. Words that only ever start a line (`Host`, `INSERT`) are treated as the format's keywords | 0.5–0.7 |
+| `diff` | regions that differ between the document and its variants; a changed phrase (`Procurement Manager` → `Head of Operations`) stays one value | 0.95 |
+
+**Suggestion quality tests.** `tests/quality/` runs the detectors on every sample in the editor and checks `expectations.yaml`: values that must be suggested whole, and known noise that must not be. `make samples` refreshes the exported samples after editing `frontend/src/sample.ts`.
 
 **Merging.** Candidates with the same non-trivial value are unified into one
 variable covering every occurrence; agreement between detectors raises confidence.

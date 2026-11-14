@@ -276,7 +276,10 @@ PATTERNS: list[Pattern] = [
     Pattern(
         "regex.port_after_host",
         VarType.PORT,
-        re.compile(r"(?<=[\w\]]):(\d{2,5})(?![\w.:])"),
+        # Not a time: "15:30" (an hour of 1-2 digits before the colon) is not host:port.
+        re.compile(
+            r"(?<=[\w\]])(?<![^\w.]\d)(?<![^\w.]\d\d)(?<!^\d)(?<!^\d\d):(\d{2,5})(?![\w.:])"
+        ),
         0.6,
         _valid_port,
         group=1,

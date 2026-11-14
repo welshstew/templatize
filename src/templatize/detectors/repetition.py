@@ -11,6 +11,59 @@ from templatize.naming import infer_type, snake_case, type_name
 
 _TOKEN = re.compile(r"[\w](?:[\w.\-:/@]*[\w])?")
 _KEY_AFTER = re.compile(r"[ \t]*[:=]")
+_LINE_START = re.compile(r"(?:^|\n)[ \t]*\Z")
+# Capitalised words in a row ("Bluewater Logistics", "Orbit Analytics GmbH"),
+# separated by single spaces: a name repeated as a whole is one value.
+_WORD = r"[A-Z](?:[\w&-]|'(?=\w))*"
+_PHRASE = re.compile(rf"(?<![\w.@/-]){_WORD}(?: {_WORD})+(?![\w@/])")
+_SQL_KEYWORDS = frozenset(
+    [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "INTO",
+        "VALUES",
+        "FROM",
+        "WHERE",
+        "JOIN",
+        "LEFT",
+        "RIGHT",
+        "INNER",
+        "OUTER",
+        "GROUP",
+        "ORDER",
+        "LIMIT",
+        "OFFSET",
+        "HAVING",
+        "UNION",
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "TABLE",
+        "INDEX",
+        "VIEW",
+        "PRIMARY",
+        "FOREIGN",
+        "REFERENCES",
+        "DEFAULT",
+        "NULL",
+        "CONSTRAINT",
+        "UNIQUE",
+        "BEGIN",
+        "COMMIT",
+        "ROLLBACK",
+        "RETURNING",
+        "CONFLICT",
+        "NOTHING",
+        "EXISTS",
+        "GRANT",
+        "REVOKE",
+        "SCHEMA",
+        "SEQUENCE",
+        "TRIGGER",
+    ]
+)
 
 _STOPWORDS = frozenset(
     [
@@ -114,7 +167,7 @@ _STOPWORDS = frozenset(
 
 
 def _non_trivial(tok: str) -> bool:
-    if len(tok) < 3 or tok.lower() in _STOPWORDS:
+    if len(tok) < 3 or tok.lower() in _STOPWORDS or tok in _SQL_KEYWORDS:
         return False
     if tok.isdigit():
         return len(tok) >= 3
@@ -134,17 +187,31 @@ class RepetitionDetector:
         text = ctx.text
         occurrences: dict[str, list[Span]] = defaultdict(list)
         used_as_key: set[str] = set()
+        mid_line: set[str] = set()
+        phrases = self._phrases(text)
+        in_phrase = [False] * (len(text) + 1)
+        for spans in phrases.values():
+            for sp in spans:
+                for i in range(sp.start, sp.end):
+                    in_phrase[i] = True
         for m in _TOKEN.finditer(text):
             tok = m.group(0)
-            if not _non_trivial(tok):
+            if not _non_trivial(tok) or in_phrase[m.start()]:
                 continue
             if _KEY_AFTER.match(text, m.end()) and not text.startswith("://", m.end()):
                 used_as_key.add(tok)
+            if not _LINE_START.search(text, max(0, m.start() - 200), m.start()):
+                mid_line.add(tok)
             occurrences[tok].append(Span(start=m.start(), end=m.end()))
+        # A word that only ever starts a line ("Host", "User", "INSERT") is the
+        # format's keyword, not data.
+        keywords = {t for t, sp in occurrences.items() if len(sp) >= 2 and t not in mid_line}
+        for phrase, spans in phrases.items():
+            occurrences[phrase] = spans
 
         out: list[Candidate] = []
         for tok, spans in occurrences.items():
-            if len(spans) < self.min_count or tok in used_as_key:
+            if len(spans) < self.min_count or tok in used_as_key or tok in keywords:
                 continue
             vtype = infer_type(tok)
             if vtype is VarType.INT and len(spans) > 6:
@@ -165,3 +232,20 @@ class RepetitionDetector:
                 )
             )
         return DetectorResult(candidates=out)
+
+    def _phrases(self, text: str) -> dict[str, list[Span]]:
+        """Multi-word capitalised names that occur at least ``min_count`` times."""
+        found: dict[str, list[Span]] = defaultdict(list)
+        for m in _PHRASE.finditer(text):
+            words = m.group(0).split(" ")
+            # Trim leading/trailing words that are not part of a name ("Please", "Hi").
+            while words and (words[0].lower() in _STOPWORDS or len(words[0]) < 2):
+                words.pop(0)
+            while words and (words[-1].lower() in _STOPWORDS or len(words[-1]) < 2):
+                words.pop()
+            if len(words) < 2:
+                continue
+            phrase = " ".join(words)
+            start = m.start() + m.group(0).index(phrase)
+            found[phrase].append(Span(start=start, end=start + len(phrase)))
+        return {p: sp for p, sp in found.items() if len(sp) >= self.min_count}

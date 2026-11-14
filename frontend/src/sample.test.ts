@@ -30,3 +30,10 @@ test("samples: label says '(2 examples)' exactly when a variant is included", ()
     assert.equal(s.label.includes("(2 examples)"), (s.variants ?? []).length === 1, s.id);
   }
 });
+
+test("samples: tests/quality/samples.json is up to date (run `make samples`)", async () => {
+  const { readFileSync } = await import("node:fs");
+  // @ts-expect-error: plain JS module without types
+  const { SAMPLES_JSON, samplesJson } = await import("../scripts/export-samples.mjs");
+  assert.equal(readFileSync(SAMPLES_JSON, "utf8"), samplesJson());
+});

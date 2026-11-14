@@ -1,0 +1,118 @@
+[
+  {
+    "id": "nginx",
+    "text": "server {\n    listen 443 ssl;\n    server_name billing.example.com;\n\n    ssl_certificate /etc/nginx/certs/billing.example.com.crt;\n\n    location / {\n        proxy_pass 10.20.30.41:8080;\n        proxy_set_header X-Env production;\n    }\n}\n",
+    "variants": [
+      "server {\n    listen 443 ssl;\n    server_name payments.example.com;\n\n    ssl_certificate /etc/nginx/certs/payments.example.com.crt;\n\n    location / {\n        proxy_pass 10.20.30.77:8080;\n        proxy_set_header X-Env staging;\n    }\n}\n"
+    ]
+  },
+  {
+    "id": "k8s",
+    "text": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders-api\n  namespace: shop-prod\n  labels:\n    app: orders-api\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: orders-api\n  template:\n    metadata:\n      labels:\n        app: orders-api\n    spec:\n      containers:\n        - name: orders-api\n          image: registry.example.com/acme/orders-api:1.14.2\n          ports:\n            - containerPort: 8080\n          env:\n            - name: LOG_LEVEL\n              value: info\n          resources:\n            limits:\n              memory: 512Mi\n              cpu: 500m\n",
+    "variants": [
+      "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: inventory-api\n  namespace: shop-staging\n  labels:\n    app: inventory-api\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: inventory-api\n  template:\n    metadata:\n      labels:\n        app: inventory-api\n    spec:\n      containers:\n        - name: inventory-api\n          image: registry.example.com/acme/inventory-api:2.3.0\n          ports:\n            - containerPort: 8080\n          env:\n            - name: LOG_LEVEL\n              value: info\n          resources:\n            limits:\n              memory: 256Mi\n              cpu: 500m\n"
+    ]
+  },
+  {
+    "id": "k8s-stack",
+    "text": "# Storefront: production\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: storefront-config\n  namespace: shop-prod\ndata:\n  LOG_LEVEL: info\n  FEATURE_FLAGS: \"checkout-v2,search-beta\"\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: storefront\n  namespace: shop-prod\n  labels:\n    app.kubernetes.io/name: storefront\nspec:\n  replicas: 4\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: storefront\n  template:\n    metadata:\n      labels:\n        app.kubernetes.io/name: storefront\n    spec:\n      containers:\n        - name: web\n          image: ghcr.io/acme/storefront:3.9.1\n          ports:\n            - containerPort: 8080\n          envFrom:\n            - configMapRef:\n                name: storefront-config\n          resources:\n            limits:\n              cpu: \"1\"\n              memory: 1Gi\n---\napiVersion: v1\nkind: Service\nmetadata:\n  name: storefront\n  namespace: shop-prod\nspec:\n  type: ClusterIP\n  selector:\n    app.kubernetes.io/name: storefront\n  ports:\n    - port: 80\n      targetPort: 8080\n---\napiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: storefront\n  namespace: shop-prod\nspec:\n  ingressClassName: nginx\n  tls:\n    - hosts:\n        - shop.example.com\n      secretName: storefront-tls\n  rules:\n    - host: shop.example.com\n      http:\n        paths:\n          - path: /\n            pathType: Prefix\n            backend:\n              service:\n                name: storefront\n                port:\n                  number: 80\n",
+    "variants": [
+      "# Storefront: staging\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: storefront-config\n  namespace: shop-staging\ndata:\n  LOG_LEVEL: debug\n  FEATURE_FLAGS: \"checkout-v2,search-beta\"\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: storefront\n  namespace: shop-staging\n  labels:\n    app.kubernetes.io/name: storefront\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app.kubernetes.io/name: storefront\n  template:\n    metadata:\n      labels:\n        app.kubernetes.io/name: storefront\n    spec:\n      containers:\n        - name: web\n          image: ghcr.io/acme/storefront:3.10.0-rc.2\n          ports:\n            - containerPort: 8080\n          envFrom:\n            - configMapRef:\n                name: storefront-config\n          resources:\n            limits:\n              cpu: \"1\"\n              memory: 512Mi\n---\napiVersion: v1\nkind: Service\nmetadata:\n  name: storefront\n  namespace: shop-staging\nspec:\n  type: ClusterIP\n  selector:\n    app.kubernetes.io/name: storefront\n  ports:\n    - port: 80\n      targetPort: 8080\n---\napiVersion: networking.k8s.io/v1\nkind: Ingress\nmetadata:\n  name: storefront\n  namespace: shop-staging\nspec:\n  ingressClassName: nginx\n  tls:\n    - hosts:\n        - shop.staging.example.com\n      secretName: storefront-tls\n  rules:\n    - host: shop.staging.example.com\n      http:\n        paths:\n          - path: /\n            pathType: Prefix\n            backend:\n              service:\n                name: storefront\n                port:\n                  number: 80\n"
+    ]
+  },
+  {
+    "id": "compose",
+    "text": "services:\n  web:\n    image: ghcr.io/acme/storefront:4.2.1\n    ports:\n      - \"8080:80\"\n    environment:\n      DATABASE_URL: postgres://shop:s3cretPass@db:5432/storefront\n      PUBLIC_HOST: shop.example.com\n    depends_on: [db]\n\n  db:\n    image: postgres:16.4\n    environment:\n      POSTGRES_USER: shop\n      POSTGRES_PASSWORD: s3cretPass\n      POSTGRES_DB: storefront\n    volumes:\n      - pgdata:/var/lib/postgresql/data\n\nvolumes:\n  pgdata:\n",
+    "variants": []
+  },
+  {
+    "id": "dotenv",
+    "text": "APP_ENV=production\nAPP_URL=https://app.example.com\nDEBUG=false\n\nDB_HOST=db-prod-01.internal.example.com\nDB_PORT=5432\nDB_NAME=orders\nDB_USER=app_user\n\nREDIS_URL=redis://cache.internal.example.com:6379/0\nSTRIPE_API_KEY=sk_live_EXAMPLE0000000000000000\nSENTRY_DSN=https://abc123@sentry.example.com/42\n",
+    "variants": [
+      "APP_ENV=staging\nAPP_URL=https://staging.example.com\nDEBUG=true\n\nDB_HOST=db-stg-01.internal.example.com\nDB_PORT=5432\nDB_NAME=orders_staging\nDB_USER=app_user\n\nREDIS_URL=redis://cache.internal.example.com:6379/0\nSTRIPE_API_KEY=sk_test_EXAMPLE0000000000000000\nSENTRY_DSN=https://abc123@sentry.example.com/42\n"
+    ]
+  },
+  {
+    "id": "systemd",
+    "text": "[Unit]\nDescription=Event ingestion daemon\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=ingest\nWorkingDirectory=/opt/ingestd\nExecStart=/opt/ingestd/bin/ingestd --port 9100 --config /etc/ingestd/config.toml\nRestart=on-failure\nRestartSec=5\nEnvironment=RUST_LOG=info\n\n[Install]\nWantedBy=multi-user.target\n",
+    "variants": [
+      "[Unit]\nDescription=Nightly report generator\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nUser=reports\nWorkingDirectory=/opt/reportd\nExecStart=/opt/reportd/bin/reportd --port 9200 --config /etc/reportd/config.toml\nRestart=on-failure\nRestartSec=5\nEnvironment=RUST_LOG=info\n\n[Install]\nWantedBy=multi-user.target\n"
+    ]
+  },
+  {
+    "id": "terraform",
+    "text": "provider \"aws\" {\n  region = \"eu-west-2\"\n}\n\nresource \"aws_s3_bucket\" \"assets\" {\n  bucket = \"acme-marketing-assets-prod\"\n\n  tags = {\n    Team        = \"marketing\"\n    Environment = \"prod\"\n    CostCenter  = \"CC-4410\"\n  }\n}\n\nresource \"aws_instance\" \"web\" {\n  ami           = \"ami-0a1b2c3d4e5f67890\"\n  instance_type = \"t3.medium\"\n  subnet_id     = \"subnet-0123abcd4567ef890\"\n\n  tags = {\n    Name        = \"marketing-web-01\"\n    Environment = \"prod\"\n  }\n}\n",
+    "variants": []
+  },
+  {
+    "id": "gha",
+    "text": "name: Deploy docs\n\non:\n  push:\n    branches: [main]\n\njobs:\n  deploy:\n    runs-on: ubuntu-24.04\n    environment: production\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: \"22\"\n      - run: npm ci && npm run build\n      - name: Upload\n        run: rsync -az dist/ deploy@docs.example.com:/var/www/docs\n        env:\n          SSH_KNOWN_HOST: docs.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyOnly\n",
+    "variants": []
+  },
+  {
+    "id": "ssh",
+    "text": "Host bastion\n    HostName 203.0.113.10\n    User jmorgan\n    Port 2222\n    IdentityFile ~/.ssh/id_ed25519_work\n\nHost db-primary\n    HostName 10.0.4.21\n    User jmorgan\n    ProxyJump bastion\n    LocalForward 5433 127.0.0.1:5432\n",
+    "variants": []
+  },
+  {
+    "id": "ini",
+    "text": "[server]\nhost = 0.0.0.0\nport = 8443\nworkers = 8\npublic_url = https://wiki.example.org\n\n[database]\nurl = mysql://wiki:Tr0ub4dor@192.0.2.55:3306/wikidb\npool_size = 20\n\n[mail]\nsmtp_host = smtp.example.org\nsmtp_port = 587\nfrom_address = wiki-noreply@example.org\nadmin_email = it-support@example.org\n",
+    "variants": []
+  },
+  {
+    "id": "json",
+    "text": "{\n  \"service\": \"notification-gateway\",\n  \"version\": \"3.8.0\",\n  \"listen\": { \"host\": \"0.0.0.0\", \"port\": 7070 },\n  \"region\": \"us-east-1\",\n  \"queue\": {\n    \"url\": \"https://queue.us-east-1.example.com/123456789012/notifications\",\n    \"batch_size\": 25\n  },\n  \"providers\": {\n    \"sms\": { \"sender_id\": \"ACMEALERT\", \"api_key\": \"AKIAIOSFODNN7EXAMPLE\" },\n    \"email\": { \"from\": \"alerts@acme.example.com\", \"reply_to\": \"support@acme.example.com\" }\n  },\n  \"owner\": \"platform-team@acme.example.com\"\n}\n",
+    "variants": []
+  },
+  {
+    "id": "letter",
+    "text": "Northwind Components Ltd\n14 Harbour Road\nBristol BS1 6AA\n\n3 March 2026\n\nSarah Okafor\nProcurement Manager\nCalder Engineering plc\nUnit 7, Riverside Park\nLeeds LS10 1AB\n\nDear Sarah,\n\nThank you for purchase order PO-55821. We are pleased to confirm the order for a\ntotal of GBP 18,450.00, payable within 30 days of invoice.\n\nThe goods will be dispatched on 17 March 2026 from our Bristol warehouse. Your account\nmanager, Ravi Patel, can be reached on +44 117 555 0142 or at\nravi.patel@northwind.example.com.\n\nYours sincerely,\n\nHelen Clarke\nSales Director\n",
+    "variants": [
+      "Northwind Components Ltd\n14 Harbour Road\nBristol BS1 6AA\n\n21 April 2026\n\nTomasz Nowak\nHead of Operations\nFenwick Robotics Ltd\n2 Mill Lane\nManchester M4 2PL\n\nDear Tomasz,\n\nThank you for purchase order PO-56107. We are pleased to confirm the order for a\ntotal of GBP 7,980.50, payable within 30 days of invoice.\n\nThe goods will be dispatched on 5 May 2026 from our Bristol warehouse. Your account\nmanager, Ravi Patel, can be reached on +44 117 555 0142 or at\nravi.patel@northwind.example.com.\n\nYours sincerely,\n\nHelen Clarke\nSales Director\n"
+    ]
+  },
+  {
+    "id": "invoice",
+    "text": "INVOICE INV-2026-0412\n\nIssued: 2026-04-01\nDue:    2026-05-01\n\nBill to:\nMarlow & Hart Architects\naccounts@marlowhart.example.com\n\nDescription                         Qty    Unit price       Amount\n------------------------------------------------------------------\nWebsite redesign                      1      4,200.00     4,200.00\nHosting (12 months)                   1        360.00       360.00\n------------------------------------------------------------------\n                                                  Total  GBP 4,560.00\n\nPay by bank transfer to Brightline Studio, sort code 20-00-00, account 55512345,\nquoting INV-2026-0412 as the reference.\n",
+    "variants": [
+      "INVOICE INV-2026-0437\n\nIssued: 2026-04-15\nDue:    2026-05-15\n\nBill to:\nGreenfield Bakery Co\nfinance@greenfieldbakery.example.com\n\nDescription                         Qty    Unit price       Amount\n------------------------------------------------------------------\nBrand identity package                1      2,750.00     2,750.00\nHosting (12 months)                   1        360.00       360.00\n------------------------------------------------------------------\n                                                  Total  GBP 3,110.00\n\nPay by bank transfer to Brightline Studio, sort code 20-00-00, account 55512345,\nquoting INV-2026-0437 as the reference.\n"
+    ]
+  },
+  {
+    "id": "welcome",
+    "text": "Subject: Welcome to Lumen, Priya!\n\nHi Priya,\n\nYour Team account is ready. You can sign in at https://app.lumen.example.com\nwith priya.shah@example.com.\n\nYour free trial runs until 28 May 2026. After that you'll be billed monthly unless you\ncancel from Settings > Billing.\n\nYou've been added to the \"Design Ops\" workspace. Your workspace admin can invite more\npeople at any time.\n\nNeed help? Reply to this email or visit https://help.lumen.example.com for guides.\n\n— The Lumen team\n",
+    "variants": [
+      "Subject: Welcome to Lumen, Marcus!\n\nHi Marcus,\n\nYour Pro account is ready. You can sign in at https://app.lumen.example.com\nwith marcus.lee@example.net.\n\nYour free trial runs until 9 June 2026. After that you'll be billed monthly unless you\ncancel from Settings > Billing.\n\nYou've been added to the \"Growth Marketing\" workspace. Your workspace admin can invite more\npeople at any time.\n\nNeed help? Reply to this email or visit https://help.lumen.example.com for guides.\n\n— The Lumen team\n"
+    ]
+  },
+  {
+    "id": "offer",
+    "text": "Dear Daniel Fischer,\n\nWe are delighted to offer you the position of Senior Data Engineer at Orbit\nAnalytics GmbH, reporting to Lena Brandt, Head of Data Platform.\n\nStart date: 1 September 2026\nLocation: Berlin office (hybrid, 3 days on site)\nAnnual salary: EUR 92,000, paid monthly\nHoliday: 28 days plus public holidays\n\nThis offer is conditional on satisfactory references. Please confirm your\nacceptance by 15 July 2026 by replying to people@orbit-analytics.example.com.\n\nKind regards,\n\nJana Weber\nPeople Partner, Orbit Analytics GmbH\n",
+    "variants": []
+  },
+  {
+    "id": "meeting",
+    "text": "Subject: Q3 planning review — Thursday 9 July, 14:00 BST\n\nHi all,\n\nPlease join the Q3 planning review on Thursday 9 July from 14:00 to 15:30 BST in\nthe Aurora room (3rd floor) or on the video call:\nhttps://meet.example.com/j/8841-2207-553\n\nAgenda:\n1. Q2 results — Amira Haddad (10 min)\n2. Roadmap priorities — Chris Duval (40 min)\n3. Hiring plan and budget of USD 240,000 — Amira Haddad (20 min)\n\nDial-in: +1 415 555 0199, PIN 66 41 09\n\nThanks,\nAmira\n",
+    "variants": []
+  },
+  {
+    "id": "release",
+    "text": "# Harbor CLI 2.7.0\n\nReleased 12 August 2026.\n\n## Highlights\n\n- `harbor deploy` now supports `--region eu-central-1` and `--region ap-south-1`.\n- Login tokens expire after 30 days instead of 7.\n\n## Fixes\n\n- Fixed a crash when `HARBOR_HOME` contained spaces (#4182).\n- Uploads larger than 2 GiB no longer time out (#4199).\n\n## Upgrade\n\n    curl -fsSL https://get.harbor.example.com/install.sh | sh -s -- --version 2.7.0\n\nThanks to @lmartins and @kchen for their contributions.\n",
+    "variants": []
+  },
+  {
+    "id": "sql",
+    "text": "-- Seed tenant: Bluewater Logistics\nINSERT INTO tenants (id, slug, name, plan, created_at)\nVALUES ('7f3c2a10-5b1e-4d8a-9c77-2e4f6a1b0c93', 'bluewater', 'Bluewater Logistics', 'enterprise', '2026-02-14 09:30:00');\n\nINSERT INTO users (tenant_id, email, role)\nVALUES\n  ('7f3c2a10-5b1e-4d8a-9c77-2e4f6a1b0c93', 'ops-admin@bluewater.example.com', 'admin'),\n  ('7f3c2a10-5b1e-4d8a-9c77-2e4f6a1b0c93', 'dispatch@bluewater.example.com', 'member');\n\nUPDATE tenants SET seat_limit = 150 WHERE slug = 'bluewater';\n",
+    "variants": []
+  },
+  {
+    "id": "html-email",
+    "text": "<!doctype html>\n<html>\n  <body style=\"font-family: sans-serif\">\n    <p>Hi Elena,</p>\n    <p>We received a request to reset the password for elena.rossi@example.com.</p>\n    <p>\n      <a href=\"https://accounts.example.com/reset?token=Q9x2LmP7vK4tR8sW\">Reset your password</a>\n    </p>\n    <p>This link expires at 18:45 UTC on 2 October 2026. If you didn't ask for this, you can ignore this email.</p>\n    <p>— Example Accounts</p>\n  </body>\n</html>\n",
+    "variants": []
+  },
+  {
+    "id": "python",
+    "text": "\"\"\"Settings for the billing worker.\"\"\"\n\nSERVICE_NAME = \"billing-worker\"\nENVIRONMENT = \"production\"\n\nDATABASE = {\n    \"host\": \"pg-billing.internal.example.com\",\n    \"port\": 5432,\n    \"name\": \"billing\",\n    \"user\": \"billing_rw\",\n}\n\nKAFKA_BROKERS = [\"10.8.0.11:9092\", \"10.8.0.12:9092\", \"10.8.0.13:9092\"]\nINVOICE_TOPIC = \"billing.invoices.v2\"\nRETRY_LIMIT = 5\nALERT_EMAIL = \"billing-oncall@example.com\"\n",
+    "variants": []
+  }
+]

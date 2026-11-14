@@ -100,7 +100,29 @@ def _char_segments(a: str, b: str) -> list[Segment]:
             raw.extend(_token_segments(a[ca1:ca2], b[cb1:cb2], ca1, cb1))
         else:
             raw.append(Segment(ca1, ca2, cb1, cb2, False))
-    return _coalesce(raw)
+    return _coalesce(_absorb_gaps(a, _coalesce(raw)))
+
+
+def _absorb_gaps(a: str, segs: list[Segment]) -> list[Segment]:
+    """Two changes separated only by spaces on one line are one change: the token
+    diff pairs up the spaces of "Procurement Manager" and "Head of Operations",
+    which would otherwise split a changed phrase into one variable per word."""
+    out: list[Segment] = []
+    for i, s in enumerate(segs):
+        gap = a[s.a1 : s.a2]
+        if (
+            s.equal
+            and out
+            and not out[-1].equal
+            and i + 1 < len(segs)
+            and not segs[i + 1].equal
+            and gap
+            and gap in (" ", "\t")
+        ):
+            out[-1].a2, out[-1].b2 = s.a2, s.b2
+            continue
+        out.append(Segment(s.a1, s.a2, s.b1, s.b2, s.equal, s.widened))
+    return out
 
 
 def _offsets(lines: list[str]) -> list[int]:
@@ -149,12 +171,16 @@ def _widen(a: str, b: str, segs: list[Segment]) -> list[Segment]:
         elif b1 == b2:
             while a2 < hi and a[a1] == a[a2] and a[a1].isspace():
                 a1, a2, b1, b2 = a1 + 1, a2 + 1, b1 + 1, b2 + 1
-        while a1 > lo and not _delim_at(a, a1 - 1):
-            a1 -= 1
-            b1 -= 1
-        while a2 < hi and not _delim_at(a, a2):
-            a2 += 1
-            b2 += 1
+        # Grow only a change that cuts a word: one that already starts/ends on a
+        # delimiter (column padding before "1") keeps its edge.
+        if needs or not _delim_at(a, a1):
+            while a1 > lo and not _delim_at(a, a1 - 1):
+                a1 -= 1
+                b1 -= 1
+        if needs or not _delim_at(a, a2 - 1):
+            while a2 < hi and not _delim_at(a, a2):
+                a2 += 1
+                b2 += 1
         if a1 == a2 and needs:
             # Inserted text between delimiters: take the following word as the anchor.
             while a2 < hi and _delim_at(a, a2) and a[a2] not in "\r\n":
@@ -239,6 +265,35 @@ def _snap_to_anchors(text: str, spans: list[tuple[int, int]]) -> list[tuple[int,
     return out
 
 
+Region = tuple[int, int, tuple[str, ...]]
+
+
+def _split_on_known(regions: list[Region]) -> list[Region]:
+    """Split a region that starts or ends with another region's value, space-separated,
+    in the document and in every example: with "Dear Sarah" (-> "Tomasz") elsewhere,
+    "Sarah Okafor" (-> "Tomasz Nowak") becomes "Sarah" + "Okafor", so the first name
+    is one variable everywhere instead of the full name hiding it."""
+    known = {key for _, _, key in regions}
+    out: list[Region] = []
+    for s1, s2, key in regions:
+        for other in known:
+            if other == key or not all(other):
+                continue
+            if all(v.startswith(o + " ") for v, o in zip(key, other, strict=True)):
+                cut = len(other[0])
+                rest = tuple(v[len(o) + 1 :] for v, o in zip(key, other, strict=True))
+                out += [(s1, s1 + cut, other), (s1 + cut + 1, s2, rest)]
+                break
+            if all(v.endswith(" " + o) for v, o in zip(key, other, strict=True)):
+                cut = len(key[0]) - len(other[0])
+                rest = tuple(v[: len(v) - len(o) - 1] for v, o in zip(key, other, strict=True))
+                out += [(s1, s1 + cut - 1, rest), (s1 + cut, s2, other)]
+                break
+        else:
+            out.append((s1, s2, key))
+    return out
+
+
 class DiffDetector:
     name = "diff"
 
@@ -288,13 +343,23 @@ class DiffDetector:
 
         # Regions with the same primary value and the same values in every variant are
         # one variable occurring several times ("Dear Ms. Johnson" / "Ms. Alice Johnson").
-        grouped: dict[tuple[str, ...], list[Span]] = {}
-        for s1, s2 in union:
-            variant_values = tuple(
-                ctx.variants[k][_map_start(segs, s1) : _map_end(segs, s2)]
-                for k, segs in enumerate(per_variant)
+        regions = [
+            (
+                s1,
+                s2,
+                (
+                    a[s1:s2],
+                    *(
+                        ctx.variants[k][_map_start(segs, s1) : _map_end(segs, s2)]
+                        for k, segs in enumerate(per_variant)
+                    ),
+                ),
             )
-            grouped.setdefault((a[s1:s2], *variant_values), []).append(Span(start=s1, end=s2))
+            for s1, s2 in union
+        ]
+        grouped: dict[tuple[str, ...], list[Span]] = {}
+        for s1, s2, key in _split_on_known(regions):
+            grouped.setdefault(key, []).append(Span(start=s1, end=s2))
 
         out: list[Candidate] = []
         for (value, *values_by_variant), group_spans in grouped.items():

@@ -1,0 +1,88 @@
+# Suggestion quality for the editor's samples (tests/quality/samples.json).
+#
+#   want:   values that must be suggested, each as one whole candidate value
+#   reject: values that must not be suggested (format keywords, split names,
+#           times mistaken for ports, block openers, ...)
+#
+# Every sample needs an entry, so a new sample comes with its expectations.
+# Heuristic detectors only (no LLM / NER), with the sample's examples.
+
+nginx:
+  want: [billing.example.com, /etc/nginx/certs/billing.example.com.crt, "10.20.30.41:8080", "443"]
+  reject: [server, listen]
+
+k8s:
+  want: [orders-api, shop-prod, "3", registry.example.com/acme/orders-api, 1.14.2, 512Mi]
+  reject: [Deployment, apps/v1]
+
+k8s-stack:
+  want: [shop-prod, storefront-config, info, "4", ghcr.io/acme/storefront, 3.9.1, 1Gi, shop.example.com, storefront-tls]
+  reject: [ConfigMap, Ingress, networking.k8s.io/v1]
+
+compose:
+  want: [ghcr.io/acme/storefront:4.2.1, "postgres://shop:s3cretPass@db:5432/storefront", shop.example.com, s3cretPass, postgres:16.4]
+  reject: [services]
+
+dotenv:
+  want: [production, https://app.example.com, db-prod-01.internal.example.com, orders, sk_live_EXAMPLE0000000000000000]
+  reject: []
+
+systemd:
+  want: [Event ingestion daemon, ingest, /opt/ingestd, /etc/ingestd/config.toml, "9100"]
+  reject: [Event, ingestion, daemon]
+
+terraform:
+  want: [eu-west-2, acme-marketing-assets-prod, marketing, CC-4410, ami-0a1b2c3d4e5f67890, t3.medium, marketing-web-01]
+  reject: ["{"]
+
+gha:
+  want: [Deploy docs, ubuntu-24.04, production, "22", deploy@docs.example.com]
+  reject: []
+
+ssh:
+  want: [bastion, db-primary, 203.0.113.10, jmorgan, "2222", ~/.ssh/id_ed25519_work, 10.0.4.21]
+  reject: [Host, HostName, User]
+
+ini:
+  want: [0.0.0.0, "8443", https://wiki.example.org, "mysql://wiki:Tr0ub4dor@192.0.2.55:3306/wikidb", smtp.example.org, wiki-noreply@example.org]
+  reject: []
+
+json:
+  want: [notification-gateway, 3.8.0, "7070", us-east-1, AKIAIOSFODNN7EXAMPLE, alerts@acme.example.com]
+  reject: []
+
+python:
+  want: [billing-worker, production, pg-billing.internal.example.com, billing, billing.invoices.v2, billing-oncall@example.com]
+  reject: ["{"]
+
+letter:
+  want: [Sarah, Okafor, Procurement Manager, Calder Engineering plc, "Unit 7, Riverside Park", PO-55821, "18,450.00", 3 March 2026, 17 March 2026]
+  reject: [Procurement, Manager, Calder, Riverside, "7,"]
+
+invoice:
+  want: [INV-2026-0412, 2026-04-01, 2026-05-01, Marlow & Hart Architects, accounts@marlowhart.example.com, "4,560.00"]
+  reject: [Marlow, "&", "redesign                      1"]
+
+welcome:
+  want: [Priya, Design Ops, priya.shah@example.com, 28 May 2026]
+  reject: [Design, Ops]
+
+offer:
+  want: [1 September 2026, 15 July 2026, people@orbit-analytics.example.com]
+  reject: []
+
+meeting:
+  want: [Amira Haddad, https://meet.example.com/j/8841-2207-553]
+  reject: ["30", Amira, Haddad]
+
+release:
+  want: []
+  reject: []
+
+sql:
+  want: [Bluewater Logistics, bluewater, enterprise, 7f3c2a10-5b1e-4d8a-9c77-2e4f6a1b0c93, "2026-02-14 09:30:00", ops-admin@bluewater.example.com, admin, member, "150"]
+  reject: [INSERT, VALUES, Bluewater, Logistics]
+
+html-email:
+  want: [elena.rossi@example.com, 2 October 2026]
+  reject: ["45"]
