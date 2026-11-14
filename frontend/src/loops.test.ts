@@ -226,3 +226,32 @@ test("map loops: rows in the UI, a mapping for the template", () => {
   assert.deepEqual(previewValues(items, [renamed]), { env: { A_KEY: "one", B_KEY: "two" } });
   assert.match(validateFieldName("Bad", renamed, "name") ?? "", /loop variable/);
 });
+
+test("table loops: cells without padding, align sent back", () => {
+  const text = "Website redesign      1\nHosting           12\n";
+  const m = new OffsetMap(text);
+  const line2 = text.indexOf("Hosting");
+  const cand: LoopCandidate = {
+    id: "loop-rows",
+    name: "rows",
+    item: "row",
+    items: [{ start: 0, end: 23 }, { start: line2, end: line2 + 20 }],
+    fields: [
+      { name: "description", type: "string", spans: [{ start: 0, end: 18 }, { start: line2, end: line2 + 18 }], align: "left" },
+      { name: "qty", type: "int", spans: [{ start: 20, end: 23 }, { start: line2 + 18, end: line2 + 20 }], align: "right" },
+    ],
+    scalar: false,
+    sources: ["repetition"],
+    detectors: ["loop.table"],
+    confidence: 0.7,
+    reason: null,
+    variant_values: null,
+  };
+  const loops = loopsFromCandidates([cand], m);
+  assert.deepEqual(loops[0]?.rows, [
+    { description: "Website redesign", qty: "1" },
+    { description: "Hosting", qty: "12" },
+  ]);
+  const { loops: acc } = acceptLoop([], loops, "loop-rows");
+  assert.deepEqual(loopSpecsFor(acc)[0]?.fields.map((f) => f.align), ["left", "right"]);
+});

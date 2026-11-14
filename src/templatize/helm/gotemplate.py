@@ -41,6 +41,7 @@ _RANGE_ACTION = re.compile(
 )
 _IF_ACTION = re.compile(r"^if \$([A-Za-z_][A-Za-z0-9_]*)$")
 _VAR_ACTION = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?$")
+_PRINTF_ACTION = re.compile(r'^printf "%(-?)([1-9][0-9]{0,3})v" (\$[A-Za-z_][A-Za-z0-9_.]*)$')
 _STRING_ACTION = re.compile(r'^"((?:[^"\\]|\\.)*)"$')
 
 
@@ -234,6 +235,10 @@ def _expr(action: str, values: Mapping[str, Any], scope: Mapping[str, Any]) -> s
         return format_value(_lookup(values, path), ".Values." + ".".join(path))
     if m := _STRING_ACTION.match(action):
         return str(json.loads(action))
+    if m := _PRINTF_ACTION.match(action):  # a padded table column
+        value = _expr(m.group(3), values, scope)
+        width = int(m.group(2))
+        return value.ljust(width) if m.group(1) else value.rjust(width)
     if m := _VAR_ACTION.match(action):
         name, field = m.group(1), m.group(2)
         if name not in scope:

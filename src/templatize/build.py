@@ -54,6 +54,8 @@ class LoopFieldSpec(BaseModel):
     spans: list[Span] = Field(min_length=1)
     """One per item, in item order."""
     type: VarType | None = None
+    align: Literal["left", "right"] | None = None
+    """A padded table column: spans are whole slots, values are the cells."""
 
 
 class LoopSpec(BaseModel):
@@ -87,7 +89,14 @@ def make_loop(text: str, spec: LoopSpec) -> Loop:
     for f in fields:
         spans = sorted(f.spans, key=lambda s: s.start)
         first = text[spans[0].start : spans[0].end] if spans[0].end <= len(text) else ""
-        out.append(LoopField(name=f.name, type=f.type or infer_type(first), spans=spans))
+        out.append(
+            LoopField(
+                name=f.name,
+                type=f.type or infer_type(first.strip(" ")),
+                spans=spans,
+                align=f.align,
+            )
+        )
     return Loop(
         name=spec.name,
         item=spec.item or singular(spec.name),
@@ -168,7 +177,10 @@ def specs_from_loop_candidates(loops: Iterable[LoopCandidate]) -> list[LoopSpec]
             name=lp.name,
             item=lp.item,
             items=lp.items,
-            fields=[LoopFieldSpec(name=f.name, spans=f.spans, type=f.type) for f in lp.fields],
+            fields=[
+                LoopFieldSpec(name=f.name, spans=f.spans, type=f.type, align=f.align)
+                for f in lp.fields
+            ],
             scalar=lp.scalar,
             map=lp.map,
             sources=lp.sources,

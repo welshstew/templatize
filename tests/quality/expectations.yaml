@@ -68,6 +68,7 @@ letter:
   reject: [Procurement, Manager, Calder, Riverside, "7,"]
 
 invoice:
+  loops: {rows: 2}  # line items: a table with padded columns
   want: [INV-2026-0412, 2026-04-01, 2026-05-01, Marlow & Hart Architects, accounts@marlowhart.example.com, "4,560.00"]
   reject: [Marlow, "&", "redesign                      1"]
 
