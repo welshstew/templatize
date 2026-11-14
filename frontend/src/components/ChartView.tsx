@@ -4,6 +4,7 @@ import { api, type ChartRenderResponse, type ChartResponse, type ChartStyle, typ
 import {
   buildTree,
   fileRole,
+  filledLines,
   findValuesLine,
   language,
   overlayLabel,
@@ -29,6 +30,26 @@ interface Props {
 const RENDERED = "rendered/";
 const ALL_RENDERED = "rendered/(all manifests).yaml";
 const COVERAGE = "(coverage report)";
+const SCAFFOLD_KIND = "(scaffold)";
+
+/** Explorer order: what the user edits first, then their templates, then the
+ * unchanged helm create files, then folders (templates/tests/ last). */
+function rank(n: TreeNode, scaffoldFiles: Set<string>): number {
+  if (n.kind === "dir") return 5;
+  const role = fileRole(n.path);
+  if (role === "values") return 0;
+  if (role === "overlay") return 1;
+  if (role === "chart") return 2;
+  if (role === "template") return scaffoldFiles.has(n.path) ? 4 : 3;
+  return 6;
+}
+
+function orderTree(nodes: TreeNode[], scaffoldFiles: Set<string>): TreeNode[] {
+  return nodes
+    .map((n, i) => ({ n, i, r: rank(n, scaffoldFiles) }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map(({ n }) => (n.kind === "dir" ? { ...n, children: orderTree(n.children, scaffoldFiles) } : n));
+}
 const CHART_NAME_RE = /^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$/;
 
 function isEditable(path: string): boolean {
@@ -92,16 +113,21 @@ function EditableCode({
   onChange,
   highlight,
   label,
+  marks,
 }: {
   value: string;
   original: string;
   onChange: (v: string) => void;
   highlight: number | null;
   label: string;
+  /** Line -> where the value on it came from (filled in from the manifests). */
+  marks: Map<number, string>;
 }) {
   const ta = useRef<HTMLTextAreaElement>(null);
   const gutter = useRef<HTMLDivElement>(null);
-  const count = value.split("\n").length - (value.endsWith("\n") ? 1 : 0);
+  const hl = useRef<HTMLDivElement>(null);
+  const lines = useMemo(() => value.split("\n"), [value]);
+  const count = lines.length - (value.endsWith("\n") ? 1 : 0);
   useEffect(() => {
     if (highlight === null || !ta.current) return;
     const lines = value.split("\n");
@@ -116,12 +142,28 @@ function EditableCode({
   return (
     <div class="code-edit">
       <div class="gutter" ref={gutter} aria-hidden="true">
-        {Array.from({ length: Math.max(count, 1) }, (_, i) => (
-          <div key={i} class={highlight === i + 1 ? "hl" : ""}>
-            {i + 1}
-          </div>
-        ))}
+        {Array.from({ length: Math.max(count, 1) }, (_, i) => {
+          const src = marks.get(i + 1);
+          return (
+            <div
+              key={i}
+              class={`${highlight === i + 1 ? "hl" : ""} ${src ? "filled" : ""}`}
+              title={src ? `Filled in from ${src}` : undefined}
+            >
+              {i + 1}
+            </div>
+          );
+        })}
       </div>
+      <div class="code-stack">
+        {/* Syntax colours drawn under a transparent textarea with identical metrics. */}
+        <div class="code-hl" ref={hl} aria-hidden="true">
+          {lines.map((line, i) => (
+            <div key={i} class={marks.has(i + 1) ? "filled" : undefined}>
+              {line === "" ? " " : tokenize(line, false).map((t, j) => <span key={j} class={t.cls ?? undefined}>{t.text}</span>)}
+            </div>
+          ))}
+        </div>
       <textarea
         ref={ta}
         value={value}
@@ -129,7 +171,12 @@ function EditableCode({
         aria-label={label}
         onInput={(e) => onChange((e.target as HTMLTextAreaElement).value)}
         onScroll={(e) => {
-          if (gutter.current) gutter.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop;
+          const el = e.target as HTMLTextAreaElement;
+          if (gutter.current) gutter.current.scrollTop = el.scrollTop;
+          if (hl.current) {
+            hl.current.scrollTop = el.scrollTop;
+            hl.current.scrollLeft = el.scrollLeft;
+          }
         }}
         onKeyDown={(e) => {
           if (e.key === "Tab" && !e.shiftKey) {
@@ -141,6 +188,7 @@ function EditableCode({
           }
         }}
       />
+      </div>
       {value !== original ? <span class="edit-flag">edited · preview only</span> : null}
     </div>
   );
@@ -189,14 +237,14 @@ function Tree({
         ) : (
           <li key={n.path} role="treeitem" aria-selected={active === n.path}>
             <button
-              class={`tree-row file role-${fileRole(n.path)} ${active === n.path ? "active" : ""}`}
+              class={`tree-row file role-${fileRole(n.path)} ${active === n.path ? "active" : ""} ${kinds[n.path] === SCAFFOLD_KIND ? "from-scaffold" : ""}`}
               style={{ paddingLeft: `${22 + depth * 14}px` }}
               onClick={() => onOpen(n.path)}
-              title={n.path}
+              title={kinds[n.path] === SCAFFOLD_KIND ? `${n.path} (unchanged from helm create)` : n.path}
             >
               <span class="file-dot" aria-hidden="true" />
               <span class="fname">{n.name}</span>
-              {kinds[n.path] ? <span class="kind">{kinds[n.path]}</span> : null}
+              {kinds[n.path] && kinds[n.path] !== SCAFFOLD_KIND ? <span class="kind">{kinds[n.path]}</span> : null}
             </button>
           </li>
         ),
@@ -249,15 +297,19 @@ export function ChartView({
   const scaffold = chart?.style === "scaffold";
   // Open values.yaml and the first template (or the coverage report) on the first
   // chart of each style.
+  const shownStyle = useRef<string | null>(null);
   useEffect(() => {
     if (!chart) return;
     const valid = tabs.filter((p) => byPath.has(p) || p.startsWith(RENDERED) || (p === COVERAGE && scaffold));
-    if (valid.length && valid.length === tabs.length) return;
+    const sameStyle = shownStyle.current === chart.style;
+    shownStyle.current = chart.style;
+    if (sameStyle && valid.length && valid.length === tabs.length) return;
     const first = scaffold
       ? ["values.yaml", COVERAGE]
       : (["values.yaml", templates[0]?.path].filter(Boolean) as string[]);
     setTabs(first);
     setActive(scaffold ? COVERAGE : (templates[0]?.path ?? "values.yaml"));
+    setCollapsed(new Set(scaffold ? ["templates/tests"] : []));
   }, [chart?.style, chart?.chart_name]);
 
   useEffect(() => setNameDraft(chartName), [chartName]);
@@ -333,6 +385,17 @@ export function ChartView({
         ? combined !== null : active.startsWith(RENDERED) ? renderedFiles.some((f) => f.path === active) : byPath.has(active);
   const lineCount = activeContent ? activeContent.split("\n").length - (activeContent.endsWith("\n") ? 1 : 0) : 0;
 
+  const scaffoldFiles = useMemo(
+    () => new Set((chart?.templates ?? []).filter((t) => t.kind === SCAFFOLD_KIND).map((t) => t.path)),
+    [chart?.templates],
+  );
+  const chartTree = orderTree(buildTree(files.map((f) => f.path)), scaffoldFiles);
+  const marks = useMemo(
+    () => (scaffold ? filledLines(valuesText, chart?.filled ?? []) : new Map<number, string>()),
+    [scaffold, valuesText, chart?.filled],
+  );
+  const filledCount = scaffold ? (chart?.filled ?? []).length : 0;
+
   let editor;
   if (error) editor = <div class="error-box ide-msg">{error}</div>;
   else if (!chart) editor = <p class="hint ide-msg">{pending ? "Building chart…" : "No chart yet."}</p>;
@@ -353,6 +416,7 @@ export function ChartView({
         onChange={(v) => setEdits((cur) => ({ ...cur, [active]: v }))}
         highlight={highlight?.path === active ? highlight.line : null}
         label={`${active} (editable for the preview)`}
+        marks={active === "values.yaml" ? marks : new Map()}
       />
     );
   else
@@ -365,7 +429,6 @@ export function ChartView({
       />
     );
 
-  const chartTree = buildTree(files.map((f) => f.path));
   const toggle = (p: string) =>
     setCollapsed((cur) => {
       const next = new Set(cur);
@@ -402,6 +465,11 @@ export function ChartView({
             helm create
           </button>
         </span>
+        <span class="style-hint">
+          {chartStyle === "exact"
+            ? "Your manifests become the templates and render back byte for byte."
+            : "The standard helm create chart, with values.yaml filled in from your manifests."}
+        </span>
         <label class="chart-name">
           <span>name</span>
           <input
@@ -437,6 +505,7 @@ export function ChartView({
               {collapsed.has("") ? null : (
                 <Tree nodes={chartTree} active={active} onOpen={(p) => open(p)} collapsed={collapsed} onToggle={toggle} kinds={kinds} depth={1} />
               )}
+              {scaffold ? <p class="explorer-hint">Dimmed files are unchanged from helm create.</p> : null}
               {scaffold ? (
                 <>
                   <div class="explorer-section">Checks</div>
@@ -448,7 +517,7 @@ export function ChartView({
                         onClick={() => open(COVERAGE)}
                       >
                         <span class="file-dot" aria-hidden="true" />
-                        <span class="fname">coverage report</span>
+                        <span class="fname">Coverage report</span>
                         {chart.coverage[0]?.available && !chart.coverage[0].error ? (
                           <span class="kind">{Math.round(chart.coverage[0].percent)}%</span>
                         ) : null}
@@ -503,7 +572,7 @@ export function ChartView({
             {tabs.map((p) => (
               <span key={p} class={`ide-tab ${p === active ? "active" : ""} ${edits[p] !== undefined ? "dirty" : ""}`}>
                 <button role="tab" aria-selected={p === active} onClick={() => setActive(p)} title={p}>
-                  {p === COVERAGE ? "Coverage" : p.startsWith(RENDERED) ? `⟶ ${p.slice(RENDERED.length)}` : p.split("/").pop()}
+                  {p === COVERAGE ? "Coverage report" : p.startsWith(RENDERED) ? `⟶ ${p.slice(RENDERED.length)}` : p.split("/").pop()}
                 </button>
                 <button class="icon" aria-label={`Close ${p}`} onClick={() => close(p)}>
                   ×
@@ -513,9 +582,21 @@ export function ChartView({
           </div>
           <div class="ide-editor">{editor}</div>
           <div class="ide-status">
-            <span>{active ? (active.startsWith(RENDERED) ? `rendered · ${active.slice(RENDERED.length)}` : `${chart?.chart_name ?? ""}/${active}`) : ""}</span>
-            {active ? <span>{active.startsWith(RENDERED) ? "YAML (rendered)" : language(active)}</span> : null}
-            {active && activeExists ? <span>{lineCount} lines</span> : null}
+            {active === COVERAGE ? (
+              <span>Coverage report</span>
+            ) : (
+              <>
+                <span>{active ? (active.startsWith(RENDERED) ? `rendered · ${active.slice(RENDERED.length)}` : `${chart?.chart_name ?? ""}/${active}`) : ""}</span>
+                {active ? <span>{active.startsWith(RENDERED) ? "YAML (rendered)" : language(active)}</span> : null}
+                {active && activeExists ? <span>{lineCount} lines</span> : null}
+                {active === "values.yaml" && filledCount ? (
+                  <span class="filled-legend">
+                    <span class="swatch" aria-hidden="true" />
+                    {filledCount} value{filledCount === 1 ? "" : "s"} filled in from your manifests
+                  </span>
+                ) : null}
+              </>
+            )}
             <span class="spacer" />
             {active && edits[active] !== undefined ? (
               <button class="link" onClick={() => setEdits(({ [active]: _drop, ...rest }) => rest)}>

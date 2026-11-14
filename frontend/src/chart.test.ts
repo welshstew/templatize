@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildTree, fileRole, findValuesLine, overlayLabel, tokenize } from "./chart.ts";
+import { buildTree, fileRole, filledLines, findValuesLine, overlayLabel, tokenize } from "./chart.ts";
 
 test("tree: directories first, order kept", () => {
   const tree = buildTree(["Chart.yaml", "values.yaml", "templates/deployment.yaml", "templates/service.yaml", ".helmignore"]);
@@ -48,4 +48,20 @@ test("findValuesLine", () => {
   assert.equal(findValuesLine(v, ["resources", "limits", "cpu"]), 9);
   assert.equal(findValuesLine(v, ["on"]), 10);
   assert.equal(findValuesLine(v, ["tag"]), null);
+});
+
+test("findValuesLine: dotted keys", () => {
+  const v = "podLabels:\n  app.kubernetes.io/part-of: shop\n";
+  assert.equal(findValuesLine(v, ["podLabels", "app.kubernetes.io/part-of"]), 2);
+});
+
+test("filledLines marks the key and its block", () => {
+  const v = "replicaCount: 4\n\nimage:\n  repository: r\n  tag: '1'\n  pullPolicy: IfNotPresent\nenvFrom:\n- configMapRef:\n    name: c\nnext: 1\n";
+  const m = filledLines(v, [
+    { path: ["replicaCount"], source: "Deployment a" },
+    { path: ["image", "tag"], source: "Deployment a" },
+    { path: ["envFrom"], source: "Deployment a" },
+    { path: ["missing"], source: "x" },
+  ]);
+  assert.deepEqual([...m.keys()].sort((a, b) => a - b), [1, 5, 7, 8, 9]);
 });

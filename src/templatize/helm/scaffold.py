@@ -36,6 +36,7 @@ from templatize.helm.chart import (
     ChartError,
     ChartResult,
     ChartTemplate,
+    FilledValue,
     assign_paths,
     default_chart_name,
 )
@@ -275,6 +276,38 @@ def diff_tree(base: Any, other: Any) -> Any:
 _SAME: Any = object()
 
 
+def filled_paths(base: Any, other: Any, prefix: tuple[str, ...] = ()) -> list[list[str]]:
+    """Paths of ``other`` that differ from ``base``: a new key or a replaced value is
+    one entry; a map that only partly changed is descended into (unless the default
+    is an empty map, which the manifests fill as a whole)."""
+    if isinstance(base, dict) and isinstance(other, dict) and base:
+        out: list[list[str]] = []
+        for k, val in other.items():
+            if k not in base:
+                out.append([*prefix, str(k)])
+            elif base[k] != val:
+                out.extend(filled_paths(base[k], val, (*prefix, str(k))))
+        return out
+    return [] if base == other else [list(prefix)]
+
+
+def _sources(resources: Sequence[Resource], handled: set[int]) -> dict[str, str]:
+    """Top-level values key -> the resource its value was read from."""
+
+    def first(kind: str) -> str | None:
+        r = next((resources[i] for i in sorted(handled) if resources[i].kind == kind), None)
+        return f"{r.kind} {r.name}" if r else None
+
+    dep = first("Deployment") or "Deployment"
+    out = {
+        "service": first("Service"),
+        "ingress": first("Ingress"),
+        "autoscaling": first("HorizontalPodAutoscaler"),
+        "serviceAccount": first("ServiceAccount") or dep,
+    }
+    return {k: v for k, v in out.items() if v} | {"*": dep}
+
+
 def dump_values(
     tree: dict[str, Any], header: str, comments: dict[str, list[str]] | None = None
 ) -> str:
@@ -404,6 +437,25 @@ def build_scaffold_chart(
         comments=comments,
     )
 
+    defaults = scaffold_defaults()
+    sources = _sources(resources, handled)
+    filled = [
+        FilledValue(path=p, source=sources.get(p[0], sources["*"]))
+        for p in filled_paths(defaults, {k: v for k, v in values.items() if k not in carried_tree})
+        if p
+    ]
+    for v in carried_vars:
+        r = next(
+            (r for r in resources if v.spans and r.chunk.start <= v.spans[0].start < r.chunk.end),
+            None,
+        )
+        filled.append(
+            FilledValue(
+                path=list(v.values_path or []),
+                source=f"variable {v.name}" + (f" ({r.kind} {r.name})" if r else ""),
+            )
+        )
+
     by_name = {s.name: s for s in specs}
     overlays: list[tuple[str, str]] = []
     for i, (label, variant) in enumerate(zip(labels, variants, strict=True)):
@@ -478,6 +530,7 @@ def build_scaffold_chart(
         style="scaffold",
         coverage=reports,
         notes=notes,
+        filled=filled,
     )
 
 

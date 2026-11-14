@@ -79,6 +79,14 @@ class ChartRoundTrip(BaseModel):
     error: str | None = None
 
 
+class FilledValue(BaseModel):
+    """A ``values.yaml`` entry templatize set from the manifests (scaffold style)."""
+
+    path: list[str]
+    source: str
+    """Where the value came from, e.g. ``Deployment storefront``."""
+
+
 class ChartResult(BaseModel):
     chart_name: str
     files: list[EmittedFile]
@@ -93,6 +101,8 @@ class ChartResult(BaseModel):
     """Scaffold style: field-by-field comparison of real ``helm template`` output."""
     notes: list[str] = []
     """Things the user should know (e.g. what the scaffold cannot express)."""
+    filled: list[FilledValue] = []
+    """Scaffold style: values that differ from the ``helm create`` defaults."""
 
     @property
     def ok(self) -> bool:

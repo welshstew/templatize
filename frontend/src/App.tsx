@@ -83,6 +83,8 @@ export function App() {
   const [profile, setProfile] = useState<DocumentProfile | null>(null);
   const [output, setOutput] = useState<"jinja" | "helm">("jinja");
   const [helmDismissed, setHelmDismissed] = useState(false);
+  /** In Helm mode the document folds away below the chart until asked for. */
+  const [docOpen, setDocOpen] = useState(false);
   const [chart, setChart] = useState<ChartResponse | null>(null);
   const [chartError, setChartError] = useState<string | null>(null);
   const [chartName, setChartName] = useState("");
@@ -277,6 +279,7 @@ export function App() {
   const acceptedCount = accepted(items).length;
   const isK8s = profile?.format === "kubernetes";
   const helm = output === "helm";
+  const folded = helm && !docOpen;
   // One badge for the chart: the first failing round trip, or the input's.
   const chartRT =
     chart && chart.style === "exact" ? (chart.roundtrips.find((x) => !x.ok) ?? chart.roundtrips[0]) : undefined;
@@ -405,27 +408,40 @@ export function App() {
         </main>
       ) : (
         <main class={`review-layout ${helm ? "helm" : ""}`}>
-          <section class="doc-pane" aria-label="Document">
+          <section class={`doc-pane ${folded ? "folded" : ""}`} aria-label="Document">
             <div class="pane-head">
               <h2>Document</h2>
-              <span class="legend">
-                <mark class="sug src-diff">examples</mark>
-                <mark class="sug src-key_value">key</mark>
-                <mark class="sug src-regex">pattern</mark>
-                <mark class="sug src-repetition">repeated</mark>
-                {info?.optional_detectors.ner ? <mark class="sug src-ner">NER</mark> : null}
-                {llm.state !== "off" ? <mark class="sug src-llm">LLM</mark> : null}
-                <mark class="acc src-manual">accepted</mark>
-              </span>
+              {folded ? (
+                <span class="muted small">Show it to select text and add a variable to the chart.</span>
+              ) : (
+                <span class="legend">
+                  <mark class="sug src-diff">examples</mark>
+                  <mark class="sug src-key_value">key</mark>
+                  <mark class="sug src-regex">pattern</mark>
+                  <mark class="sug src-repetition">repeated</mark>
+                  {info?.optional_detectors.ner ? <mark class="sug src-ner">NER</mark> : null}
+                  {llm.state !== "off" ? <mark class="sug src-llm">LLM</mark> : null}
+                  <mark class="acc src-manual">accepted</mark>
+                </span>
+              )}
+              {helm ? (
+                <button class="fold" aria-expanded={docOpen} onClick={() => setDocOpen(!docOpen)}>
+                  {docOpen ? "Hide document" : "Show document"}
+                </button>
+              ) : null}
             </div>
-            <DocumentView
-              map={map}
-              items={items}
-              selectedId={selectedId}
-              onSelectItem={setSelectedId}
-              onTextSelection={setSelection}
-            />
-            <p class="hint">Select any text to turn it into a variable. Click a highlight to find it in the list.</p>
+            {folded ? null : (
+              <>
+                <DocumentView
+                  map={map}
+                  items={items}
+                  selectedId={selectedId}
+                  onSelectItem={setSelectedId}
+                  onTextSelection={setSelection}
+                />
+                <p class="hint">Select any text to turn it into a variable. Click a highlight to find it in the list.</p>
+              </>
+            )}
           </section>
           <Sidebar
             llm={llm}

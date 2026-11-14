@@ -127,7 +127,7 @@ export function findValuesLine(values: string, path: string[]): number | null {
   const stack: { indent: number; key: string }[] = [];
   const lines = values.split("\n");
   for (const [i, line] of lines.entries()) {
-    const m = /^(\s*)("([^"]*)"|[A-Za-z_][A-Za-z0-9_]*):/.exec(line);
+    const m = /^(\s*)("([^"]*)"|[A-Za-z_][\w./-]*):(?:\s|$)/.exec(line);
     if (!m) continue;
     const indent = (m[1] ?? "").length;
     const key = m[3] ?? m[2] ?? "";
@@ -136,6 +136,31 @@ export function findValuesLine(values: string, path: string[]): number | null {
     if (stack.length === path.length && stack.every((s, j) => s.key === path[j])) return i + 1;
   }
   return null;
+}
+
+/**
+ * Lines of ``values.yaml`` holding values templatize filled in, mapped to where each
+ * came from. A filled key marks its own line and the block nested under it (deeper
+ * lines, and ``- `` list items at the key's indent, as PyYAML writes them).
+ */
+export function filledLines(values: string, filled: { path: string[]; source: string }[]): Map<number, string> {
+  const out = new Map<number, string>();
+  const lines = values.split("\n");
+  const indentOf = (l: string) => l.length - l.trimStart().length;
+  for (const f of filled) {
+    const start = findValuesLine(values, f.path);
+    if (start === null) continue;
+    const base = indentOf(lines[start - 1] ?? "");
+    out.set(start, f.source);
+    for (let i = start; i < lines.length; i++) {
+      const l = lines[i] ?? "";
+      if (!l.trim()) break;
+      const ind = indentOf(l);
+      if (ind > base || (ind === base && l.trimStart().startsWith("- "))) out.set(i + 1, f.source);
+      else break;
+    }
+  }
+  return out;
 }
 
 /** Keys of a values overlay file (``values-staging.yaml`` -> ``staging``). */

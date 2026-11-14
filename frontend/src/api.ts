@@ -133,6 +133,11 @@ export interface CoverageReport {
   percent: number;
 }
 
+export interface FilledValue {
+  path: string[];
+  source: string;
+}
+
 export interface ChartResponse {
   chart_name: string;
   style: ChartStyle;
@@ -142,6 +147,8 @@ export interface ChartResponse {
   roundtrips: ChartRoundTrip[];
   coverage: CoverageReport[];
   notes: string[];
+  /** helm create style: values.yaml entries filled in from the manifests. */
+  filled?: FilledValue[];
   ok: boolean;
 }
 

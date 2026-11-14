@@ -10,7 +10,7 @@ from templatize.build import VariableSpec
 from templatize.detectors.llm import LlmReview
 from templatize.emitters import EmittedFile
 from templatize.helm import ChartStyle
-from templatize.helm.chart import ChartRoundTrip, ChartTemplate
+from templatize.helm.chart import ChartRoundTrip, ChartTemplate, FilledValue
 from templatize.helm.coverage import CoverageReport
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Variable
 from templatize.roundtrip import RoundTripResult
@@ -109,6 +109,7 @@ class ChartResponse(BaseModel):
     roundtrips: list[ChartRoundTrip]
     coverage: list[CoverageReport]
     notes: list[str]
+    filled: list[FilledValue] = []
     ok: bool
 
 

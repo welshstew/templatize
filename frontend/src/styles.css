@@ -22,6 +22,8 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --radius: 8px;
+  --filled: #15803d;
+  --filled-bg: rgba(21, 128, 61, 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +47,8 @@
     --src-manual: #4ade80;
     --src-llm: #f472b6;
     --src-ner: #fb923c;
+    --filled: #4ade80;
+    --filled-bg: rgba(74, 222, 128, 0.09);
   }
 }
 
@@ -258,18 +262,26 @@ pre.code {
 .values-hint { font-family: var(--mono); }
 
 .review-layout.helm .output { padding: 0; overflow: hidden; }
+/* Helm mode: the chart is the result, so it comes first and fills the screen;
+   the document folds away below it. */
+.review-layout.helm { grid-template-areas: "out side" "doc side"; grid-template-rows: auto auto; }
+.review-layout.helm .ide { height: calc(100vh - 150px); min-height: 420px; }
+.chart-view.max .ide { height: auto; flex: 1; }
+.doc-pane.folded .pane-head h2 { margin-bottom: 0; }
+.pane-head .fold { margin-left: auto; }
 .chart-view { display: flex; flex-direction: column; }
 .chart-view.max {
   position: fixed; inset: 0; z-index: 30; border-radius: 0; border: none;
 }
 .ide-head {
-  display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px; flex-wrap: wrap;
   border-bottom: 1px solid var(--border); background: var(--panel);
 }
 .ide-title { font-weight: 600; font-size: 14px; }
+.style-hint { font-size: 12px; color: var(--muted); flex: 1 1 14rem; min-width: 0; }
 .chart-name { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
 .chart-name input { font-family: var(--mono); width: 14rem; color: var(--text); padding: 2px 6px; }
-.ide { display: grid; grid-template-columns: 230px minmax(0, 1fr); height: 62vh; min-height: 360px; }
+.ide { display: grid; grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 62vh; min-height: 360px; }
 .chart-view.max .ide { height: auto; flex: 1; }
 .explorer { background: var(--ide-side); border-right: 1px solid var(--border); overflow: auto; font-size: 13px; padding-bottom: 8px; }
 .explorer-section {
@@ -295,15 +307,18 @@ pre.code {
 .role-overlay .file-dot { background: var(--src-diff); }
 .role-chart .file-dot { background: var(--tok-num); }
 .role-rendered .file-dot { background: var(--tok-str); border-radius: 50%; }
+.tree-row.from-scaffold .fname { color: var(--muted); }
+.tree-row.from-scaffold .file-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.explorer-hint { margin: 4px 0 0; padding: 0 10px 0 22px; font-size: 11.5px; color: var(--muted); }
 
-.ide-main { display: flex; flex-direction: column; min-width: 0; background: var(--ide-bg); }
+.ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ide-bg); }
 .ide-tabs { display: flex; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--ide-side); min-height: 32px; }
 .ide-tab { display: inline-flex; align-items: center; border-right: 1px solid var(--border); font-size: 12.5px; white-space: nowrap; }
 .ide-tab button { border: none; border-radius: 0; background: none; padding: 6px 8px; font-weight: 400; font-family: var(--mono); font-size: 12.5px; }
 .ide-tab .icon { padding: 6px 6px; color: var(--muted); }
 .ide-tab.active { background: var(--ide-bg); box-shadow: inset 0 2px 0 var(--accent); }
 .ide-tab.dirty button:first-child::after { content: " ●"; color: var(--accent); }
-.ide-editor { flex: 1; overflow: auto; position: relative; }
+.ide-editor { flex: 1; min-height: 0; overflow: auto; position: relative; }
 .ide-msg { padding: 12px; margin: 12px; }
 
 .code-lines { font-family: var(--mono); font-size: 12.5px; line-height: 1.55; padding: 6px 0; min-width: max-content; }
@@ -324,14 +339,30 @@ button.tok-action.ref:hover { text-decoration: underline; }
 
 .code-edit { display: flex; height: 100%; position: relative; }
 .code-edit .gutter {
-  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; padding: 6px 12px 6px 0;
-  width: 3.5em; text-align: right; color: var(--ide-line); overflow: hidden; flex: none; user-select: none;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; padding: 6px 0 26px;
+  width: 4em; text-align: right; color: var(--ide-line); overflow: hidden; flex: none; user-select: none;
 }
+.code-edit .gutter > div { padding-right: 12px; }
 .code-edit .gutter .hl { color: var(--accent); font-weight: 600; }
-.code-edit textarea {
-  flex: 1; border: none; border-radius: 0; resize: none; outline: none; background: transparent;
-  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; padding: 6px 16px 6px 0; white-space: pre; overflow: auto; tab-size: 2;
+.code-edit .gutter .filled { color: var(--filled); box-shadow: inset -3px 0 0 var(--filled); }
+/* The textarea (transparent text, visible caret) sits exactly over the coloured copy. */
+.code-stack { position: relative; flex: 1; min-width: 0; }
+.code-hl, .code-stack textarea {
+  position: absolute; inset: 0; margin: 0; border: none; border-radius: 0;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; letter-spacing: 0;
+  padding: 6px 16px 6px 4px; white-space: pre; tab-size: 2;
 }
+.code-hl { overflow: hidden; pointer-events: none; }
+.code-hl > div { width: max-content; min-width: 100%; padding-right: 16px; }
+.code-hl > div.filled { background: var(--filled-bg); }
+.code-hl .tok-comment { font-style: normal; }
+.code-stack textarea {
+  resize: none; outline: none; background: transparent; overflow: auto;
+  color: transparent; caret-color: var(--text);
+}
+.code-stack textarea::selection { background: color-mix(in srgb, var(--accent) 28%, transparent); color: transparent; }
+.filled-legend { display: inline-flex; align-items: center; gap: 6px; color: var(--filled); }
+.filled-legend .swatch { width: 12px; height: 10px; background: var(--filled-bg); box-shadow: inset 3px 0 0 var(--filled); }
 .edit-flag {
   position: absolute; top: 6px; right: 12px; font-size: 11px; color: var(--accent);
   background: var(--panel); border: 1px solid var(--accent); border-radius: 999px; padding: 0 8px;
@@ -345,7 +376,8 @@ button.tok-action.ref:hover { text-decoration: underline; }
 .st-fail { color: var(--fail); font-weight: 600; }
 
 @media (max-width: 900px) {
-  .ide { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; }
+  .ide, .review-layout.helm .ide { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; }
+  .review-layout.helm { grid-template-areas: "out" "doc" "side"; }
   .explorer { max-height: 30vh; border-right: none; border-bottom: 1px solid var(--border); }
   .ide-editor { min-height: 50vh; }
 }

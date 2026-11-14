@@ -12,7 +12,7 @@ from templatize.build import specs_from_candidates
 from templatize.helm import ChartError
 from templatize.helm import build as build_helm_chart
 from templatize.helm.coverage import compare, flatten, split_rendered
-from templatize.helm.scaffold import diff_tree, map_values, scaffold_files
+from templatize.helm.scaffold import diff_tree, filled_paths, map_values, scaffold_files
 from templatize.helm.values import load
 from templatize.suggest import suggest
 from tests.conftest import FIXTURES, VARIANTS, read_fixture
@@ -161,3 +161,24 @@ def test_coverage_with_real_helm(tmp_path: Path) -> None:
     assert HELM is not None
     lint = subprocess.run([HELM, "lint", str(root)], capture_output=True, text=True, timeout=60)
     assert lint.returncode == 0, lint.stdout + lint.stderr
+
+
+def test_filled_paths() -> None:
+    base = {"a": 1, "img": {"repo": "nginx", "tag": ""}, "labels": {}, "same": [1]}
+    other = {"a": 2, "img": {"repo": "r", "tag": ""}, "labels": {"x": "y"}, "same": [1], "new": 3}
+    assert filled_paths(base, other) == [["a"], ["img", "repo"], ["labels"], ["new"]]
+
+
+def test_filled_values_name_their_source() -> None:
+    chart = scaffold()
+    filled = {".".join(f.path): f.source for f in chart.filled}
+    assert filled["replicaCount"] == "Deployment storefront"
+    assert filled["image.repository"] == "Deployment storefront"
+    assert filled["service.targetPort"] == "Service storefront"
+    assert filled["ingress.hosts"] == "Ingress storefront"
+    assert "image.pullPolicy" not in filled  # same as the helm create default
+    values = load(chart.file("values.yaml").content)
+    for f in chart.filled:  # every path exists in values.yaml
+        node = values
+        for k in f.path:
+            node = node[k]
