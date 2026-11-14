@@ -198,6 +198,8 @@ class RepetitionDetector:
             tok = m.group(0)
             if not _non_trivial(tok) or in_phrase[m.start()]:
                 continue
+            if text[max(0, m.start() - 2) : m.start()].endswith(("<", "</")):
+                continue  # a markup tag name (<VirtualHost>, </Directory>)
             if _KEY_AFTER.match(text, m.end()) and not text.startswith("://", m.end()):
                 used_as_key.add(tok)
             if not _LINE_START.search(text, max(0, m.start() - 200), m.start()):

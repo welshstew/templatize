@@ -249,7 +249,13 @@ def repetition(text: str) -> dict[str, int]:
 
 def test_port_after_host_is_not_a_clock_time() -> None:
     text = "from 14:00 to 15:30, db.example.com:5432 and 127.0.0.1:6379, 8080:80"
-    assert values(regex(text), VarType.PORT) == ["5432", "6379", "80"]
+    assert values(regex(text), VarType.PORT) == ["80"]
+    # The host:port pairs are endpoints, kept whole.
+    found = regex(text)
+    assert [c.value for c in found if c.name == "endpoint"] == [
+        "db.example.com:5432",
+        "127.0.0.1:6379",
+    ]
 
 
 def test_date_and_time_ranges_name_their_ends() -> None:

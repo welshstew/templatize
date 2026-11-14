@@ -20,8 +20,15 @@ _YAML = re.compile(
     r"^([ \t]*)(-[ \t]+)?([A-Za-z_][\w.\-/]*(?: [A-Za-z][\w.\-/]*){0,3})[ \t]*:(?:[ \t]+(.*?))?[ \t]*$"
 )
 # ssh_config / Apache style "Keyword value" (CamelCase keyword, no separator).
-_SPACED = re.compile(r"^[ \t]*([A-Z][a-z]+(?:[A-Z][a-z0-9]*)*)[ \t]+([^\s#][^#\r\n]*?)[ \t]*$")
+_SPACED = re.compile(
+    r"^[ \t]*([A-Z](?:[a-z]+|[A-Z]+(?=[A-Z][a-z]))(?:[A-Z][a-z0-9]*)*)[ \t]+([^\s#][^#\r\n]*?)[ \t]*$"
+)
 _SPACED_MIN_SHARE = 0.6
+# redis.conf / haproxy.cfg style "keyword value" (lowercase keyword). Only one-word
+# values are taken ("maxmemory 4gb"): longer ones ("server app1 10.0.1.11:8080 check")
+# are left to the patterns, which find their parts.
+_SPACED_LOWER = re.compile(r"^[ \t]*([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*)[ \t]+([^\s#;{}]+)[ \t]*$")
+_PROSE_END = re.compile(r"[.!?,]$")
 _NGINX = re.compile(r"^[ \t]*([a-z_][a-z0-9_]*)[ \t]+([^;{}#\r\n]+?)[ \t]*;[ \t]*(?:#.*)?$")
 
 _GENERIC_KEYS = frozenset(
@@ -141,6 +148,7 @@ class KeyValueDetector:
             ln for _, ln in _lines(ctx.text) if ln.strip() and not ln.lstrip().startswith("#")
         ]
         spaced_ok = self._spaced_format(content)
+        lower_ok = self._lower_spaced_format(content)
         stack: list[tuple[int, str]] = []  # YAML (indent, key) parents
         scopes = _Scopes(ctx.text)
         section: str | None = None  # INI [section]
@@ -241,6 +249,21 @@ class KeyValueDetector:
                 )
                 continue
 
+            lm = _SPACED_LOWER.match(line) if lower_ok else None
+            if lm:
+                value, s = _unquote(lm.group(2), lm.start(2))
+                self._add(
+                    out,
+                    ctx.text,
+                    lm.group(1),
+                    section,
+                    line_start + s,
+                    line_start + s + len(value),
+                    "kv.spaced",
+                    0.6,
+                )
+                continue
+
             nm = _NGINX.match(line)
             if nm:
                 value = nm.group(2)
@@ -269,6 +292,22 @@ class KeyValueDetector:
             return False
         camel = any(sum(c.isupper() for c in k) >= 2 for k in keys)
         return camel or len(set(keys)) < len(keys)
+
+    @staticmethod
+    def _lower_spaced_format(content: list[str]) -> bool:
+        """A "keyword value" config with lowercase keywords (redis.conf, haproxy.cfg)?
+        Most lines start with a lowercase keyword and none reads like a sentence; the
+        keywords look like config (``maxmemory-policy``, ``log_level``) or repeat."""
+        if len(content) < 3:
+            return False
+        lead = re.compile(r"^[ \t]*([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*)[ \t]+\S")
+        keys = [m.group(1) for ln in content if (m := lead.match(ln))]
+        if len(keys) / len(content) < _SPACED_MIN_SHARE:
+            return False
+        if any(_PROSE_END.search(ln.rstrip()) or len(ln.split()) > 8 for ln in content):
+            return False
+        configish = any(c in k for k in keys for c in "-_.")
+        return configish or len(set(keys)) < len(keys)
 
     @staticmethod
     def _add(

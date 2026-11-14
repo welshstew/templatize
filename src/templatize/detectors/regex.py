@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import itertools
 import re
+from bisect import bisect_right
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -135,6 +136,15 @@ def _valid_cidr(v: str) -> bool:
         return False
 
 
+def _valid_endpoint(v: str) -> bool:
+    host, _, port = v.rpartition(":")
+    if not _valid_port(port):
+        return False
+    if host[0].isdigit() and host.replace(".", "").isdigit():
+        return _valid_ipv4(host)
+    return _hostname_ok(host)
+
+
 def _valid_phone(v: str) -> bool:
     digits = sum(c.isdigit() for c in v)
     if v.startswith("+"):
@@ -229,6 +239,18 @@ PATTERNS: list[Pattern] = [
         re.compile(r"(?<![\w:.])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])"),
         0.85,
         _valid_ipv6,
+    ),
+    Pattern(
+        "regex.host_port",
+        VarType.STRING,
+        # "10.0.1.11:8080", "api.prod.example.com:8443": an endpoint, kept whole.
+        re.compile(
+            r"(?<![\w.:/@-])((?:\d{1,3}\.){3}\d{1,3}|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+            r"[A-Za-z][A-Za-z0-9-]{1,62}):(\d{2,5})(?![\w.:/-])"
+        ),
+        0.9,
+        _valid_endpoint,
+        name="endpoint",
     ),
     Pattern(
         "regex.datetime",
@@ -384,6 +406,7 @@ class RegexDetector:
                     )
                 )
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
+        out = _drop_inner(out)
         return DetectorResult(candidates=_line_labels(text, _name_ranges(text, out)))
 
 
@@ -391,6 +414,38 @@ class RegexDetector:
 # (hyphen, en dash or em dash).
 _RANGE_BETWEEN = re.compile(r"^[ \t]*(?:to|until|till|through|thru|-|\u2013|\u2014|and)[ \t]*$")
 _PORT_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"']?$")
+
+
+# Whole values whose parts other patterns also match: the IP inside a URL, the host
+# of an endpoint, the time of a timestamp. The whole value wins.
+_WHOLE = frozenset(
+    {
+        "regex.url",
+        "regex.email",
+        "regex.host_port",
+        "regex.datetime",
+        "regex.date_text",
+        "regex.phone",
+    }
+)
+
+
+def _drop_inner(found: list[Candidate]) -> list[Candidate]:
+    wholes = sorted(
+        (c.spans[0] for c in found if c.detectors[0] in _WHOLE), key=lambda s: (s.start, -s.end)
+    )
+    if not wholes:
+        return found
+    starts = [s.start for s in wholes]
+
+    def inside(s: Span) -> bool:
+        i = bisect_right(starts, s.start)
+        return any(
+            w.start <= s.start and s.end <= w.end and (w.start, w.end) != (s.start, s.end)
+            for w in wholes[max(0, i - 8) : i]
+        )
+
+    return [c for c in found if not inside(c.spans[0])]
 
 
 # "Dial-in: +1 415 555 0199, PIN 66 41 09": a short label opening the line.

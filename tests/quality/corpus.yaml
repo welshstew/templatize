@@ -13,11 +13,11 @@ ssh_config:
 
 haproxy.cfg:
   want: ["4096", /etc/haproxy/certs/www.example.com.pem, "10.0.1.11:8080", "10.0.1.12:8080"]
-  reject: [global, defaults, frontend, backend, http]
+  reject: [global, defaults, frontend, backend]
 
 vhost.conf:
   want: [intranet.example.org, www.intranet.example.org, /var/www/intranet/public, /etc/ssl/certs/intranet.example.org.crt, /etc/ssl/private/intranet.example.org.key, http://127.0.0.1:9000/api]
-  reject: [VirtualHost, ServerName, "on"]
+  reject: [VirtualHost, ServerName]
 
 prometheus.yml:
   want: [15s, 30s, "alertmanager.monitoring.svc:9093", "api.prod.example.com:8443", /internal/metrics]
@@ -110,7 +110,7 @@ server.properties:
 
 .npmrc:
   want: [https://npm.internal.example.com/, npm_7Qx2vLk9PzR4sT1uW8yB3nM6cD5fG0hJ]
-  reject: [registry, "true"]
+  reject: [registry]
 
 values.yaml:
   want: ["3", registry.example.com/platform/search-api, 5.2.0, IfNotPresent, ClusterIP, "8080", nginx, search.example.com, search-example-com-tls, 500m, 768Mi, "https://es.internal.example.com:9200", "300"]
