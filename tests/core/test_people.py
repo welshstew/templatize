@@ -165,3 +165,24 @@ def test_letter_date(date: str) -> None:
 def test_no_letter_date_without_a_greeting_or_in_prose() -> None:
     assert people("3 March 2026\n\nRelease notes\n") == {}
     assert people("Sent on 3 March 2026.\n\nDear Sarah,\n") == {}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "Dial-in: +1 415 555 0199, PIN 66 41 09\n",
+            {"dial_in_phone": "+1 415 555 0199", "dial_in_pin": "66 41 09"},
+        ),
+        ("Support: 0117 555 0142\n", {"support_phone": "0117 555 0142"}),
+        (
+            "Join with Meeting ID 845 2210 9931 and passcode 4417.\n",
+            {"meeting_id": "845 2210 9931", "passcode": "4417"},
+        ),
+        ("call +44 117 555 0142\n", {"phone_number": "+44 117 555 0142"}),
+    ],
+)
+def test_labelled_phones_and_access_codes(text: str, expected: dict[str, str]) -> None:
+    cands = RegexDetector().detect(DetectionContext(text=text)).candidates
+    found = {c.name: c.value for c in cands if c.type in (VarType.PHONE, VarType.STRING)}
+    assert found == expected

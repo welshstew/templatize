@@ -11,7 +11,7 @@ from datetime import date
 
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span, VarType
-from templatize.naming import TEXT_DATE, TIME, type_name
+from templatize.naming import TEXT_DATE, TIME, snake_case, type_name
 
 _TRAILING_PUNCT = ".,;:!?)]}'\""
 
@@ -171,6 +171,8 @@ class Pattern:
     validate: Callable[[str], bool] | None = None
     group: int = 0
     strip_trailing_punct: bool = False
+    name: str | None = None
+    """The variable name, when the pattern says more than the type (``pin``)."""
 
 
 PATTERNS: list[Pattern] = [
@@ -281,6 +283,18 @@ PATTERNS: list[Pattern] = [
         _valid_phone,
     ),
     Pattern(
+        "regex.access_code",
+        VarType.STRING,
+        # "PIN 66 41 09", "Passcode: 4417", "Meeting ID 845 2210 9931", "access code #1234"
+        re.compile(
+            r"\b(PIN|Passcode|Pass code|Access code|Meeting ID|Conference ID|Participant code)"
+            r"(?:[ \t]*[:#]|[ \t]+(?:is|code)?)?[ \t]*#?[ \t]*(\d[\d \t-]{2,16}\d)(?![\w-])",
+            re.IGNORECASE,
+        ),
+        0.75,
+        group=2,
+    ),
+    Pattern(
         "regex.semver",
         VarType.SEMVER,
         re.compile(
@@ -353,9 +367,12 @@ class RegexDetector:
                     continue
                 if pat.validate is not None and not pat.validate(value):
                     continue
+                name = pat.name or type_name(pat.type)
+                if pat.detector == "regex.access_code":
+                    name = snake_case(m.group(1))
                 out.append(
                     Candidate(
-                        name=type_name(pat.type),
+                        name=name,
                         name_origin="type",
                         type=pat.type,
                         value=value,
@@ -367,13 +384,39 @@ class RegexDetector:
                     )
                 )
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
-        return DetectorResult(candidates=_name_ranges(text, out))
+        return DetectorResult(candidates=_line_labels(text, _name_ranges(text, out)))
 
 
 # "from 14:00 to 15:30", "9 July - 12 July", "between 9:00 and 10:00": the ends of a range
 # (hyphen, en dash or em dash).
 _RANGE_BETWEEN = re.compile(r"^[ \t]*(?:to|until|till|through|thru|-|\u2013|\u2014|and)[ \t]*$")
 _PORT_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"']?$")
+
+
+# "Dial-in: +1 415 555 0199, PIN 66 41 09": a short label opening the line.
+_LINE_LABEL = re.compile(r"[ \t]*([A-Z][A-Za-z]*(?:[ -][A-Za-z]+){0,3})[ \t]*:[ \t]")
+
+
+def _line_labels(text: str, found: list[Candidate]) -> list[Candidate]:
+    """Phones and access codes after a line label are named after it: ``dial_in_phone``,
+    ``dial_in_pin``, ``support_phone``."""
+    out: list[Candidate] = []
+    for c in found:
+        labelled = c.type is VarType.PHONE or c.detectors == ["regex.access_code"]
+        if not labelled or c.name_origin != "type":
+            out.append(c)
+            continue
+        s = c.spans[0]
+        line_start = text.rfind("\n", 0, s.start) + 1
+        m = _LINE_LABEL.match(text, line_start, s.start)
+        if m is None:
+            out.append(c)
+            continue
+        label = snake_case(m.group(1))
+        suffix = "phone" if c.type is VarType.PHONE else c.name
+        name = label if label.endswith(suffix) else f"{label}_{suffix}"
+        out.append(c.model_copy(update={"name": name, "name_origin": "context"}))
+    return out
 
 
 def _port_mapping(text: str, s: Span) -> bool:
