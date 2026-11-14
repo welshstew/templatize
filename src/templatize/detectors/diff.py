@@ -46,6 +46,7 @@ _ANCHOR_TYPES = frozenset(
         VarType.DATE,
         VarType.DATETIME,
         VarType.TIME,
+        VarType.PHONE,
         VarType.EMAIL,
         VarType.URL,
         VarType.IPV4,

@@ -135,6 +135,13 @@ def _valid_cidr(v: str) -> bool:
         return False
 
 
+def _valid_phone(v: str) -> bool:
+    digits = sum(c.isdigit() for c in v)
+    if v.startswith("+"):
+        return 8 <= digits <= 15
+    return 10 <= digits <= 11
+
+
 def _valid_iso_date(v: str) -> bool:
     try:
         date(int(v[0:4]), int(v[5:7]), int(v[8:10]))
@@ -256,6 +263,22 @@ PATTERNS: list[Pattern] = [
         # Not part of a longer number ("8080:80"), a timestamp or a version.
         re.compile(rf"(?<![\w:.]){TIME}(?![\w:]|\.\d)"),
         0.6,
+    ),
+    Pattern(
+        "regex.phone",
+        VarType.PHONE,
+        re.compile(
+            r"(?<![\w+.-])(?:"
+            # International: "+44 117 555 0142", "+1 (415) 555-0199", "+49-30-1234567"
+            r"\+\d{1,3}(?:[ .-]?\(?\d{1,5}\)?){2,5}"
+            # US: "(415) 555-0199", "415-555-0199", "415.555.0199"
+            r"|\(\d{3}\)[ ]?\d{3}[-. ]\d{4}|\d{3}([-.])\d{3}\1\d{4}"
+            # UK national: "0117 555 0142", "020 7946 0018", "07700 900123"
+            r"|0\d{2,4}[ ]\d{3,4}(?:[ ]\d{3,4})?"
+            r")(?![\w-]|[.,]\d)"
+        ),
+        0.8,
+        _valid_phone,
     ),
     Pattern(
         "regex.semver",

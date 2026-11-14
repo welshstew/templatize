@@ -101,15 +101,20 @@ def find_addresses(text: str) -> list[Span]:
     return found
 
 
+def address_roles(text: str, spans: list[Span]) -> list[str | None]:
+    """ "sender"/"recipient" for the two addresses of a letter, else None."""
+    if len(spans) == 2 and _GREETING.search(text, spans[1].end):
+        return ["sender", "recipient"]
+    return [None] * len(spans)
+
+
 class AddressDetector:
     name = "address"
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
         text = ctx.text
         spans = find_addresses(text)
-        names = ["address"] * len(spans)
-        if len(spans) == 2 and _GREETING.search(text, spans[1].end):
-            names = ["sender_address", "recipient_address"]
+        names = [f"{r}_address" if r else "address" for r in address_roles(text, spans)]
         return DetectorResult(
             candidates=[
                 Candidate(

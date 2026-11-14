@@ -32,6 +32,7 @@ TYPE_NAMES: dict[VarType, str] = {
     VarType.DATETIME: "timestamp",
     VarType.TIME: "time",
     VarType.ADDRESS: "address",
+    VarType.PHONE: "phone_number",
     VarType.SEMVER: "version",
     VarType.PATH: "path",
     VarType.MAC: "mac_address",
