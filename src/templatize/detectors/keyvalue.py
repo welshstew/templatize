@@ -643,7 +643,12 @@ class KeyValueDetector:
             end = start + len(nm.group(1))
             value = nm.group(1)
             key = f"{key}_name" if not key.endswith("name") else key
-        if (dm := _WITH_DETAIL.match(value)) and len(dm.group(1)) < 60:
+        if (
+            (dm := _WITH_DETAIL.match(value))
+            and len(dm.group(1)) < 60
+            # A short detail: an email, a region, "25 seats"; a description stays.
+            and (" " not in dm.group(2).strip() or re.fullmatch(r"\d+ [a-z]+", dm.group(2)))
+        ):
             # "Business (25 seats)": a count in the detail is a value named by its unit.
             if cm := re.fullmatch(r"(\d+) ([a-z]+)", dm.group(2)):
                 cs = start + dm.start(2)
