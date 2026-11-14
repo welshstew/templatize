@@ -17,7 +17,14 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from templatize.build import BuildResult, LoopSpec, VariableSpec, build, specs_from_candidates
+from templatize.build import (
+    BuildResult,
+    LoopSpec,
+    VariableSpec,
+    accept_suggestions,
+    build,
+    specs_from_candidates,
+)
 from templatize.bundle import make_chart_zip, make_zip
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, apply_review, review_candidates
 from templatize.emitters import EMITTERS
@@ -47,6 +54,14 @@ def _print_candidates(res: SuggestResult, min_conf: float) -> None:
         )
         if c.variant_values:
             print(f"{'':>45}variants: {', '.join(_short(v, 20) for v in c.variant_values)}")
+    for lp in res.loops:
+        if lp.confidence < min_conf:
+            continue
+        fields = "scalar" if lp.scalar else ", ".join(f.name for f in lp.fields)
+        print(
+            f"loop {lp.confidence:.2f}  {lp.name} ({len(lp.items)} x {lp.item}: {fields})"
+            f"  {','.join(lp.detectors)}"
+        )
     for n in res.notices:
         where = f" at {n.span.start}" if n.span else ""
         print(f"note: {n.kind}{where}: {n.message}")
@@ -79,8 +94,11 @@ def _suggest(text: str, variants: list[str], llm_url: str | None) -> SuggestResu
     except LlmUnavailable as exc:
         print(f"warning: LLM review skipped: {exc}", file=sys.stderr)
         return res
-    return SuggestResult(
-        candidates=apply_review(res.candidates, review), notices=[*res.notices, *review.notices]
+    return res.model_copy(
+        update={
+            "candidates": apply_review(res.candidates, review),
+            "notices": [*res.notices, *review.notices],
+        }
     )
 
 
@@ -96,16 +114,19 @@ def cmd_suggest(args: argparse.Namespace) -> int:
 def cmd_build(args: argparse.Namespace) -> int:
     text = _read(args.file)
     specs: list[VariableSpec]
+    loops: list[LoopSpec] = []
     if args.vars:
         specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
     else:
         res = _suggest(text, [_read(v) for v in args.variant], args.llm_url)
-        specs = specs_from_candidates(_select(res, args.min_confidence))
-    loops = (
-        TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())
-        if args.loops
-        else []
-    )
+        chosen = _select(res, args.min_confidence)
+        if args.no_loops or args.loops:
+            specs = specs_from_candidates(chosen)
+        else:
+            found = [lp for lp in res.loops if lp.confidence >= args.min_confidence]
+            specs, loops = accept_suggestions(chosen, found)
+    if args.loops:
+        loops = TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())
     result = build(text, specs, engine=args.engine, loops=loops)
     _write_outputs(result, args.output, args.zip)
 
@@ -123,7 +144,9 @@ def cmd_build(args: argparse.Namespace) -> int:
     rt = result.roundtrip
     verdict = "PASS" if rt.ok else "FAIL"
     print(
-        f"round-trip: {verdict} ({len(result.ir.variables)} variables, {rt.expected_bytes} bytes)"
+        f"round-trip: {verdict} ({len(result.ir.variables)} variables"
+        + (f", {len(result.ir.loops)} loops" if result.ir.loops else "")
+        + f", {rt.expected_bytes} bytes)"
         + (f": {rt.error} at char {rt.first_difference}" if not rt.ok else ""),
         file=sys.stderr,
     )
@@ -207,6 +230,11 @@ def make_parser() -> argparse.ArgumentParser:
     b.add_argument(
         "--loops",
         help="JSON file with a list of loop specs (repeated blocks; values go to values.yaml)",
+    )
+    b.add_argument(
+        "--no-loops",
+        action="store_true",
+        help="with --accept-all: keep repeated blocks as separate variables",
     )
     b.add_argument("--min-confidence", type=float, default=0.0)
     b.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")

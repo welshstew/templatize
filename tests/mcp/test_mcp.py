@@ -264,3 +264,13 @@ def test_offline_checker_mcp_step(http_server: str) -> None:
     from templatize_api.offline_check import check_mcp
 
     assert check_mcp(http_server, FIXTURES / "nginx.conf") is None
+
+
+def test_tools_suggest_and_generate_loops() -> None:
+    text = 'BROKERS = ["10.0.0.1:9092", "10.0.0.2:9092"]\n'
+    sug = tools.suggest_parameters(text)
+    (loop,) = sug.loops
+    assert loop.name == "brokers" and loop.values == ["10.0.0.1:9092", "10.0.0.2:9092"]
+    gen = tools.generate_template(text)
+    assert gen.roundtrip.ok and gen.values_filename == "values.yaml"
+    assert "{% for broker in brokers %}" in gen.template

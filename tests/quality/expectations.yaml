@@ -3,6 +3,8 @@
 #   want:   values that must be suggested, each as one whole candidate value
 #   reject: values that must not be suggested (format keywords, split names,
 #           times mistaken for ports, block openers, ...)
+#   loops:  the repeated blocks that must be suggested, name -> number of items;
+#           any other loop fails the test (default: none)
 #
 # Every sample needs an entry, so a new sample comes with its expectations.
 # Heuristic detectors only (no LLM / NER), with the sample's examples.
@@ -52,6 +54,7 @@ json:
   reject: []
 
 python:
+  loops: {kafka_brokers: 3}
   want: [billing-worker, production, pg-billing.internal.example.com, billing, billing.invoices.v2, billing-oncall@example.com]
   reject: ["{"]
 
@@ -80,6 +83,7 @@ release:
   reject: []
 
 sql:
+  loops: {users: 2}
   want: [Bluewater Logistics, bluewater, enterprise, 7f3c2a10-5b1e-4d8a-9c77-2e4f6a1b0c93, "2026-02-14 09:30:00", ops-admin@bluewater.example.com, admin, member, "150"]
   reject: [INSERT, VALUES, Bluewater, Logistics]
 

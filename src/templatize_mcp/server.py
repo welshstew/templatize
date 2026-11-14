@@ -39,7 +39,8 @@ Typical flow:
 2. generate_template(text, variables=[{name, value}...]) -> template, .env,
    render.py and a round-trip verdict. Identify variables by `value` (the exact text);
    you never need character offsets. Omit `variables` to accept suggestions above
-   `min_confidence` automatically.
+   `min_confidence` automatically, including `loops`: repeated blocks (list items,
+   SQL rows) become {% for %} loops and their values go to values.yaml instead of .env.
 3. render_template / validate_template to try other values or check a template
    that you edited.
 Everything runs locally; nothing is stored or sent anywhere.

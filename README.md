@@ -562,7 +562,17 @@ and the values go to `values.yaml` instead of `.env` (lists of mappings, or of s
 for a scalar loop), which `render.py` reads. Add or remove items there to change the
 output. Loops are accepted by `POST /build` (`loops`), `templatize build --loops
 loops.json`, and lists are accepted as values by `/render` and the MCP render/validate
-tools. Detection, the UI and Helm `range` are next; see `docs/design/loops.md`.
+tools.
+
+Loops are suggested (`loops` in `/suggest`, `templatize suggest`, MCP
+`suggest_parameters`) for YAML/JSON lists of values or of same-keyed mappings,
+`INSERT ... VALUES` rows (fields named after the columns), inline lists such as
+`BROKERS = ["a", "b"]`, and runs of lines starting with the same keyword
+(`server 10.0.0.1:8080;`). Items must share one shape: what differs between them
+becomes the fields. Examples with more or fewer items confirm a loop (confidence
+0.97, and their lists are kept). `templatize build --accept-all` and MCP
+`generate_template` without `variables` accept loops too (`--no-loops` to keep
+separate variables). The UI and Helm `range` are next; see `docs/design/loops.md`.
 
 > JavaScript clients index strings in UTF-16 code units, not code points. Convert at the
 > API boundary.

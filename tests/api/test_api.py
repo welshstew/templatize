@@ -208,3 +208,13 @@ def test_build_with_loops_and_render_lists(client: TestClient) -> None:
     assert rendered == {"ok": True, "output": "hosts:\n- x\n- y\n- z\n", "error": None}
     bad = client.post("/build", json={"text": text, "loops": [{**loop, "name": "for"}]})
     assert bad.status_code == 422 and "reserved" in bad.json()["detail"]
+
+
+def test_suggest_returns_loops(client: TestClient) -> None:
+    text = (
+        "INSERT INTO users (email, role) VALUES ('a@x.example', 'admin'), ('b@x.example', 'dev');\n"
+    )
+    res = client.post("/suggest", json={"text": text}).json()
+    (loop,) = res["loops"]
+    assert (loop["name"], loop["item"], len(loop["items"])) == ("users", "user", 2)
+    assert [f["name"] for f in loop["fields"]] == ["email", "role"]

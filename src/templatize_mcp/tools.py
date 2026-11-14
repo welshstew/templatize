@@ -12,8 +12,10 @@ from typing import Literal
 from pydantic import BaseModel
 
 from templatize.build import (
+    LoopSpec,
     VariableInput,
     VariableResolutionError,
+    accept_suggestions,
     build,
     resolve_inputs,
     specs_from_candidates,
@@ -27,6 +29,7 @@ from templatize.helm import build as build_helm_chart
 from templatize.helm.coverage import CoverageReport
 from templatize.ir import MAX_INPUT_CHARS, Candidate, IRValidationError, Notice, VarType
 from templatize.k8s import DocumentProfile
+from templatize.loops import loop_values
 from templatize.roundtrip import RoundTripResult
 from templatize.suggest import SuggestResult, check_limits, suggest
 from templatize.validate import validate_template as core_validate
@@ -61,8 +64,23 @@ NEXT_STEP_HELM = (
 )
 
 
+class SuggestedLoop(BaseModel):
+    name: str
+    item: str
+    items: int
+    """How many repeated items were found."""
+    fields: list[str]
+    """Keys of each item (empty for a list of plain values)."""
+    values: list[dict[str, str]] | list[str]
+    confidence: float
+    reason: str | None = None
+
+
 class SuggestParametersResult(BaseModel):
     candidates: list[Candidate]
+    loops: list[SuggestedLoop] = []
+    """Repeated blocks (list items, SQL rows): generate_template turns them into
+    {% for %} loops when called without `variables`."""
     notices: list[Notice]
     profile: DocumentProfile = DocumentProfile()
     """format="kubernetes" with helm_suggested=true means a Helm chart can be generated."""
@@ -82,7 +100,9 @@ class GenerateTemplateResult(BaseModel):
     template_filename: str
     template: str
     env: str
-    """Contents of the .env file (KEY="value" lines)."""
+    """Contents of the values file: .env (KEY="value" lines), or values.yaml when the
+    template has loops (see values_filename)."""
+    values_filename: str = ".env"
     render_script: str
     """render.py: `uv run render.py > output.txt` renders template + .env."""
     variables: list[GeneratedVariable]
@@ -122,6 +142,19 @@ def suggest_parameters(
         raise ToolInputError(str(exc)) from None
     return SuggestParametersResult(
         candidates=[c for c in res.candidates if c.confidence >= min_confidence],
+        loops=[
+            SuggestedLoop(
+                name=lp.name,
+                item=lp.item,
+                items=len(lp.items),
+                fields=[] if lp.scalar else [f.name for f in lp.fields],
+                values=loop_values(text, lp),
+                confidence=lp.confidence,
+                reason=lp.reason,
+            )
+            for lp in res.loops
+            if lp.confidence >= min_confidence
+        ],
         notices=res.notices,
         profile=res.profile,
         next_step=NEXT_STEP_HELM if res.profile.helm_suggested else NEXT_STEP,
@@ -203,14 +236,15 @@ def generate_template(
     variants = variants or []
     try:
         check_limits(text, variants)
+        loops: list[LoopSpec] = []
         if variables is None:
-            cands = [
-                c for c in _suggest(text, variants).candidates if c.confidence >= min_confidence
-            ]
-            specs = specs_from_candidates(cands)
+            res = _suggest(text, variants)
+            cands = [c for c in res.candidates if c.confidence >= min_confidence]
+            found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+            specs, loops = accept_suggestions(cands, found)
         else:
             specs = resolve_inputs(text, variables)
-        result = build(text, specs, engine=engine)
+        result = build(text, specs, engine=engine, loops=loops)
     except (VariableResolutionError, IRValidationError, ValueError) as exc:
         raise ToolInputError(str(exc)) from None
     runner = result.runner[0].content if result.runner else ""
@@ -219,6 +253,7 @@ def generate_template(
         template_filename=result.template.path,
         template=result.template.content,
         env=result.env.content,
+        values_filename=result.env.path,
         render_script=runner,
         variables=[
             GeneratedVariable(

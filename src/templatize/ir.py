@@ -175,6 +175,43 @@ class Candidate(BaseModel):
         return self
 
 
+class LoopFieldCandidate(BaseModel):
+    name: str
+    type: VarType = VarType.STRING
+    spans: list[Span] = Field(min_length=1)
+    """One per item, in item order."""
+
+
+LoopValues = list[dict[str, str]] | list[str]
+
+
+class LoopCandidate(BaseModel):
+    """A suggested repeated block (see :class:`Loop`)."""
+
+    id: str = ""
+    name: str
+    item: str
+    items: list[Span] = Field(min_length=1)
+    fields: list[LoopFieldCandidate] = Field(min_length=1)
+    scalar: bool = False
+    sources: list[Source]
+    detectors: list[str]
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str | None = None
+    variant_values: list[LoopValues | None] | None = None
+    """The list in each example document (None where the example has no such loop)."""
+
+    @model_validator(mode="after")
+    def _fill_id(self) -> LoopCandidate:
+        if not self.id:
+            self.id = "loop-" + candidate_id(self.name, self.items)
+        return self
+
+    @property
+    def region(self) -> Span:
+        return Span(start=self.items[0].start, end=self.items[-1].end)
+
+
 def candidate_id(value: str, spans: list[Span]) -> str:
     key = value + "|" + ",".join(f"{s.start}-{s.end}" for s in sorted(spans, key=_span_key))
     return hashlib.sha1(key.encode("utf-8", "surrogatepass")).hexdigest()[:12]

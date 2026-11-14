@@ -1,6 +1,6 @@
 # Design: repeated blocks as loops
 
-Status: milestone 1 (IR + Jinja2) implemented · Scope: core IR, detectors, Jinja2 + Helm (exact) emitters, UI
+Status: milestones 1 (IR + Jinja2) and 2 (detection) implemented · Scope: core IR, detectors, Jinja2 + Helm (exact) emitters, UI
 
 ## Why
 

@@ -8,7 +8,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
-from templatize.build import build, specs_from_candidates
+from templatize.build import accept_suggestions, build, specs_from_candidates
 from templatize.bundle import make_zip
 from templatize.suggest import suggest
 from tests.conftest import read_fixture, variants_for
@@ -31,6 +31,30 @@ def test_fixture_roundtrips_with_variants(fixture_path: Path) -> None:
     assert any(c.variant_values for c in res.candidates)
     result = build(text, specs_from_candidates(res.candidates))
     assert result.roundtrip.ok, result.roundtrip
+
+
+def test_fixture_roundtrips_with_suggested_loops(fixture_path: Path, tmp_path: Path) -> None:
+    """Accepting every suggestion including loops: round trip, and render.py from
+    values.yaml reproduces the fixture."""
+    text = read_fixture(fixture_path)
+    variants = variants_for(fixture_path)
+    res = suggest(text, variants)
+    specs, loops = accept_suggestions(res.candidates, res.loops)
+    result = build(text, specs, loops=loops)
+    assert result.roundtrip.ok, result.roundtrip
+    if not loops:
+        return
+    with zipfile.ZipFile(BytesIO(make_zip(result))) as zf:
+        zf.extractall(tmp_path)
+    out = tmp_path / "out.bin"
+    proc = subprocess.run(
+        [sys.executable, str(tmp_path / "render.py"), "-o", str(out)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert out.read_bytes() == fixture_path.read_bytes()
 
 
 def test_fixture_roundtrips_with_no_variables(fixture_path: Path) -> None:

@@ -37,6 +37,7 @@ def test_build_accept_all_outputs(tmp_path: Path, capsys: pytest.CaptureFixture[
             "build",
             str(FIXTURES / "docker-compose.yml"),
             "--accept-all",
+            "--no-loops",
             "-o",
             str(tmp_path / "out"),
             "--zip",
@@ -49,6 +50,18 @@ def test_build_accept_all_outputs(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert (tmp_path / "out" / ".env").read_text().count("=") >= 5
     with zipfile.ZipFile(tmp_path / "b.zip") as zf:
         assert sorted(zf.namelist()) == [".env", "README.md", "render.py", "template.j2"]
+
+
+def test_build_accept_all_turns_lists_into_loops(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "out"
+    assert (
+        main(["build", str(FIXTURES / "docker-compose.yml"), "--accept-all", "-o", str(out)]) == 0
+    )
+    assert "1 loops" in capsys.readouterr().err
+    assert "{% for depends_on_item in depends_on %}" in (out / "template.j2").read_text()
+    assert "depends_on:\n- db\n- cache\n" in (out / "values.yaml").read_text()
 
 
 def test_build_prints_template_by_default(capsys: pytest.CaptureFixture[str]) -> None:

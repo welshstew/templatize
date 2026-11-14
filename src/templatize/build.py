@@ -14,6 +14,7 @@ from templatize.ir import (
     Candidate,
     IRValidationError,
     Loop,
+    LoopCandidate,
     LoopField,
     Source,
     Span,
@@ -22,6 +23,7 @@ from templatize.ir import (
     Variable,
     VarType,
 )
+from templatize.loops import compatible_candidates, singular
 from templatize.naming import infer_type
 from templatize.roundtrip import RoundTripResult, check_roundtrip
 from templatize.suggest import check_limits
@@ -67,14 +69,6 @@ class LoopSpec(BaseModel):
     confidence: float | None = None
     description: str | None = None
     values_path: ValuesPath | None = None
-
-
-def singular(name: str) -> str:
-    if name.endswith("ies") and len(name) > 4:
-        return name[:-3] + "y"
-    if name.endswith("s") and not name.endswith("ss") and len(name) > 3:
-        return name[:-1]
-    return f"{name}_item"
 
 
 def make_loop(text: str, spec: LoopSpec) -> Loop:
@@ -158,6 +152,30 @@ def specs_from_candidates(candidates: Iterable[Candidate]) -> list[VariableSpec]
         )
         for c in candidates
     ]
+
+
+def specs_from_loop_candidates(loops: Iterable[LoopCandidate]) -> list[LoopSpec]:
+    return [
+        LoopSpec(
+            name=lp.name,
+            item=lp.item,
+            items=lp.items,
+            fields=[LoopFieldSpec(name=f.name, spans=f.spans, type=f.type) for f in lp.fields],
+            scalar=lp.scalar,
+            sources=lp.sources,
+            confidence=lp.confidence,
+            description=lp.reason,
+        )
+        for lp in loops
+    ]
+
+
+def accept_suggestions(
+    candidates: Sequence[Candidate], loops: Sequence[LoopCandidate]
+) -> tuple[list[VariableSpec], list[LoopSpec]]:
+    """Specs for accepting ``loops`` and the scalar ``candidates`` compatible with them."""
+    kept = compatible_candidates(candidates, loops)
+    return specs_from_candidates(kept), specs_from_loop_candidates(loops)
 
 
 def build_ir(ir: TemplateIR, engine: str = "jinja2") -> BuildResult:
