@@ -153,6 +153,21 @@ def check_chart(base: str, text: str, variants: list[str], cands: list[Any]) -> 
     want = {f"{name}/Chart.yaml", f"{name}/values.yaml", *(f"{name}/{p}" for p in files)}
     if not want <= names:
         return f"chart zip is missing {sorted(want - names)}"
+    return check_scaffold(base, payload)
+
+
+def check_scaffold(base: str, payload: dict[str, Any]) -> str | None:
+    """helm create style: when the app has helm, coverage must be computed (offline)."""
+    info = _get_json(base, "/info")
+    status, body, _ = _post(base, "/chart", {**payload, "style": "scaffold"})
+    if status == 422 and b"exactly one Deployment" in body:
+        return None  # not a single-application input
+    if status != 200:
+        return f"/chart (scaffold) -> {status}: {body[:200]!r}"
+    chart = json.loads(body)
+    for rep in chart["coverage"]:
+        if info.get("helm") and (not rep["available"] or rep["error"]):
+            return f"scaffold coverage failed: {rep['error']}"
     return None
 
 

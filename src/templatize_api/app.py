@@ -26,11 +26,13 @@ from templatize.detectors import HEURISTIC_DETECTORS, Detector, default_detector
 from templatize.detectors import ner as ner_detector
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, check_health, review_candidates
 from templatize.emitters import EMITTERS, TemplateRenderError, get_emitter
-from templatize.emitters.base import Emitter
+from templatize.emitters.base import EmittedFile, Emitter
 from templatize.emitters.jinja2 import Jinja2Emitter
-from templatize.helm import ChartError, ChartResult, build_chart
+from templatize.helm import ChartError, ChartResult
+from templatize.helm import build as build_helm_chart
+from templatize.helm import coverage as helm_coverage
 from templatize.helm import values as helm_values
-from templatize.helm.chart import render_templates
+from templatize.helm.chart import CHART_NAME_RE, render_templates
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, IRValidationError
 from templatize.suggest import InputLimitError, SuggestResult, suggest
 from templatize_api.middleware import BodyLimitMiddleware, SecurityHeadersMiddleware
@@ -87,7 +89,8 @@ def _run_build(req: BuildRequest) -> BuildResult:
 
 def _run_chart(req: ChartRequest) -> ChartResult:
     try:
-        return build_chart(
+        return build_helm_chart(
+            req.style,
             req.text,
             req.variables,
             req.variants,
@@ -243,6 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engines=sorted(EMITTERS),
             detectors=list(HEURISTIC_DETECTORS),
             optional_detectors={"ner": ner_health.ok(), "llm": llm_health.ok()},
+            helm=helm_coverage.helm_binary() is not None,
             mcp_http="/mcp" if mcp_routes else None,
             limits=Limits(
                 max_input_chars=MAX_INPUT_CHARS,
@@ -352,7 +356,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def chart_render_endpoint(req: ChartRenderRequest) -> ChartRenderResponse:
         """Render chart templates with (edited) values, for the live preview.
 
-        Supports the ``{{ .Values.x }}`` references templatize generates."""
+        Exact style: the ``{{ .Values.x }}`` references templatize generates, rendered
+        in-process. Scaffold style: the whole chart through ``helm template``."""
+        if req.style == "scaffold":
+            if not CHART_NAME_RE.match(req.chart_name):
+                raise ApiError(422, "invalid chart name")
+            files = [f for f in req.files if f.path != "values.yaml"]
+            files.append(EmittedFile(path="values.yaml", content=req.values_yaml))
+            try:
+                rendered = helm_coverage.helm_template(files, req.chart_name, req.overlay_yaml)
+            except helm_coverage.HelmUnavailable:
+                return ChartRenderResponse(ok=False, error="the preview needs helm on the server")
+            except ValueError as exc:
+                return ChartRenderResponse(ok=False, error=str(exc))
+            return ChartRenderResponse(ok=True, files=rendered)
         try:
             tree = helm_values.load(req.values_yaml)
             if req.overlay_yaml is not None:

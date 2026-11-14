@@ -21,7 +21,8 @@ from templatize.build import BuildResult, VariableSpec, build, specs_from_candid
 from templatize.bundle import make_chart_zip, make_zip
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, apply_review, review_candidates
 from templatize.emitters import EMITTERS
-from templatize.helm import ChartError, build_chart
+from templatize.helm import ChartError
+from templatize.helm import build as build_helm_chart
 from templatize.ir import Candidate, IRValidationError
 from templatize.suggest import InputLimitError, SuggestResult, suggest
 
@@ -134,7 +135,9 @@ def cmd_chart(args: argparse.Namespace) -> int:
         res = _suggest(text, variants, args.llm_url)
         specs = specs_from_candidates(_select(res, args.min_confidence))
     labels = args.label or None
-    result = build_chart(text, specs, variants, chart_name=args.name, variant_labels=labels)
+    result = build_helm_chart(
+        args.style, text, specs, variants, chart_name=args.name, variant_labels=labels
+    )
     if args.output:
         root = args.output / result.chart_name
         for f in result.files:
@@ -162,6 +165,19 @@ def cmd_chart(args: argparse.Namespace) -> int:
             + (f": {rt.error}" if not rt.ok else ""),
             file=sys.stderr,
         )
+    for cov in result.coverage:
+        if not cov.available:
+            print(f"coverage {cov.document}: not checked ({cov.error})", file=sys.stderr)
+        elif cov.error:
+            print(f"coverage {cov.document} with {cov.label}: ERROR {cov.error}", file=sys.stderr)
+        else:
+            print(
+                f"coverage {cov.document} with {cov.label}: {cov.percent:.0f}% of fields identical "
+                f"({cov.lost} lost, {cov.changed} changed, {cov.added} added by the scaffold)",
+                file=sys.stderr,
+            )
+    for note in result.notes:
+        print(f"note: {note}", file=sys.stderr)
     return 0 if result.ok else 2
 
 
@@ -207,6 +223,13 @@ def make_parser() -> argparse.ArgumentParser:
     csel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
     csel.add_argument("--vars", help="JSON file with a list of variable specs")
     c.add_argument("--name", help="chart name (default: the first workload's name)")
+    c.add_argument(
+        "--style",
+        choices=["exact", "scaffold"],
+        default="exact",
+        help="exact: your manifests as templates (byte-for-byte); scaffold: the helm create "
+        "chart filled in from them (coverage checked with helm)",
+    )
     c.add_argument("--min-confidence", type=float, default=0.0)
     c.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
     c.add_argument("-o", "--output", type=Path, help="write the chart directory under this path")

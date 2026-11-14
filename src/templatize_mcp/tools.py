@@ -22,7 +22,9 @@ from templatize.detectors import Detector, default_detectors
 from templatize.detectors import ner as ner_detector
 from templatize.emitters import TemplateRenderError, get_emitter
 from templatize.emitters.jinja2 import Jinja2Emitter
-from templatize.helm import ChartError, ChartRoundTrip, build_chart
+from templatize.helm import ChartError, ChartRoundTrip, ChartStyle
+from templatize.helm import build as build_helm_chart
+from templatize.helm.coverage import CoverageReport
 from templatize.ir import MAX_INPUT_CHARS, Candidate, IRValidationError, Notice, VarType
 from templatize.k8s import DocumentProfile
 from templatize.roundtrip import RoundTripResult
@@ -134,8 +136,14 @@ class GenerateHelmChartResult(BaseModel):
     variables: list[GeneratedVariable]
     values_paths: dict[str, str]
     """Variable name -> dotted values.yaml path."""
+    style: ChartStyle
     roundtrips: list[ChartRoundTrip]
-    """ok=true for each: the chart renders back to the input (and to each variant)."""
+    """Exact style: ok=true for each means the chart renders back to the input (and to
+    each variant) byte for byte."""
+    coverage: list[CoverageReport]
+    """Scaffold style: per document, which fields render identically (percent), and
+    which are lost, changed or added by the helm create scaffold."""
+    notes: list[str]
     used_suggestions: bool
 
 
@@ -146,6 +154,7 @@ def generate_helm_chart(
     chart_name: str | None = None,
     variant_labels: list[str] | None = None,
     min_confidence: float = 0.5,
+    style: ChartStyle = "exact",
 ) -> GenerateHelmChartResult:
     variants = variants or []
     try:
@@ -157,8 +166,8 @@ def generate_helm_chart(
             specs = specs_from_candidates(cands)
         else:
             specs = resolve_inputs(text, variables)
-        result = build_chart(
-            text, specs, variants, chart_name=chart_name, variant_labels=variant_labels
+        result = build_helm_chart(
+            style, text, specs, variants, chart_name=chart_name, variant_labels=variant_labels
         )
     except (VariableResolutionError, IRValidationError, ChartError, ValueError) as exc:
         raise ToolInputError(str(exc)) from None
@@ -172,7 +181,10 @@ def generate_helm_chart(
             for v in result.variables
         ],
         values_paths={v.name: ".".join(v.values_path or []) for v in result.variables},
+        style=result.style,
         roundtrips=result.roundtrips,
+        coverage=result.coverage,
+        notes=result.notes,
         used_suggestions=variables is None,
     )
 

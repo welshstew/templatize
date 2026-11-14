@@ -43,6 +43,7 @@ def test_check_fixture_against_app(monkeypatch: pytest.MonkeyPatch) -> None:
         return r.status_code, r.content, dict(r.headers)
 
     monkeypatch.setattr(offline_check, "_post", post)
+    monkeypatch.setattr(offline_check, "_get_json", lambda _b, path: client.get(path).json())
     for path in sorted(p for p in FIXTURES.iterdir() if p.is_file()):
         result = offline_check.check_fixture("http://test", path)
         assert result is None or result.startswith("ok:"), (path.name, result)

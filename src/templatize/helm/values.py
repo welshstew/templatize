@@ -49,7 +49,7 @@ def typed(value: str) -> str | int | bool:
     return value
 
 
-def build_tree(entries: Iterable[tuple[Sequence[str], str]]) -> Tree:
+def build_tree(entries: Iterable[tuple[Sequence[str], Any]]) -> Tree:
     tree: Tree = {}
     for path, value in entries:
         node = tree

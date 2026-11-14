@@ -142,3 +142,61 @@ def test_mcp_tool() -> None:
     with pytest.raises(tools.ToolInputError):
         tools.generate_helm_chart("not yaml: [\n")
     assert json.loads(r.model_dump_json())["chart_name"] == "storefront"
+
+
+def test_api_scaffold_chart_and_preview(client: TestClient) -> None:
+    import shutil
+
+    info = client.get("/info").json()
+    assert info["helm"] is (shutil.which("helm") is not None)
+    body = {
+        "text": STACK,
+        "variants": [STAGING],
+        "variables": _variables(client),
+        "variant_labels": ["staging"],
+        "style": "scaffold",
+    }
+    chart = client.post("/chart", json=body).json()
+    assert chart["style"] == "scaffold" and chart["ok"]
+    assert chart["roundtrips"] == [] and len(chart["coverage"]) == 2
+    paths = [f["path"] for f in chart["files"]]
+    assert "templates/_helpers.tpl" in paths and "templates/configmap.yaml" in paths
+    if not info["helm"]:
+        assert chart["coverage"][0]["available"] is False
+        return
+    assert chart["coverage"][0]["percent"] >= 90
+    files = {f["path"]: f["content"] for f in chart["files"]}
+    out = client.post(
+        "/chart/render",
+        json={
+            "style": "scaffold",
+            "chart_name": chart["chart_name"],
+            "files": chart["files"],
+            "templates": [],
+            "values_yaml": files["values.yaml"].replace("replicaCount: 4", "replicaCount: 7"),
+            "overlay_yaml": None,
+        },
+    ).json()
+    assert out["ok"], out
+    dep = next(f["content"] for f in out["files"] if f["path"] == "templates/deployment.yaml")
+    assert "replicas: 7" in dep and 'image: "ghcr.io/acme/storefront:3.9.1"' in dep
+    bad = client.post(
+        "/chart/render",
+        json={
+            "style": "scaffold",
+            "chart_name": "storefront",
+            "files": chart["files"],
+            "templates": [],
+            "values_yaml": "a: [",
+        },
+    ).json()
+    assert not bad["ok"] and "helm template failed" in bad["error"]
+    r = client.post("/chart/download", json=body)
+    assert r.status_code == 200 and r.headers["x-roundtrip"] == "pass"
+
+
+def test_mcp_scaffold_style() -> None:
+    r = tools.generate_helm_chart(STACK, style="scaffold")
+    assert r.style == "scaffold" and r.roundtrips == []
+    assert any(f.path == "templates/_helpers.tpl" for f in r.files)
+    assert r.coverage and r.notes

@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 from templatize.build import VariableSpec
 from templatize.detectors.llm import LlmReview
 from templatize.emitters import EmittedFile
+from templatize.helm import ChartStyle
 from templatize.helm.chart import ChartRoundTrip, ChartTemplate
+from templatize.helm.coverage import CoverageReport
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Variable
 from templatize.roundtrip import RoundTripResult
 
@@ -72,6 +74,8 @@ class InfoResponse(BaseModel):
     engines: list[str]
     detectors: list[str]
     optional_detectors: dict[str, bool]
+    helm: bool
+    """``helm`` is installed: the helm create chart style can be checked and previewed."""
     mcp_http: str | None
     """Path of the MCP streamable HTTP endpoint, if enabled."""
     limits: Limits
@@ -91,14 +95,20 @@ class ChartRequest(BaseModel):
         default=None, max_length=MAX_VARIANTS
     )
     """Names for the per-example values files (``values-<label>.yaml``)."""
+    style: ChartStyle = "exact"
+    """``exact``: your manifests as templates. ``scaffold``: the ``helm create`` chart
+    filled in from them (needs ``helm`` on the server for the coverage check)."""
 
 
 class ChartResponse(BaseModel):
     chart_name: str
+    style: ChartStyle
     files: list[EmittedFile]
     templates: list[ChartTemplate]
     variables: list[Variable]
     roundtrips: list[ChartRoundTrip]
+    coverage: list[CoverageReport]
+    notes: list[str]
     ok: bool
 
 
@@ -110,6 +120,10 @@ class ChartRenderRequest(BaseModel):
     values_yaml: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)]
     overlay_yaml: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)] | None = None
     """An example's values file, merged over ``values_yaml`` like ``helm -f``."""
+    style: ChartStyle = "exact"
+    chart_name: Annotated[str, Field(max_length=53)] = "chart"
+    files: list[EmittedFile] = Field(default_factory=list, max_length=MAX_CHART_FILES)
+    """Scaffold style: the whole chart (helpers included), rendered with real Helm."""
 
 
 class ChartRenderResponse(BaseModel):

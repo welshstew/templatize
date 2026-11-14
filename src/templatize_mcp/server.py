@@ -169,13 +169,23 @@ def create_server() -> MCPServer:
             float,
             Field(ge=0, le=1, description="Threshold when accepting suggestions automatically."),
         ] = 0.5,
+        style: Annotated[
+            Literal["exact", "scaffold"],
+            Field(
+                description=(
+                    "exact: the manifests become the templates (byte-for-byte round trip). "
+                    "scaffold: the standard `helm create` chart with its values.yaml filled in "
+                    "from the manifests; `coverage` reports what renders identically."
+                )
+            ),
+        ] = "exact",
     ) -> tools.GenerateHelmChartResult:
         """Build a Helm chart from Kubernetes manifests: Chart.yaml, a nested values.yaml,
-        one template per resource, and a values file per variant. Verifies that the chart
-        renders back to the input (and each variant) byte for byte."""
+        templates, and a values file per variant. Style "exact" verifies a byte-for-byte
+        round trip; style "scaffold" fills in the `helm create` chart and reports coverage."""
         with _tool_errors("generate_helm_chart"):
             return tools.generate_helm_chart(
-                text, variables, variants, chart_name, variant_labels, min_confidence
+                text, variables, variants, chart_name, variant_labels, min_confidence, style
             )
 
     @server.tool(annotations=READ_ONLY)

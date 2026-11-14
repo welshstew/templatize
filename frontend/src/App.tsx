@@ -4,6 +4,7 @@ import {
   api,
   type BuildResponse,
   type ChartResponse,
+  type ChartStyle,
   type DocumentProfile,
   type Info,
   type Notice,
@@ -85,6 +86,7 @@ export function App() {
   const [chart, setChart] = useState<ChartResponse | null>(null);
   const [chartError, setChartError] = useState<string | null>(null);
   const [chartName, setChartName] = useState("");
+  const [chartStyle, setChartStyle] = useState<ChartStyle>("exact");
   const reviewedVariants = useRef<string[]>([]);
 
   const limits = info?.limits ?? DEFAULT_LIMITS;
@@ -111,6 +113,7 @@ export function App() {
       setChart(null);
       setChartError(null);
       setChartName("");
+      setChartStyle("exact");
       reviewedVariants.current = docVariants;
       setSelectedId(null);
       setSelection(null);
@@ -204,7 +207,7 @@ export function App() {
     (signal) => {
       if (mode !== "review" || output !== "helm") return;
       setBuildPending(true);
-      api.chart(text, reviewedVariants.current, specs, { chartName: chartName || null }, signal).then(
+      api.chart(text, reviewedVariants.current, specs, { chartName: chartName || null, style: chartStyle }, signal).then(
         (c) => {
           setChart(c);
           setChartError(null);
@@ -217,7 +220,7 @@ export function App() {
         },
       );
     },
-    [mode, output, text, specsKey, chartName],
+    [mode, output, text, specsKey, chartName, chartStyle],
     250,
   );
 
@@ -256,7 +259,7 @@ export function App() {
     try {
       const helm = output === "helm";
       const blob = helm
-        ? await api.chartDownload(text, reviewedVariants.current, specs, { chartName: chartName || null })
+        ? await api.chartDownload(text, reviewedVariants.current, specs, { chartName: chartName || null, style: chartStyle })
         : await api.download(text, specs);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -275,7 +278,9 @@ export function App() {
   const isK8s = profile?.format === "kubernetes";
   const helm = output === "helm";
   // One badge for the chart: the first failing round trip, or the input's.
-  const chartRT = chart ? (chart.roundtrips.find((x) => !x.ok) ?? chart.roundtrips[0]) : undefined;
+  const chartRT =
+    chart && chart.style === "exact" ? (chart.roundtrips.find((x) => !x.ok) ?? chart.roundtrips[0]) : undefined;
+  const chartCoverage = chart?.style === "scaffold" ? chart.coverage[0] : undefined;
   const chartRoundTrip: RoundTrip | null = chartRT ? { ...chartRT, engine: "helm" } : null;
   const chartScope = chart && chart.roundtrips.length > 1 ? `input + ${chart.roundtrips.length - 1} example${chart.roundtrips.length > 2 ? "s" : ""}` : null;
   const suggestedCount = items.filter((i) => i.status === "suggested").length;
@@ -291,12 +296,26 @@ export function App() {
         </h1>
         {mode === "review" ? (
           <>
+            {helm && chart?.style === "scaffold" ? (
+              <span
+                class={`badge ${chartCoverage?.available && !chartCoverage.error ? "pass" : "neutral"} ${buildPending ? "stale" : ""}`}
+                role="status"
+                title="Fields of your manifests that the helm create chart renders identically (checked with helm template)"
+              >
+                {chartCoverage?.available && !chartCoverage.error
+                  ? `helm create chart · ${Math.round(chartCoverage.percent)}% of fields identical`
+                  : chartCoverage?.error && chartCoverage.available
+                    ? "helm create chart · render error"
+                    : "helm create chart · coverage not checked"}
+              </span>
+            ) : (
             <RoundTripBadge
               result={helm ? chartRoundTrip : (build?.roundtrip ?? null)}
               pending={buildPending}
               scope={helm ? chartScope : null}
               failedDocument={helm ? (chart?.roundtrips.find((r) => !r.ok)?.document ?? null) : null}
             />
+            )}
             {isK8s ? (
               <span class="seg" role="group" aria-label="Output format">
                 <button aria-pressed={!helm} class={!helm ? "on" : ""} onClick={() => setOutput("jinja")}>
@@ -426,6 +445,9 @@ export function App() {
               documents={[reviewedText.current, ...reviewedVariants.current]}
               chartName={chartName}
               onChartName={setChartName}
+              chartStyle={chartStyle}
+              onChartStyle={setChartStyle}
+              helmAvailable={info?.helm ?? false}
             />
           ) : (
             <OutputPanel

@@ -342,9 +342,40 @@ API: `POST /chart` (same inputs as `/build`, plus `variants`, `chart_name`,
 `POST /chart/download` (zip of the chart directory). MCP: `generate_helm_chart`, and
 `suggest_parameters` returns the profile so the client can offer a chart.
 
-**Not in v1:** Helm idioms that change the output's structure (`include "chart.fullname"`,
-`.Release.Namespace`, `toYaml` blocks). They depend on the release name or re-serialise
-YAML, so the exact round trip would not hold in general.
+**Two chart styles.** The chart view has an **Exact | helm create** switch (CLI
+`--style exact|scaffold`, API and MCP `style`):
+
+- **Exact** (above): your manifests are the templates, and the round trip is byte for byte.
+- **helm create**: the standard chart that `helm create` generates (Helm 4.3.2, bundled in
+  `src/templatize/helm/scaffold/` with its Apache-2.0 notice), with the scaffold's
+  `values.yaml` placeholders replaced by what your manifests say: `replicaCount`,
+  `image.repository`/`tag`/`pullPolicy`, `service.type`/`port`, `ingress.enabled`,
+  `className`, `hosts`, `tls` and annotations, `resources`, probes, `autoscaling` (from an
+  HPA), `serviceAccount`, `podAnnotations`/`podLabels`, security contexts,
+  `nodeSelector`/`tolerations`/`affinity`, volumes, and `fullnameOverride`/`nameOverride`
+  so the names match. The deployment template is extended with optional `env`, `envFrom`,
+  `command`, `args`, `containerName` and `containerPort`, and the service template with
+  `service.targetPort`. Resources the scaffold does not model (ConfigMaps, Secrets, extra
+  Services, ...) are carried over as exact templates with your variables. Examples give a
+  `values-<label>.yaml` with only the differences, as before. The style needs exactly one
+  Deployment; for anything else use the exact style.
+
+  The scaffold adds labels and fields of its own, so a byte-for-byte round trip is not
+  possible. Instead the chart is rendered with real `helm template` and compared with your
+  manifests field by field: the **coverage report** (an entry in the explorer, and a badge
+  in the top bar) lists what renders identically, what is **lost** (in your manifests but
+  not in the chart, e.g. `metadata.namespace`, which the scaffold leaves to
+  `helm install -n`, or custom labels), **changed**, and **added** by the scaffold
+  (standard labels, a Service, port names). For the sample app stack, 93% of the fields
+  render identically. The preview is rendered with Helm too. The app image includes a
+  pinned, checksum-verified `helm` (`scripts/fetch-helm.py`); without one (set
+  `TEMPLATIZE_HELM=0`, or run outside the image without Helm installed) the chart is still
+  built, but marked "coverage not checked".
+
+**Not in the exact style:** Helm idioms that change the output's structure
+(`include "chart.fullname"`, `.Release.Namespace`, `toYaml` blocks). They depend on the
+release name or re-serialise YAML, so the exact round trip would not hold. The helm create
+style uses them, and is checked by coverage instead.
 
 ### MCP server
 
@@ -355,7 +386,7 @@ with five read-only tools:
 |---|---|
 | `suggest_parameters(text, variants?, min_confidence?)` | Scored candidate variables (spans are code points) |
 | `generate_template(text, variables?, variants?, min_confidence?)` | Template, `.env`, `render.py` and the round-trip verdict. Give variables **by value**, e.g. `[{"name": "db_host", "value": "db01.example.com", "occurrences": "all"}]`, so the model never has to count characters (spans also work). Omit `variables` to accept suggestions automatically |
-| `generate_helm_chart(text, variables?, variants?, chart_name?, variant_labels?, min_confidence?)` | Helm chart from Kubernetes manifests: Chart.yaml, nested values.yaml, one template per resource, a values file per variant, and a round trip per document. Variables take an optional `values_path` |
+| `generate_helm_chart(text, variables?, variants?, chart_name?, variant_labels?, min_confidence?, style?)` | Helm chart from Kubernetes manifests: Chart.yaml, nested values.yaml, templates, and a values file per variant. `style="exact"` checks a byte-for-byte round trip per document; `style="scaffold"` fills in the `helm create` chart and returns a coverage report. Variables take an optional `values_path` |
 | `render_template(template, values?, newline?)` | Sandboxed render. Errors come back in `error`, not as an exception |
 | `validate_template(template, values?, expected_text?)` | Syntax, referenced, missing and unused variables, renders?, and reproduces `expected_text` byte for byte? |
 

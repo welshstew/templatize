@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 
-import { api, type ChartRenderResponse, type ChartResponse, type EmittedFile } from "../api.ts";
+import { api, type ChartRenderResponse, type ChartResponse, type ChartStyle, type EmittedFile } from "../api.ts";
 import {
   buildTree,
   fileRole,
@@ -10,6 +10,7 @@ import {
   tokenize,
   type TreeNode,
 } from "../chart.ts";
+import { CoveragePanel } from "./CoveragePanel.tsx";
 
 interface Props {
   chart: ChartResponse | null;
@@ -19,10 +20,15 @@ interface Props {
   documents: string[];
   chartName: string;
   onChartName: (name: string) => void;
+  chartStyle: ChartStyle;
+  onChartStyle: (style: ChartStyle) => void;
+  /** helm is installed on the server (needed to check and preview the scaffold style). */
+  helmAvailable: boolean;
 }
 
 const RENDERED = "rendered/";
 const ALL_RENDERED = "rendered/(all manifests).yaml";
+const COVERAGE = "(coverage report)";
 const CHART_NAME_RE = /^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$/;
 
 function isEditable(path: string): boolean {
@@ -199,7 +205,17 @@ function Tree({
   );
 }
 
-export function ChartView({ chart, error, pending, documents, chartName, onChartName }: Props) {
+export function ChartView({
+  chart,
+  error,
+  pending,
+  documents,
+  chartName,
+  onChartName,
+  chartStyle,
+  onChartStyle,
+  helmAvailable,
+}: Props) {
   const [tabs, setTabs] = useState<string[]>([]);
   const [active, setActive] = useState<string>("");
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -230,13 +246,19 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
     if (overlay && !byPath.has(overlay)) setOverlay(null);
   }, [generatedKey]);
 
-  // Open values.yaml and the first template on the first chart.
+  const scaffold = chart?.style === "scaffold";
+  // Open values.yaml and the first template (or the coverage report) on the first
+  // chart of each style.
   useEffect(() => {
-    if (!chart || tabs.length) return;
-    const first = ["values.yaml", templates[0]?.path].filter(Boolean) as string[];
+    if (!chart) return;
+    const valid = tabs.filter((p) => byPath.has(p) || p.startsWith(RENDERED) || (p === COVERAGE && scaffold));
+    if (valid.length && valid.length === tabs.length) return;
+    const first = scaffold
+      ? ["values.yaml", COVERAGE]
+      : (["values.yaml", templates[0]?.path].filter(Boolean) as string[]);
     setTabs(first);
-    setActive(templates[0]?.path ?? "values.yaml");
-  }, [chart]);
+    setActive(scaffold ? COVERAGE : (templates[0]?.path ?? "values.yaml"));
+  }, [chart?.style, chart?.chart_name]);
 
   useEffect(() => setNameDraft(chartName), [chartName]);
 
@@ -256,7 +278,10 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
     if (!chart) return;
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      api.chartRender(templates, valuesText, overlayText, ctrl.signal).then(setRendered, (e) => {
+      const scaffoldFiles = scaffold
+        ? { chartName: chart.chart_name, files: files.map((f) => ({ path: f.path, content: contentOf(f.path) })) }
+        : null;
+      api.chartRender(templates, valuesText, overlayText, scaffoldFiles, ctrl.signal).then(setRendered, (e) => {
         if (!(e instanceof DOMException && e.name === "AbortError")) {
           setRendered({ ok: false, files: [], error: String(e) });
         }
@@ -294,13 +319,18 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
   };
 
   const activeContent =
-    active === ALL_RENDERED
+    active === COVERAGE
+      ? ""
+      : active === ALL_RENDERED
       ? (combined ?? "")
       : active.startsWith(RENDERED)
         ? (renderedFiles.find((f) => f.path === active)?.content ?? "")
         : contentOf(active);
   const activeExists =
-    active === ALL_RENDERED ? combined !== null : active.startsWith(RENDERED) ? renderedFiles.some((f) => f.path === active) : byPath.has(active);
+    active === COVERAGE
+      ? scaffold
+      : active === ALL_RENDERED
+        ? combined !== null : active.startsWith(RENDERED) ? renderedFiles.some((f) => f.path === active) : byPath.has(active);
   const lineCount = activeContent ? activeContent.split("\n").length - (activeContent.endsWith("\n") ? 1 : 0) : 0;
 
   let editor;
@@ -308,6 +338,12 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
   else if (!chart) editor = <p class="hint ide-msg">{pending ? "Building chart…" : "No chart yet."}</p>;
   else if (!active || !activeExists)
     editor = <p class="hint ide-msg">{active.startsWith(RENDERED) && rendered && !rendered.ok ? `Render error: ${rendered.error}` : "Open a file from the explorer."}</p>;
+  else if (active === COVERAGE)
+    editor = (
+      <div class="ide-doc">
+        <CoveragePanel reports={chart.coverage} notes={chart.notes} />
+      </div>
+    );
   else if (isEditable(active))
     editor = (
       <EditableCode
@@ -344,6 +380,28 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
     <section class={`output chart-view ${maximized ? "max" : ""}`} aria-label="Helm chart">
       <div class="ide-head">
         <span class="ide-title">Helm chart</span>
+        <span class="seg" role="group" aria-label="Chart style">
+          <button
+            class={chartStyle === "exact" ? "on" : ""}
+            aria-pressed={chartStyle === "exact"}
+            title="Your manifests become the templates; the chart reproduces them byte for byte"
+            onClick={() => onChartStyle("exact")}
+          >
+            Exact
+          </button>
+          <button
+            class={chartStyle === "scaffold" ? "on" : ""}
+            aria-pressed={chartStyle === "scaffold"}
+            title={
+              helmAvailable
+                ? "The standard helm create chart, with values.yaml filled in from your manifests"
+                : "The standard helm create chart, filled in from your manifests (helm is not installed on the server, so coverage and preview are unavailable)"
+            }
+            onClick={() => onChartStyle("scaffold")}
+          >
+            helm create
+          </button>
+        </span>
         <label class="chart-name">
           <span>name</span>
           <input
@@ -379,6 +437,26 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
               {collapsed.has("") ? null : (
                 <Tree nodes={chartTree} active={active} onOpen={(p) => open(p)} collapsed={collapsed} onToggle={toggle} kinds={kinds} depth={1} />
               )}
+              {scaffold ? (
+                <>
+                  <div class="explorer-section">Checks</div>
+                  <ul class="tree">
+                    <li>
+                      <button
+                        class={`tree-row file role-coverage ${active === COVERAGE ? "active" : ""}`}
+                        style={{ paddingLeft: "22px" }}
+                        onClick={() => open(COVERAGE)}
+                      >
+                        <span class="file-dot" aria-hidden="true" />
+                        <span class="fname">coverage report</span>
+                        {chart.coverage[0]?.available && !chart.coverage[0].error ? (
+                          <span class="kind">{Math.round(chart.coverage[0].percent)}%</span>
+                        ) : null}
+                      </button>
+                    </li>
+                  </ul>
+                </>
+              ) : null}
               <div class="explorer-section">
                 Preview
                 {overlays.length ? (
@@ -404,7 +482,7 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
                     <span class="fname">all manifests</span>
                   </button>
                 </li>
-                {templates.map((t) => {
+                {(rendered?.ok ? rendered.files : templates).map((t) => {
                   const p = RENDERED + t.path.replace(/^templates\//, "");
                   return (
                     <li key={p}>
@@ -425,7 +503,7 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
             {tabs.map((p) => (
               <span key={p} class={`ide-tab ${p === active ? "active" : ""} ${edits[p] !== undefined ? "dirty" : ""}`}>
                 <button role="tab" aria-selected={p === active} onClick={() => setActive(p)} title={p}>
-                  {p.startsWith(RENDERED) ? `⟶ ${p.slice(RENDERED.length)}` : p.split("/").pop()}
+                  {p === COVERAGE ? "Coverage" : p.startsWith(RENDERED) ? `⟶ ${p.slice(RENDERED.length)}` : p.split("/").pop()}
                 </button>
                 <button class="icon" aria-label={`Close ${p}`} onClick={() => close(p)}>
                   ×
@@ -450,7 +528,16 @@ export function ChartView({ chart, error, pending, documents, chartName, onChart
               </span>
             ) : null}
             {rendered && !rendered.ok ? <span class="st-fail">render error</span> : null}
-            {combined !== null && expected !== undefined ? (
+            {scaffold && chart ? (
+              chart.coverage[expectedIdx]?.available && !chart.coverage[expectedIdx]?.error ? (
+                <span class={chart.coverage[expectedIdx]!.lost ? "muted" : "st-pass"}>
+                  coverage {Math.round(chart.coverage[expectedIdx]!.percent)}% · {chart.coverage[expectedIdx]!.lost} lost ·{" "}
+                  {chart.coverage[expectedIdx]!.added} added
+                </span>
+              ) : (
+                <span class="muted">coverage not checked{helmAvailable ? "" : " (no helm)"}</span>
+              )
+            ) : combined !== null && expected !== undefined ? (
               combined === expected ? (
                 <span class="st-pass">
                   ✓ preview identical to {expectedIdx === 0 ? "the input" : `example ${expectedIdx + 1}`}

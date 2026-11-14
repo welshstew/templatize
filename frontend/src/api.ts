@@ -101,12 +101,47 @@ export interface ChartTemplate {
   span: Span;
 }
 
+export type ChartStyle = "exact" | "scaffold";
+
+export interface FieldDiff {
+  path: string;
+  expected: string | null;
+  actual: string | null;
+}
+
+export interface ResourceCoverage {
+  kind: string;
+  name: string;
+  status: "matched" | "lost" | "added";
+  covered: number;
+  lost: FieldDiff[];
+  changed: FieldDiff[];
+  added: FieldDiff[];
+}
+
+export interface CoverageReport {
+  label: string;
+  document: string;
+  available: boolean;
+  error: string | null;
+  resources: ResourceCoverage[];
+  covered: number;
+  expected_fields: number;
+  lost: number;
+  changed: number;
+  added: number;
+  percent: number;
+}
+
 export interface ChartResponse {
   chart_name: string;
+  style: ChartStyle;
   files: EmittedFile[];
   templates: ChartTemplate[];
   variables: { name: string; value: string; values_path: string[] | null }[];
   roundtrips: ChartRoundTrip[];
+  coverage: CoverageReport[];
+  notes: string[];
   ok: boolean;
 }
 
@@ -119,6 +154,7 @@ export interface ChartRenderResponse {
 export interface ChartOptions {
   chartName?: string | null;
   variantLabels?: string[] | null;
+  style?: ChartStyle;
 }
 
 export interface LlmReview {
@@ -147,6 +183,7 @@ export interface Info {
   engines: string[];
   detectors: string[];
   optional_detectors: Record<string, boolean>;
+  helm?: boolean;
   limits: { max_input_chars: number; max_variants: number; max_variables: number };
 }
 
@@ -204,13 +241,35 @@ export const api = {
   chart: (text: string, variants: string[], variables: VariableSpec[], opts: ChartOptions, signal?: AbortSignal) =>
     post<ChartResponse>(
       "/chart",
-      { text, variants, variables, chart_name: opts.chartName || null, variant_labels: opts.variantLabels ?? null },
+      {
+        text,
+        variants,
+        variables,
+        chart_name: opts.chartName || null,
+        variant_labels: opts.variantLabels ?? null,
+        style: opts.style ?? "exact",
+      },
       signal,
     ),
-  chartRender: (templates: EmittedFile[], valuesYaml: string, overlayYaml: string | null, signal?: AbortSignal) =>
+  chartRender: (
+    templates: EmittedFile[],
+    valuesYaml: string,
+    overlayYaml: string | null,
+    scaffold: { chartName: string; files: EmittedFile[] } | null,
+    signal?: AbortSignal,
+  ) =>
     post<ChartRenderResponse>(
       "/chart/render",
-      { templates, values_yaml: valuesYaml, overlay_yaml: overlayYaml },
+      scaffold
+        ? {
+            style: "scaffold",
+            chart_name: scaffold.chartName,
+            files: scaffold.files,
+            templates: [],
+            values_yaml: valuesYaml,
+            overlay_yaml: overlayYaml,
+          }
+        : { templates, values_yaml: valuesYaml, overlay_yaml: overlayYaml },
       signal,
     ),
   chartDownload: async (text: string, variants: string[], variables: VariableSpec[], opts: ChartOptions): Promise<Blob> => {
@@ -223,6 +282,7 @@ export const api = {
         variables,
         chart_name: opts.chartName || null,
         variant_labels: opts.variantLabels ?? null,
+        style: opts.style ?? "exact",
       }),
     });
     if (!resp.ok) throw await errorFrom(resp);

@@ -35,12 +35,21 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra api --extra mcp --no-editable
 
 # ---------------------------------------------------------------------------
+# Helm, for the helm create chart style (coverage report and preview). Pinned
+# release, SHA-256 verified at build time; never downloads at runtime.
+FROM python:${PYTHON_VERSION}-slim AS helm
+ARG TARGETARCH
+COPY scripts/fetch-helm.py /tmp/fetch-helm.py
+RUN python /tmp/fetch-helm.py /opt/helm "${TARGETARCH}"
+
+# ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
 LABEL org.opencontainers.image.title="templatize" \
       org.opencontainers.image.description="Turn plain text into templates, offline"
 RUN useradd --system --uid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=frontend /fe/dist /app/static
+COPY --from=helm /opt/helm/helm /usr/local/bin/helm
 COPY scripts/offline-fixtures.sh /usr/local/bin/offline-fixtures
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \

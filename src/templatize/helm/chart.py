@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -28,6 +29,7 @@ from templatize.build import VariableSpec, make_ir
 from templatize.detectors.k8s import camel
 from templatize.emitters.base import EmittedFile, TemplateRenderError
 from templatize.helm import gotemplate, values
+from templatize.helm.coverage import CoverageReport
 from templatize.ir import Span, TemplateIR, Variable
 from templatize.k8s import Resource, parse_resources
 from templatize.roundtrip import EXCERPT_RADIUS
@@ -85,9 +87,17 @@ class ChartResult(BaseModel):
     variables: list[Variable]
     """With final (unique) ``values_path`` filled in."""
     roundtrips: list[ChartRoundTrip]
+    """Exact style: byte-for-byte check per document. Empty for the scaffold style."""
+    style: Literal["exact", "scaffold"] = "exact"
+    coverage: list[CoverageReport] = []
+    """Scaffold style: field-by-field comparison of real ``helm template`` output."""
+    notes: list[str] = []
+    """Things the user should know (e.g. what the scaffold cannot express)."""
 
     @property
     def ok(self) -> bool:
+        if self.style == "scaffold":  # "not checked" (no helm) is not a failure
+            return all(c.error is None or not c.available for c in self.coverage)
         return all(r.ok for r in self.roundtrips)
 
     def file(self, path: str) -> EmittedFile:
@@ -117,10 +127,12 @@ def _template_names(resources: Sequence[Resource]) -> list[str]:
     return [f"templates/{n}.yaml" for n in names]
 
 
-def assign_paths(variables: Sequence[Variable]) -> list[list[str]]:
+def assign_paths(variables: Sequence[Variable], reserved: Iterable[str] = ()) -> list[list[str]]:
     """Final values path per variable: its own, or derived from its name; made unique
-    and prefix-free (``image`` and ``image.tag`` cannot both be values)."""
-    taken: list[list[str]] = []
+    and prefix-free (``image`` and ``image.tag`` cannot both be values). ``reserved``
+    top-level keys are already in use (the scaffold's own values)."""
+    taken: list[list[str]] = [[k] for k in reserved]
+    first = len(taken)
 
     def clash(p: list[str]) -> list[str] | None:
         return next((t for t in taken if t[: len(p)] == p or p[: len(t)] == t), None)
@@ -129,14 +141,14 @@ def assign_paths(variables: Sequence[Variable]) -> list[list[str]]:
         path = list(var.values_path) if var.values_path else [camel(var.name)]
         candidate, n = path, 2
         while (other := clash(candidate)) is not None:
-            if n > len(variables) + 2:  # cannot happen: each suffix is new
+            if n > len(variables) + len(taken) + 2:  # cannot happen: each suffix is new
                 raise ChartError(f"cannot find a free values path for {var.name!r}")
             # Rename at the deepest segment the two paths share, so "image.tag" next to
             # a value "image" becomes "image2.tag", not the still-clashing "image.tag2".
             i = min(len(other), len(path)) - 1
             candidate, n = [*path[:i], f"{path[i]}{n}", *path[i + 1 :]], n + 1
         taken.append(candidate)
-    return taken
+    return taken[first:]
 
 
 def _compare(label: str, document: str, expected: str, rendered: str) -> ChartRoundTrip:
