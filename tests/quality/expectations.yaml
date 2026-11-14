@@ -23,6 +23,7 @@ k8s-stack:
   reject: [ConfigMap, Ingress, networking.k8s.io/v1]
 
 compose:
+  loops: {web_environment: 2, db_environment: 3}  # map loops: offered, not auto-accepted
   # DATABASE_URL is built from POSTGRES_USER/PASSWORD/DB: suggested as those parts.
   want: [ghcr.io/acme/storefront:4.2.1, shop.example.com, s3cretPass, postgres:16.4]
   reject: [services, "postgres://shop:s3cretPass@db:5432/storefront"]

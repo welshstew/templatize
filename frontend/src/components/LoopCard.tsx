@@ -155,6 +155,11 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
         )}
       </div>
 
+      {loop.map ? (
+        <div class="loop-for">
+          <code>{`{% for ${loop.fields[0]?.name ?? "key"}, ${loop.fields[1]?.name ?? "value"} in ${loop.name}.items() %}`}</code>
+        </div>
+      ) : (
       <div class="loop-for">
         <code>{"{% for "}</code>
         {accepted ? (
@@ -171,6 +176,7 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
         )}
         <code>{` in ${loop.name} %}`}</code>
       </div>
+      )}
       {blocker ? <div class="field-error">Can't make this a loop: {blocker}.</div> : null}
 
       <div class="loop-table-wrap">
@@ -189,7 +195,7 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
                       onCommit={(v) => onUpdate(loop.id, renameField(loop, c, v))}
                     />
                   ) : (
-                    <code>{loop.scalar ? loop.item : `${loop.item}.${c}`}</code>
+                    <code>{loop.map ? c : loop.scalar ? loop.item : `${loop.item}.${c}`}</code>
                   )}
                 </th>
               ))}
@@ -269,7 +275,10 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
         <div class="meta muted">
           examples:{" "}
           {loop.variantValues
-            .map((v) => (v ? `${v.length} item${v.length === 1 ? "" : "s"}` : "no match"))
+            .map((v) => {
+              const n = v ? (Array.isArray(v) ? v.length : Object.keys(v).length) : 0;
+              return v ? `${n} item${n === 1 ? "" : "s"}` : "no match";
+            })
             .join(" · ")}
         </div>
       ) : null}

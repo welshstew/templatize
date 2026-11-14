@@ -44,6 +44,8 @@ export interface DocumentProfile {
 
 /** One loop's list: a mapping per item, or a string per item (scalar loop). */
 export type LoopRows = Record<string, string>[] | string[];
+/** A loop's values as sent to the server: map loops are a mapping of key -> value. */
+export type LoopValue = LoopRows | Record<string, string>;
 
 export interface LoopFieldCandidate {
   name: string;
@@ -60,11 +62,15 @@ export interface LoopCandidate {
   items: Span[];
   fields: LoopFieldCandidate[];
   scalar: boolean;
+  /** Key/value entries (environment:, labels:): rendered with .items(). */
+  map?: boolean;
+  /** False when "accept all" should leave it (maps): offered only. */
+  auto_accept?: boolean;
   sources: string[];
   detectors: string[];
   confidence: number;
   reason: string | null;
-  variant_values: (LoopRows | null)[] | null;
+  variant_values: (LoopValue | null)[] | null;
 }
 
 export interface SuggestResult {
@@ -80,13 +86,14 @@ export interface LoopSpec {
   items: Span[];
   fields: { name: string; spans: Span[]; type?: string }[];
   scalar: boolean;
+  map?: boolean;
   sources?: string[];
   /** Each example's list (Helm charts write it to the example's values file). */
-  variant_values?: (LoopRows | null)[] | null;
+  variant_values?: (LoopValue | null)[] | null;
 }
 
 /** Render values: variables are strings, loops are lists. */
-export type RenderValues = Record<string, string | LoopRows>;
+export type RenderValues = Record<string, string | LoopValue>;
 
 export interface VariableSpec {
   name: string;

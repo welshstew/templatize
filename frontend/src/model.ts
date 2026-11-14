@@ -10,6 +10,7 @@ import type {
   LoopCandidate,
   LoopRows,
   LoopSpec,
+  LoopValue,
   RenderValues,
   Span,
   VariableSpec,
@@ -473,7 +474,7 @@ export function segments(map: OffsetMap, items: Item[], loops: LoopItem[] = []):
 /** Preview values keyed by variable name, for /render: accepted loops add their lists. */
 export function previewValues(items: Item[], loops: LoopItem[] = []): RenderValues {
   const out: RenderValues = Object.fromEntries(accepted(items).map((i) => [i.name, i.previewValue]));
-  for (const l of loops) if (l.status === "accepted") out[l.name] = l.previewRows;
+  for (const l of loops) if (l.status === "accepted") out[l.name] = loopValue(l, l.previewRows);
   return out;
 }
 
@@ -501,10 +502,12 @@ export interface LoopItem {
   items: Span[];
   fields: LoopField[];
   scalar: boolean;
+  /** Key/value entries: fields[0] is the key, fields[1] the value (loop variables). */
+  map: boolean;
   sources: string[];
   confidence: number | null;
   reason: string | null;
-  variantValues: (LoopRows | null)[] | null;
+  variantValues: (LoopValue | null)[] | null;
   status: Status;
   /** The document's rows. */
   rows: LoopRows;
@@ -513,6 +516,15 @@ export interface LoopItem {
   /** Variables and suggestions this loop replaced when it was accepted, with their
    * status then (restored if the loop is removed). */
   absorbed: { id: string; status: Status }[];
+}
+
+/** What the template renders from: rows, or for a map loop a key -> value mapping. */
+export function loopValue(loop: { map: boolean; fields: LoopField[] }, rows: LoopRows): LoopValue {
+  if (!loop.map) return rows;
+  const [k, v] = loop.fields;
+  return Object.fromEntries(
+    (rows as Record<string, string>[]).map((r) => [r[k?.name ?? "key"] ?? "", r[v?.name ?? "value"] ?? ""]),
+  );
 }
 
 export function loopRegion(loop: { items: Span[] }): Span {
@@ -542,6 +554,7 @@ export function loopsFromCandidates(cands: LoopCandidate[], map: OffsetMap): Loo
       items: c.items,
       fields,
       scalar: c.scalar,
+      map: c.map ?? false,
       sources: c.sources,
       confidence: c.confidence,
       reason: c.reason,
@@ -671,12 +684,14 @@ export function renameField(loop: LoopItem, from: string, to: string): Partial<L
     fields: loop.fields.map((f) => (f.name === from ? { ...f, name: to } : f)),
     rows: rename(loop.rows),
     previewRows: rename(loop.previewRows),
-    variantValues: loop.variantValues?.map((v) => (v ? rename(v) : v)) ?? null,
+    // A map's example values are key -> value mappings: data, not field names.
+    variantValues: loop.map ? loop.variantValues : (loop.variantValues?.map((v) => (v ? rename(v as LoopRows) : v)) ?? null),
   };
 }
 
 export function validateFieldName(name: string, loop: LoopItem, self: string): string | null {
   if (!name) return "name is required";
+  if (loop.map && !NAME_RE.test(name)) return "a loop variable: lowercase letters, digits and _";
   if (!VALUES_KEY_RE.test(name)) return "letters, digits and _ (not starting with a digit)";
   if (RESERVED.has(name)) return `"${name}" is a reserved word`;
   if (loop.fields.some((f) => f.name !== self && f.name === name)) return `"${name}" is already a field`;
@@ -692,6 +707,7 @@ export function loopSpecsFor(loops: LoopItem[]): LoopSpec[] {
       items: l.items,
       fields: l.fields.map((f) => ({ name: f.name, spans: f.spans, type: f.type })),
       scalar: l.scalar,
+      ...(l.map ? { map: true } : {}),
       sources: l.sources,
       ...(l.variantValues ? { variant_values: l.variantValues } : {}),
     }));

@@ -124,7 +124,9 @@ def cmd_build(args: argparse.Namespace) -> int:
         if args.no_loops or args.loops:
             specs = specs_from_candidates(chosen)
         else:
-            found = [lp for lp in res.loops if lp.confidence >= args.min_confidence]
+            found = [
+                lp for lp in res.loops if lp.auto_accept and lp.confidence >= args.min_confidence
+            ]
             specs, loops = accept_suggestions(chosen, found)
     if args.loops:
         loops = TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())
@@ -167,7 +169,9 @@ def cmd_chart(args: argparse.Namespace) -> int:
         if args.no_loops or args.style == "scaffold":
             specs = specs_from_candidates(chosen)
         else:
-            found = [lp for lp in res.loops if lp.confidence >= args.min_confidence]
+            found = [
+                lp for lp in res.loops if lp.auto_accept and lp.confidence >= args.min_confidence
+            ]
             specs, loops = accept_suggestions(chosen, found)
     if args.loops:
         loops = TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())
@@ -327,7 +331,9 @@ def cmd_role(args: argparse.Namespace) -> int:
         if args.no_loops:
             specs = specs_from_candidates(chosen)
         else:
-            found = [lp for lp in res.loops if lp.confidence >= args.min_confidence]
+            found = [
+                lp for lp in res.loops if lp.auto_accept and lp.confidence >= args.min_confidence
+            ]
             specs, loops = accept_suggestions(chosen, found)
     if args.loops:
         loops = TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())

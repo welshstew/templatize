@@ -505,14 +505,18 @@ pre.doc .dl.loop-line.accepted { border-left-style: solid; background: color-mix
 pre.doc .dl.loop-line.selected { background: color-mix(in srgb, var(--c) 16%, transparent); }
 pre.doc .dl.loop-first { border-top-left-radius: 4px; }
 pre.doc .dl.loop-last { border-bottom-left-radius: 4px; }
+pre.doc .dl.loop-line { position: relative; }
+/* The badge sits at the right edge, so the first line keeps its indentation. */
 pre.doc .dl.loop-first::before {
   content: attr(data-label);
+  position: absolute;
+  right: 4px;
+  top: 3px;
   font: 600 10.5px/1 var(--sans);
   color: var(--accent-text);
   background: var(--c);
   border-radius: 3px;
-  padding: 1px 5px;
-  margin-right: 6px;
-  vertical-align: 1px;
+  padding: 2px 5px;
   user-select: none;
+  pointer-events: none;
 }

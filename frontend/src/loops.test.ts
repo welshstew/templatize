@@ -188,3 +188,41 @@ test("loops: document segments and regions", () => {
     ["('t1', 'a@x', 'admin'), ('t1', 'b@x', 'dev')"],
   );
 });
+
+test("map loops: rows in the UI, a mapping for the template", () => {
+  const text = "env:\n  A_KEY: one\n  B_KEY: two\n";
+  const m = new OffsetMap(text);
+  const span = (s: string): Span => ({ start: text.indexOf(s), end: text.indexOf(s) + s.length });
+  const cand: LoopCandidate = {
+    id: "loop-env",
+    name: "env",
+    item: "env_item",
+    items: [span("A_KEY: one"), span("B_KEY: two")],
+    fields: [
+      { name: "key", type: "string", spans: [span("A_KEY"), span("B_KEY")] },
+      { name: "value", type: "string", spans: [span("one"), span("two")] },
+    ],
+    scalar: false,
+    map: true,
+    auto_accept: false,
+    sources: ["repetition"],
+    detectors: ["loop.yaml_map"],
+    confidence: 0.6,
+    reason: null,
+    variant_values: [{ A_KEY: "uno", C_KEY: "tres" }],
+  };
+  let { items, loops } = { items: [], loops: loopsFromCandidates([cand], m) } as { items: never[]; loops: ReturnType<typeof loopsFromCandidates> };
+  assert.deepEqual(loops[0]?.rows, [
+    { key: "A_KEY", value: "one" },
+    { key: "B_KEY", value: "two" },
+  ]);
+  ({ loops } = acceptLoop(items, loops, "loop-env"));
+  assert.deepEqual(previewValues(items, loops), { env: { A_KEY: "one", B_KEY: "two" } });
+  const spec = loopSpecsFor(loops)[0];
+  assert.equal(spec?.map, true);
+  // renaming a loop variable keeps the examples' mappings (they are data)
+  const renamed = { ...loops[0]!, ...renameField(loops[0]!, "key", "name") };
+  assert.deepEqual(renamed.variantValues, [{ A_KEY: "uno", C_KEY: "tres" }]);
+  assert.deepEqual(previewValues(items, [renamed]), { env: { A_KEY: "one", B_KEY: "two" } });
+  assert.match(validateFieldName("Bad", renamed, "name") ?? "", /loop variable/);
+});

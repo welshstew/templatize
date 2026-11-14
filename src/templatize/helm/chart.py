@@ -317,7 +317,9 @@ def build_chart(
         main_tree = values.build_tree(
             [
                 *((v.values_path or [], v.value) for v in variables),
-                *((lp.values_path or [], lp.values_of(text)) for lp in chart_loops),
+                # Maps too are lists of {key, value} rows: Go ranges maps in sorted
+                # key order, which would reorder the output.
+                *((lp.values_path or [], lp.rows_of(text)) for lp in chart_loops),
             ]
         )
     except values.ValuesError as exc:
@@ -338,8 +340,10 @@ def build_chart(
                 diff.append((v.values_path or [], vv[i]))
         for lp, spec in zip(chart_loops, loops, strict=True):
             lv = spec.variant_values
-            if lv is not None and i < len(lv) and lv[i] is not None and lv[i] != lp.values_of(text):
-                diff.append((lp.values_path or [], lv[i]))
+            if lv is not None and i < len(lv) and lv[i] is not None:
+                rows = _as_rows(lp, lv[i])
+                if rows != lp.rows_of(text):
+                    diff.append((lp.values_path or [], rows))
         overlays.append(
             (
                 f"values-{label}.yaml",
@@ -383,6 +387,14 @@ def build_chart(
         roundtrips=roundtrips,
         loops=chart_loops,
     )
+
+
+def _as_rows(lp: Loop, value: object) -> object:
+    """An example's list for ``lp`` as chart rows (a map's mapping -> key/value rows)."""
+    if lp.map and isinstance(value, dict):
+        key, val = (f.name for f in lp.fields)
+        return [{key: k, val: v} for k, v in value.items()]
+    return value
 
 
 def _range_emit(
