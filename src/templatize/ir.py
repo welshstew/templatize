@@ -182,7 +182,7 @@ class LoopFieldCandidate(BaseModel):
     """One per item, in item order."""
 
 
-LoopValues = list[dict[str, str]] | list[str]
+LoopValues = list[dict[str, str]] | list[str] | dict[str, str]
 
 
 class LoopCandidate(BaseModel):
@@ -194,6 +194,11 @@ class LoopCandidate(BaseModel):
     items: list[Span] = Field(min_length=1)
     fields: list[LoopFieldCandidate] = Field(min_length=1)
     scalar: bool = False
+    map: bool = False
+    """Key/value entries (see :class:`Loop`)."""
+    auto_accept: bool = True
+    """False for loops that change the shape of the output a lot (maps): offered,
+    but not taken by "accept all"."""
     sources: list[Source]
     detectors: list[str]
     confidence: float = Field(ge=0.0, le=1.0)
@@ -269,6 +274,10 @@ class Loop(BaseModel):
     items: list[Span] = Field(min_length=1, max_length=MAX_LOOP_ITEMS)
     fields: list[LoopField] = Field(min_length=1)
     scalar: bool = False
+    map: bool = False
+    """Items are key/value entries (``LABEL: value``): two fields, the key then the
+    value; the values file holds a mapping and Jinja renders
+    ``{% for key, value in name.items() %}``. Their names are the loop variables."""
     sources: list[Source] = Field(default_factory=lambda: [Source.MANUAL])
     confidence: float | None = None
     description: str | None = None
@@ -281,8 +290,25 @@ class Loop(BaseModel):
     def separator(self, text: str) -> str:
         return text[self.items[0].end : self.items[1].start] if len(self.items) > 1 else ""
 
-    def values_of(self, text: str) -> list[dict[str, str]] | list[str]:
-        """The list this loop renders: one dict per item (or one string, if scalar)."""
+    def rows_of(self, text: str) -> list[dict[str, str]] | list[str]:
+        """One dict per item (or one string, if scalar); a map's entries as
+        ``{key_field: ..., value_field: ...}`` rows."""
+        if self.scalar:
+            return [text[s.start : s.end] for s in self.fields[0].spans]
+        return [
+            {f.name: text[f.spans[i].start : f.spans[i].end] for f in self.fields}
+            for i in range(len(self.items))
+        ]
+
+    def values_of(self, text: str) -> list[dict[str, str]] | list[str] | dict[str, str]:
+        """What this loop renders from: a list of dicts (or strings, if scalar), or a
+        mapping for a map loop."""
+        if self.map:
+            k, v = self.fields
+            return {
+                text[k.spans[i].start : k.spans[i].end]: text[v.spans[i].start : v.spans[i].end]
+                for i in range(len(self.items))
+            }
         if self.scalar:
             return [text[s.start : s.end] for s in self.fields[0].spans]
         return [
@@ -311,9 +337,9 @@ class TemplateIR(BaseModel):
         occ.sort(key=lambda p: p[0].start)
         return occ
 
-    def values(self) -> dict[str, str | list[dict[str, str]] | list[str]]:
+    def values(self) -> dict[str, str | list[dict[str, str]] | list[str] | dict[str, str]]:
         """Render context that reproduces the text: variables and loop lists."""
-        out: dict[str, str | list[dict[str, str]] | list[str]] = {
+        out: dict[str, str | list[dict[str, str]] | list[str] | dict[str, str]] = {
             v.name: v.value for v in self.variables
         }
         for lp in self.loops:
@@ -386,6 +412,16 @@ def _validate_loops(ir: TemplateIR, names: set[str], var_spans: list[Span]) -> N
             validate_values_path(lp.values_path)
         if lp.scalar and len(lp.fields) != 1:
             raise IRValidationError(f"scalar loop {lp.name!r} must have exactly one field")
+        if lp.map:
+            if lp.scalar or len(lp.fields) != 2:
+                raise IRValidationError(f"map loop {lp.name!r} needs a key field and a value field")
+            keys = [ir.text[s.start : s.end] for s in lp.fields[0].spans]
+            if len(set(keys)) != len(keys):
+                raise IRValidationError(f"map loop {lp.name!r} has duplicate keys")
+            for f in lp.fields:  # they are template variables in the loop
+                validate_name(f.name)
+                if f.name in names:
+                    raise IRValidationError(f"loop variable {f.name!r} is already used")
         for a, b in itertools.pairwise(lp.items):
             if b.start < a.end:
                 raise IRValidationError(f"items of loop {lp.name!r} overlap or are out of order")

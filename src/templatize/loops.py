@@ -60,6 +60,9 @@ class Found:
     names: list[tuple[Span, str]] = field(default_factory=list)
     """Named regions of the first item (absolute): a field inside one takes its name
     (SQL column names)."""
+    fields: list[list[Span]] | None = None
+    """Known fields (one span per item), instead of inferring them by diffing."""
+    map: bool = False
 
 
 # --- field inference -------------------------------------------------------------
@@ -179,7 +182,86 @@ def find_yaml(text: str) -> list[Found]:
 
     for d in docs:
         walk(d, None)
+        _maps(text, d, None, out, ())
     return out
+
+
+# Mappings whose entries are open-ended data, not a fixed set of settings.
+OPEN_MAP_KEYS = frozenset(
+    {
+        "environment",
+        "env",
+        "labels",
+        "annotations",
+        "tags",
+        "data",
+        "stringdata",
+        "headers",
+        "variables",
+        "vars",
+        "extra_vars",
+        "build_args",
+        "args",
+        "nodeselector",
+        "selector",
+        "matchlabels",
+        "podlabels",
+        "podannotations",
+        "commonlabels",
+        "sysctls",
+    }
+)
+_ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
+def _maps(
+    text: str, node: Node | None, key: str | None, out: list[Found], path: tuple[str, ...]
+) -> None:
+    """Mappings of >= 2 plain keys to scalars, under an open-ended parent key
+    (``environment:``, ``labels:``) or with environment-variable keys: map loops."""
+    if isinstance(node, SequenceNode):
+        for k in node.value:  # a list item is a record, not the open map itself
+            _maps(text, k, None, out, path)
+        return
+    if not isinstance(node, MappingNode):
+        return
+    for k, v in node.value:
+        child = k.value if isinstance(k, ScalarNode) else None
+        _maps(text, v, child, out, (*path, str(child)) if child is not None else path)
+    entries = node.value
+    if len(entries) < MIN_ITEMS:
+        return
+    if not all(isinstance(k, ScalarNode) and isinstance(v, ScalarNode) for k, v in entries):
+        return
+    keys = [str(k.value) for k, _ in entries]
+    open_ended = (key or "").lower().replace("_", "") in {m.replace("_", "") for m in OPEN_MAP_KEYS}
+    if not (open_ended or all(_ENV_KEY.match(k) for k in keys)):
+        return
+    if len({k.style for k, _ in entries}) != 1 or len({v.style for _, v in entries}) != 1:
+        return
+    key_spans = [_scalar_span(text, k) for k, _ in entries]
+    value_spans = [_scalar_span(text, v) for _, v in entries]
+    if not all(key_spans) or not all(value_spans):
+        return
+    ks = [s for s in key_spans if s is not None]
+    vs = [s for s in value_spans if s is not None]
+    items = [
+        Span(start=entries[i][0].start_mark.index, end=entries[i][1].end_mark.index)
+        for i in range(len(entries))
+    ]
+    items = [_trimmed(text, it.start, it.end) or it for it in items]
+    out.append(
+        Found(
+            # web: {environment: ...} -> web_environment (one per compose service)
+            name=snake_case(f"{path[-2]}_{key}" if key and len(path) >= 2 else key or "entries"),
+            items=items,
+            detector="loop.yaml_map",
+            confidence=0.6,
+            reason=f"entries of {key!r}" if key else "key/value entries",
+            fields=[ks, vs],
+            map=True,
+        )
+    )
 
 
 def find_sql(text: str) -> list[Found]:
@@ -300,7 +382,15 @@ FINDERS = (find_sql, find_yaml, find_inline_lists, find_keyword_lines)
 def _candidate(text: str, found: Found) -> LoopCandidate | None:
     if not _same_separator(text, found.items):
         return None
-    fields = infer_fields(text, found.items)
+    if found.fields is not None:
+        fields: list[list[Span]] | None = found.fields
+        skeletons = {
+            _pieces(text, it, [f[i] for f in found.fields]) for i, it in enumerate(found.items)
+        }
+        if len(skeletons) != 1:
+            return None
+    else:
+        fields = infer_fields(text, found.items)
     if fields is None:
         return None
     scalar = len(fields) == 1 and fields[0] == found.items
@@ -310,7 +400,9 @@ def _candidate(text: str, found: Found) -> LoopCandidate | None:
         first = spans[0]
         value = text[first.start : first.end]
         named = next((n for region, n in found.names if region.contains(first)), None)
-        if scalar:
+        if found.map:
+            name = ("key", "value")[len(names)]
+        elif scalar:
             name = "value"
         elif named:
             name = snake_case(named)
@@ -327,7 +419,9 @@ def _candidate(text: str, found: Found) -> LoopCandidate | None:
             LoopFieldCandidate(name=n, type=t, spans=s)
             for n, t, s in zip(names, types, fields, strict=True)
         ],
-        scalar=scalar,
+        scalar=scalar and not found.map,
+        map=found.map,
+        auto_accept=not found.map,
         sources=[Source.REPETITION],
         detectors=[found.detector],
         confidence=found.confidence,
@@ -352,6 +446,12 @@ def find_loops(text: str) -> list[LoopCandidate]:
 
 
 def loop_values(text: str, loop: LoopCandidate) -> LoopValues:
+    if loop.map:
+        k, v = loop.fields
+        return {
+            text[k.spans[i].start : k.spans[i].end]: text[v.spans[i].start : v.spans[i].end]
+            for i in range(len(loop.items))
+        }
     if loop.scalar:
         return [text[s.start : s.end] for s in loop.fields[0].spans]
     return [
@@ -434,6 +534,10 @@ def _aligned(text: str, other: LoopCandidate, ref: LoopCandidate) -> LoopValues 
     vals = loop_values(text, other)
     if ref.scalar:
         return vals
+    if ref.map:
+        if not isinstance(vals, dict):
+            return None
+        return dict(vals)
     want = [f.name for f in ref.fields]
     rows = [v for v in vals if isinstance(v, dict)]
     if any(set(want) - set(r) for r in rows):

@@ -155,7 +155,11 @@ class Jinja2Emitter:
     def _loop(self, b: _Builder, ir: TemplateIR, lp: Loop, newline: str) -> None:
         """``{% for item in name %}{% if not loop.first %}SEP{% endif %}BODY{% endfor %}``:
         the body is the first item with its holes as expressions."""
-        b.expr("{% for " + lp.item + " in " + lp.name + " %}")
+        if lp.map:
+            key, value = lp.fields
+            b.expr("{% for " + key.name + ", " + value.name + " in " + lp.name + ".items() %}")
+        else:
+            b.expr("{% for " + lp.item + " in " + lp.name + " %}")
         sep = lp.separator(ir.text)
         if sep:
             b.expr("{% if not loop.first %}")
@@ -163,7 +167,8 @@ class Jinja2Emitter:
             b.expr("{% endif %}")
         first = lp.items[0]
         holes: list[tuple[Span, str]] = [
-            (f.spans[0], lp.item if lp.scalar else f"{lp.item}.{f.name}") for f in lp.fields
+            (f.spans[0], f.name if lp.map else lp.item if lp.scalar else f"{lp.item}.{f.name}")
+            for f in lp.fields
         ]
         holes += [(sp, v.name) for v in ir.variables for sp in v.spans if first.contains(sp)]
         holes.sort(key=lambda h: h[0].start)

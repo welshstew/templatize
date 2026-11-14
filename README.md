@@ -611,6 +611,16 @@ take any number of items in the preview. Accepting a loop sets aside the suggest
 on its fields (they come back if you remove the loop); variables that sit at the same
 place in every item, such as a tenant id in every row, still work inside it.
 
+**Map loops.** Open-ended key/value blocks (`environment:`, `labels:`,
+`annotations:`, `tags:`, `data:`, or keys that look like environment variables) are
+offered as map loops: `{% for key, value in web_environment.items() %}` over a
+mapping in values.yaml, so adding an entry adds a line. They are named after the
+enclosing key (`web_environment`, `db_environment`). "Accept all" leaves them out,
+because accepting one replaces the per-key variables (and, in compose, the
+`DATABASE_URL` parts); accept them one by one. In Helm charts a map is written as a
+list of `{key, value}` rows, because Go ranges maps in sorted key order and would
+reorder the output.
+
 In an exact-style Helm chart a loop is a `range` over a list in values.yaml
 (`{{ range $i, $port := .Values.ports }}{{ if $i }}SEP{{ end }}...{{ end }}`; inside it,
 variables are `{{ $.Values.x }}`), and an example with more or fewer items gets its

@@ -202,7 +202,9 @@ def generate_helm_chart(
             res = _suggest(text, variants)
             cands = [c for c in res.candidates if c.confidence >= min_confidence]
             if style == "exact":
-                found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+                found = [
+                    lp for lp in res.loops if lp.auto_accept and lp.confidence >= min_confidence
+                ]
                 specs, loops = accept_suggestions(cands, found)
             else:
                 specs = specs_from_candidates(cands)
@@ -251,7 +253,7 @@ def generate_template(
         if variables is None:
             res = _suggest(text, variants)
             cands = [c for c in res.candidates if c.confidence >= min_confidence]
-            found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+            found = [lp for lp in res.loops if lp.auto_accept and lp.confidence >= min_confidence]
             specs, loops = accept_suggestions(cands, found)
         else:
             specs = resolve_inputs(text, variables)
@@ -359,7 +361,7 @@ def generate_ansible_role(
         if variables is None:
             res = _suggest(text, variants)
             cands = [c for c in res.candidates if c.confidence >= min_confidence]
-            found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+            found = [lp for lp in res.loops if lp.auto_accept and lp.confidence >= min_confidence]
             specs, loops = accept_suggestions(cands, found)
         else:
             specs = resolve_inputs(text, variables)

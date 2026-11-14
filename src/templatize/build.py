@@ -66,6 +66,8 @@ class LoopSpec(BaseModel):
     fields: list[LoopFieldSpec] = Field(default_factory=list)
     scalar: bool = False
     """Items are single values: a list of strings. ``fields`` may be omitted."""
+    map: bool = False
+    """Items are key/value entries: two fields (key, value), rendered from a mapping."""
     sources: list[Source] = Field(default_factory=lambda: [Source.MANUAL])
     confidence: float | None = None
     description: str | None = None
@@ -92,6 +94,7 @@ def make_loop(text: str, spec: LoopSpec) -> Loop:
         items=items,
         fields=out,
         scalar=spec.scalar,
+        map=spec.map,
         sources=spec.sources,
         confidence=spec.confidence,
         description=spec.description,
@@ -167,6 +170,7 @@ def specs_from_loop_candidates(loops: Iterable[LoopCandidate]) -> list[LoopSpec]
             items=lp.items,
             fields=[LoopFieldSpec(name=f.name, spans=f.spans, type=f.type) for f in lp.fields],
             scalar=lp.scalar,
+            map=lp.map,
             sources=lp.sources,
             confidence=lp.confidence,
             description=lp.reason,
@@ -179,7 +183,9 @@ def specs_from_loop_candidates(loops: Iterable[LoopCandidate]) -> list[LoopSpec]
 def accept_suggestions(
     candidates: Sequence[Candidate], loops: Sequence[LoopCandidate]
 ) -> tuple[list[VariableSpec], list[LoopSpec]]:
-    """Specs for accepting ``loops`` and the scalar ``candidates`` compatible with them."""
+    """Specs for accepting ``loops`` and the scalar ``candidates`` compatible with them.
+    Loops that are only offered (``auto_accept=False``: maps) are left out."""
+    loops = [lp for lp in loops if lp.auto_accept]
     kept = compatible_candidates(candidates, loops)
     return specs_from_candidates(kept), specs_from_loop_candidates(loops)
 
