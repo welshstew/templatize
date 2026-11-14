@@ -46,7 +46,7 @@ export interface Item {
 
 export const VAR_TYPES = [
   "string", "int", "float", "bool", "ipv4", "ipv6", "cidr", "email", "url", "hostname",
-  "port", "uuid", "date", "datetime", "semver", "path", "mac",
+  "port", "uuid", "date", "datetime", "time", "semver", "path", "mac",
 ] as const;
 
 const NAME_RE = /^[a-z_][a-z0-9_]*$/;

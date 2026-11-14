@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import itertools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,14 +11,9 @@ from datetime import date
 
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span, VarType
-from templatize.naming import type_name
+from templatize.naming import TEXT_DATE, TIME, type_name
 
 _TRAILING_PUNCT = ".,;:!?)]}'\""
-
-_MONTHS = (
-    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|"
-    r"Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
-)
 
 _COMMON_TLDS = frozenset(
     [
@@ -251,11 +247,15 @@ PATTERNS: list[Pattern] = [
     Pattern(
         "regex.date_text",
         VarType.DATE,
-        re.compile(
-            rf"\b(?:\d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTHS}\.?,?\s+\d{{4}}"
-            rf"|{_MONTHS}\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}})\b"
-        ),
+        re.compile(rf"\b{TEXT_DATE}(?!\w)"),
         0.75,
+    ),
+    Pattern(
+        "regex.time",
+        VarType.TIME,
+        # Not part of a longer number ("8080:80"), a timestamp or a version.
+        re.compile(rf"(?<![\w:.]){TIME}(?![\w:]|\.\d)"),
+        0.6,
     ),
     Pattern(
         "regex.semver",
@@ -343,4 +343,45 @@ class RegexDetector:
                         reason=f"looks like {pat.type.value}",
                     )
                 )
-        return DetectorResult(candidates=out)
+        out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
+        return DetectorResult(candidates=_name_ranges(text, out))
+
+
+# "from 14:00 to 15:30", "9 July - 12 July", "between 9:00 and 10:00": the ends of a range
+# (hyphen, en dash or em dash).
+_RANGE_BETWEEN = re.compile(r"^[ \t]*(?:to|until|till|through|thru|-|\u2013|\u2014|and)[ \t]*$")
+_PORT_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"']?$")
+
+
+def _port_mapping(text: str, s: Span) -> bool:
+    """``- "22:22"`` in a YAML list is a port mapping, not a time."""
+    line_start = text.rfind("\n", 0, s.start) + 1
+    line_end = text.find("\n", s.end)
+    rest = text[s.end : len(text) if line_end < 0 else line_end]
+    return bool(_PORT_ITEM.match(text[line_start : s.start])) and rest.strip(" \t\"'\r") == ""
+
+
+def _name_ranges(text: str, found: list[Candidate]) -> list[Candidate]:
+    """Name the two ends of a date or time range ``start_*`` and ``end_*``."""
+    ends = sorted(
+        (c for c in found if c.type in (VarType.DATE, VarType.TIME)), key=lambda c: c.spans[0].start
+    )
+    names: dict[int, str] = {}
+    for a, b in itertools.pairwise(ends):
+        if a.type is not b.type or id(a) in names:
+            continue
+        gap = text[a.spans[0].end : b.spans[0].start]
+        if not _RANGE_BETWEEN.match(gap):
+            continue
+        if gap.strip() == "and" and not text[: a.spans[0].start].rstrip().lower().endswith(
+            "between"
+        ):
+            continue
+        base = type_name(a.type)
+        names[id(a)], names[id(b)] = f"start_{base}", f"end_{base}"
+    return [
+        c.model_copy(update={"name": names[id(c)], "name_origin": "context"})
+        if id(c) in names
+        else c
+        for c in found
+    ]
