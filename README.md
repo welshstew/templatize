@@ -669,13 +669,31 @@ notes: `docs/design/loops.md`.
 
 | Detector | What it finds | Confidence |
 |---|---|---|
-| `regex` | IPv4/IPv6, CIDR, email, URL, hostname/FQDN, port, UUID, ISO/numeric/text dates, semver, paths, MAC | 0.6–0.9 |
-| `key_value` | values in `key: value`, `key = value`, `KEY=value`, `"key": "value"`, `directive value;`, and ssh_config/Apache-style `Keyword value` lines. Names come from the key, YAML parents qualify generic keys (`database_host`), and k8s `name:`/`value:` pairs are recognised | 0.45–0.7 |
-| `sql` | literals in `INSERT … (cols) VALUES (…)` rows, `UPDATE … SET col = …` and `WHERE col = …`, named after their column | 0.7–0.75 |
-| `repetition` | identical non-trivial tokens (or multi-word names such as `Bluewater Logistics`) appearing ≥2 times → one variable covering all occurrences. Words that only ever start a line (`Host`, `INSERT`) are treated as the format's keywords | 0.5–0.7 |
-| `diff` | regions that differ between the document and its variants; a changed phrase (`Procurement Manager` → `Head of Operations`) stays one value | 0.95 |
+| `regex` | IPv4/IPv6, CIDR, email, URL, hostname/FQDN, `host:port` endpoints, port, UUID, ISO/numeric/text dates (weekday and year optional), times, date-and-time, `start_`/`end_` ranges, semver, paths, MAC, phone numbers, AWS ARNs and regions, references (`INC-20931`), IDs (`P7X2KQ1`), amounts, IBANs, API tokens and JWTs, access and verification codes, durations. A whole value (URL, email, endpoint, timestamp, phone) wins over matches inside it; references, IDs and amounts are named after the word before them, phones and codes after a line label (`dial_in_pin`) | 0.4–0.9 |
+| `key_value` | values in `key: value`, `key = value`, `KEY=value`, `"key": "value"`, `directive value;`, `Keyword value` (ssh_config, Apache, Fluent Bit) and `keyword value` (redis.conf, haproxy) lines; Dockerfiles, Makefiles, XML, TOML inline tables, iCalendar/vCard, Ansible inventory host lines, Terraform variable blocks; `key=value` strings (`Server=…;Database=…`, `host=… port=…`) are split into their parts. Names come from the key, YAML parents qualify generic keys (`database_host`), and k8s `name:`/`value:` pairs are recognised | 0.45–0.75 |
+| `address` | postal addresses over several lines: street line(s) down to the town and postcode (UK, US, Canada, Europe); `sender_address`/`recipient_address` in a letter | 0.75 |
+| `people` | names a heuristic can be sure of: the name matching an email in the text, a letter's signature and recipient block (first/last name, title, company), the greeting's name, the letter date, companies above addresses, brands in stock phrases ("shopping with X", "The X team"), "Name (Title)" and "the X role" | 0.7 |
+| `commands` | values of long flags (`--namespace billing`), database client options (`psql -h … -U …`), `ssh user@host`, `-p 3100`, and Markdown code spans next to the noun they name | 0.6–0.9 |
+| `sql` | literals in `INSERT … (cols) VALUES (…)` rows, `UPDATE … SET col = …` and `WHERE col = …`, named after their column; roles, passwords, databases and schemas of `CREATE USER`/`GRANT` | 0.7–0.8 |
+| `repetition` | identical non-trivial tokens (or multi-word names such as `Bluewater Logistics`) appearing ≥2 times → one variable covering all occurrences. Words that only ever start a line (`Host`, `INSERT`), markup tag names, file names and protocol versions are not values | 0.5–0.7 |
+| `diff` | regions that differ between the document and its variants; a changed phrase (`Procurement Manager` → `Head of Operations`) stays one value, and a region snaps to the address or date around it | 0.95 |
+
+Text inside template syntax already in the document (`${{ github.sha }}`, `{{ }}`) is
+never a value. Loops are also found for CSV files (fields named by the header).
 
 **Suggestion quality tests.** `tests/quality/` runs the detectors on every sample in the editor and checks `expectations.yaml`: values that must be suggested whole, and known noise that must not be. `make samples` refreshes the exported samples after editing `frontend/src/sample.ts`.
+
+**Detection corpus.** `tests/quality/corpus/` holds 67 documents the detectors were not
+written against (configs, CI files, IaC, emails, letters, logs), with expectations in
+`corpus.yaml`. Each is checked for its expected values and noise, for a round trip
+with every suggestion accepted, and for a round trip with a generated example in which
+every suggested value changes. `make corpus-report` lists what is missed and what is
+noise.
+
+**UI end-to-end tests.** `make e2e` (against a running app, e.g. `make up`) drives the UI
+in Chrome with Playwright: every sample and corpus document is analyzed, every
+suggestion accepted, and the round trip must pass; what was suggested is written to
+`frontend/e2e-report/`.
 
 **Names from context.** A generic key inside a keyed block or INI section is
 qualified by it: `DATABASE = {"host": ...}` gives `database_host`, `[server] port`
