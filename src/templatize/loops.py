@@ -20,6 +20,7 @@ import itertools
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import yaml
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
@@ -66,6 +67,10 @@ class Found:
     aligns: list[str | None] | None = None
     """Per known field: "left"/"right" for padded table columns."""
     field_names: list[str] | None = None
+    children: list[Found] = field(default_factory=list)
+    """Nested lists inside each item."""
+    groups: list[int] | None = None
+    """For a nested list: items per parent item."""
 
 
 # --- field inference -------------------------------------------------------------
@@ -167,6 +172,12 @@ def find_yaml(text: str) -> list[Found]:
                 elif all(isinstance(k, MappingNode) for k in kids):
                     keysets = {tuple(sorted(str(kk.value) for kk, _ in k.value)) for k in kids}
                     if len(keysets) == 1:
+                        nested = _nested(text, kids, key)
+                        if nested is not None:
+                            out.append(nested)
+                            for k in kids:
+                                walk(k, key)
+                            return
                         items = [_trimmed(text, k.start_mark.index, k.end_mark.index) for k in kids]
                 if items and all(items):
                     spans = [s for s in items if s is not None]
@@ -187,6 +198,120 @@ def find_yaml(text: str) -> list[Found]:
         walk(d, None)
         _maps(text, d, None, out, ())
     return out
+
+
+def _nested(text: str, kids: list[Node], key: str | None) -> Found | None:
+    """Mappings with the same keys where some keys hold a list in every item (with
+    >= 1 entry): an outer loop whose scalar values that differ are fields and whose
+    lists are nested loops (``servers[].ports[]``). One level; inner items are
+    scalars with one quoting style, or flat mappings of scalars with the same keys."""
+    maps = [k for k in kids if isinstance(k, MappingNode)]
+    keys = [str(kk.value) for kk, _ in maps[0].value]
+    list_keys = [
+        k
+        for k in keys
+        if all(
+            isinstance(dict((str(a.value), b) for a, b in m.value)[k], SequenceNode) for m in maps
+        )
+    ]
+    if not list_keys:
+        return None
+    items = [_trimmed(text, m.start_mark.index, m.end_mark.index) for m in maps]
+    if not all(items):
+        return None
+    outer_items = [it for it in items if it is not None]
+    entries = [dict((str(a.value), b) for a, b in m.value) for m in maps]
+    fields: list[list[Span]] = []
+    names: list[str] = []
+    for k in keys:
+        if k in list_keys:
+            continue
+        nodes = [e[k] for e in entries]
+        if not all(isinstance(n, ScalarNode) for n in nodes):
+            return None
+        if len({str(n.value) for n in nodes}) == 1:
+            continue  # the same in every item: literal text
+        spans = [_scalar_span(text, n) for n in nodes if isinstance(n, ScalarNode)]
+        if not all(spans) or len({n.style for n in nodes if isinstance(n, ScalarNode)}) != 1:
+            return None
+        fields.append([sp for sp in spans if sp is not None])
+        names.append(snake_case(k))
+    children: list[Found] = []
+    for k in list_keys:
+        seqs = [e[k] for e in entries]
+        child = _child_list(text, seqs, k)
+        if child is None:
+            return None
+        children.append(child)
+    return Found(
+        name=snake_case(key or "items"),
+        items=outer_items,
+        detector="loop.yaml_nested",
+        # Above a plain list loop (0.8): it covers the inner lists too.
+        confidence=0.85,
+        reason=f"items of the list {key!r}, each with " + ", ".join(repr(k) for k in list_keys),
+        fields=fields,
+        field_names=names,
+        children=children,
+    )
+
+
+def _child_list(text: str, seqs: list[Node], key: str) -> Found | None:
+    groups: list[int] = []
+    items: list[Span] = []
+    fields: list[list[Span]] = []
+    names: list[str] = []
+    scalar = True
+    inner_keys: list[str] | None = None
+    styles: set[str | None] = set()
+    for seq in seqs:
+        if not isinstance(seq, SequenceNode) or not seq.value:
+            return None  # an empty inner list has no text to template
+        groups.append(len(seq.value))
+        for n in seq.value:
+            if isinstance(n, ScalarNode):
+                if inner_keys is not None:
+                    return None
+                sp = _scalar_span(text, n)
+                if sp is None:
+                    return None
+                styles.add(n.style)
+                items.append(sp)
+            elif isinstance(n, MappingNode):
+                scalar = False
+                ks = [str(a.value) for a, _ in n.value]
+                if inner_keys is None:
+                    inner_keys = ks
+                    fields = [[] for _ in ks]
+                if ks != inner_keys or not all(isinstance(b, ScalarNode) for _, b in n.value):
+                    return None
+                it = _trimmed(text, n.start_mark.index, n.end_mark.index)
+                if it is None:
+                    return None
+                items.append(it)
+                for f, (_, b) in zip(fields, n.value, strict=True):
+                    sp = _scalar_span(text, b)
+                    if sp is None:
+                        return None
+                    f.append(sp)
+            else:
+                return None
+    if len(styles) > 1:
+        return None
+    if scalar:
+        fields, names = [items], ["value"]
+    else:
+        names = [snake_case(k) for k in inner_keys or []]
+    return Found(
+        name=snake_case(key),
+        items=items,
+        detector="loop.yaml_nested",
+        confidence=0.75,
+        reason=f"the list {key!r} in each item",
+        fields=fields,
+        field_names=names,
+        groups=groups,
+    )
 
 
 # Mappings whose entries are open-ended data, not a fixed set of settings.
@@ -513,21 +638,54 @@ FINDERS = (find_sql, find_yaml, find_inline_lists, find_keyword_lines, find_tabl
 # --- candidates ------------------------------------------------------------------
 
 
+def _groups(n: int, groups: list[int] | None) -> list[range]:
+    if groups is None:
+        return [range(n)]
+    out, pos = [], 0
+    for g in groups:
+        out.append(range(pos, pos + g))
+        pos += g
+    return out
+
+
 def _candidate(text: str, found: Found) -> LoopCandidate | None:
-    if not _same_separator(text, found.items):
+    ranges = _groups(len(found.items), found.groups)
+    seps = {
+        text[found.items[a].end : found.items[b].start]
+        for r in ranges
+        for a, b in zip(r, list(r)[1:], strict=False)
+    }
+    if len(seps) > 1:
         return None
+    children: list[LoopCandidate] = []
+    for ch in found.children:
+        c = _candidate(text, ch)
+        if c is None:
+            return None
+        children.append(c)
+    child_regions = [
+        [
+            Span(start=ch.items[r[0]].start, end=ch.items[r[-1]].end)
+            for r in _groups(len(ch.items), ch.groups)
+        ]
+        for ch in found.children
+    ]
     if found.fields is not None:
         fields: list[list[Span]] | None = found.fields
-        skeletons = {
-            _pieces(text, it, [f[i] for f in found.fields]) for i, it in enumerate(found.items)
-        }
+        skeletons = set()
+        for i, it in enumerate(found.items):
+            holes = sorted(
+                [f[i] for f in found.fields] + [regions[i] for regions in child_regions],
+                key=lambda sp: sp.start,
+            )
+            skeletons.add(_pieces(text, it, holes))
         if len(skeletons) != 1:
             return None
     else:
         fields = infer_fields(text, found.items)
     if fields is None:
         return None
-    scalar = len(fields) == 1 and fields[0] == found.items
+    scalar = len(fields) == 1 and fields[0] == found.items and not children
     names: list[str] = []
     types: list[VarType] = []
     for spans in fields:
@@ -563,6 +721,8 @@ def _candidate(text: str, found: Found) -> LoopCandidate | None:
         detectors=[found.detector],
         confidence=found.confidence,
         reason=found.reason,
+        children=children,
+        groups=found.groups,
     )
 
 
@@ -587,13 +747,20 @@ def _cell(text: str, f: LoopFieldCandidate, i: int) -> str:
     return raw.rstrip(" ") if f.align == "left" else raw.lstrip(" ") if f.align == "right" else raw
 
 
-def loop_values(text: str, loop: LoopCandidate) -> LoopValues:
+def loop_values(text: str, loop: LoopCandidate, which: Sequence[int] | None = None) -> LoopValues:
+    idx = list(range(len(loop.items)) if which is None else which)
     if loop.map:
         k, v = loop.fields
-        return {_cell(text, k, i): _cell(text, v, i) for i in range(len(loop.items))}
+        return {_cell(text, k, i): _cell(text, v, i) for i in idx}
     if loop.scalar:
-        return [_cell(text, loop.fields[0], i) for i in range(len(loop.items))]
-    return [{f.name: _cell(text, f, i) for f in loop.fields} for i in range(len(loop.items))]
+        return [_cell(text, loop.fields[0], i) for i in idx]
+    rows: list[dict[str, Any]] = []
+    for i in idx:
+        row: dict[str, Any] = {f.name: _cell(text, f, i) for f in loop.fields}
+        for c in loop.children:  # nested lists: this item's group
+            row[c.name] = loop_values(text, c, _groups(len(c.items), c.groups)[i])
+        rows.append(row)
+    return rows
 
 
 def _plural(name: str) -> str:
@@ -649,6 +816,13 @@ def detect_loops(
         main = loop_values(text, lp)
         if any(v is not None and v != main for v in variant_values):
             confidence = max(confidence, VARIANT_CONFIDENCE)
+        # Nested lists: their loop variable must not clash with anything visible.
+        taken = [*taken_names, *names, *items]
+        children = []
+        for c in lp.children:
+            (citem,) = _item_names([c.name], taken=taken)
+            taken.append(citem)
+            children.append(c.model_dump() | {"item": citem, "id": ""})
         out.append(
             LoopCandidate.model_validate(
                 lp.model_dump()
@@ -658,6 +832,7 @@ def detect_loops(
                     "item": item,
                     "confidence": confidence,
                     "variant_values": variant_values if variants else None,
+                    "children": children,
                 }
             )
         )
@@ -674,7 +849,7 @@ def _aligned(text: str, other: LoopCandidate, ref: LoopCandidate) -> LoopValues 
         if not isinstance(vals, dict):
             return None
         return dict(vals)
-    want = [f.name for f in ref.fields]
+    want = [f.name for f in ref.fields] + [c.name for c in ref.children]
     rows = [v for v in vals if isinstance(v, dict)]
     if any(set(want) - set(r) for r in rows):
         return None
@@ -715,7 +890,9 @@ def compatible_candidates(
             inside = [s for s in spans if lp.region.overlaps(s)]
             if not inside:
                 continue
-            fields = [s for f in lp.fields for s in f.spans]
+            fields = [s for f in lp.fields for s in f.spans] + [
+                s for ch in lp.children for f in ch.fields for s in f.spans
+            ]
             offsets = set()
             ok = len(inside) == len(lp.items)
             for s in inside:

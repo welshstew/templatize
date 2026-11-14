@@ -133,7 +133,7 @@ class Jinja2Emitter:
     def emit(self, ir: TemplateIR) -> str:
         newline = self.newline_for(ir)
         b = _Builder()
-        regions = [(lp.region, lp) for lp in ir.loops]
+        regions = [(lp.region, lp) for lp in ir.loops if lp.parent is None]
         events: list[tuple[Span, Variable | Loop]] = [
             (span, var)
             for span, var in ir.sorted_occurrences()
@@ -155,30 +155,44 @@ class Jinja2Emitter:
     def _loop(self, b: _Builder, ir: TemplateIR, lp: Loop, newline: str) -> None:
         """``{% for item in name %}{% if not loop.first %}SEP{% endif %}BODY{% endfor %}``:
         the body is the first item with its holes as expressions."""
+        source = lp.name
+        if lp.parent is not None:  # a nested list: a field of the parent's item
+            parent = next(p for p in ir.loops if p.name == lp.parent and p.parent is None)
+            source = f"{parent.item}.{lp.name}"
         if lp.map:
             key, value = lp.fields
-            b.expr("{% for " + key.name + ", " + value.name + " in " + lp.name + ".items() %}")
+            b.expr("{% for " + key.name + ", " + value.name + " in " + source + ".items() %}")
         else:
-            b.expr("{% for " + lp.item + " in " + lp.name + " %}")
+            b.expr("{% for " + lp.item + " in " + source + " %}")
         sep = lp.separator(ir.text)
         if sep:
             b.expr("{% if not loop.first %}")
             self._literal(b, sep, newline)
             b.expr("{% endif %}")
         first = lp.items[0]
-        holes: list[tuple[Span, str]] = []
+        holes: list[tuple[Span, str | Loop]] = []
         for f in lp.fields:
             ref = f.name if lp.map else lp.item if lp.scalar else f"{lp.item}.{f.name}"
             if f.align is not None:  # a padded table column
                 flag = "-" if f.align == "left" else ""
                 ref = f'"%{flag}{f.width}s"|format({ref})'
             holes.append((f.spans[0], ref))
-        holes += [(sp, v.name) for v in ir.variables for sp in v.spans if first.contains(sp)]
+        nested = [(c.group_region(0), c) for c in ir.children(lp)]
+        holes += nested
+        holes += [
+            (sp, v.name)
+            for v in ir.variables
+            for sp in v.spans
+            if first.contains(sp) and not any(r.contains(sp) for r, _ in nested)
+        ]
         holes.sort(key=lambda h: h[0].start)
         pos = first.start
-        for sp, expr in holes:
+        for sp, what in holes:
             self._literal(b, ir.text[pos : sp.start], newline)
-            b.expr("{{ " + expr + " }}")
+            if isinstance(what, Loop):
+                self._loop(b, ir, what, newline)
+            else:
+                b.expr("{{ " + what + " }}")
             pos = sp.end
         self._literal(b, ir.text[pos : first.end], newline)
         b.expr("{% endfor %}")

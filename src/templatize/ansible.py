@@ -120,7 +120,14 @@ def _prefixed(ir: TemplateIR, prefix: str) -> TemplateIR:
         return TemplateIR(
             text=ir.text,
             variables=[v.model_copy(update={"name": f"{prefix}_{v.name}"}) for v in ir.variables],
-            loops=[lp.model_copy(update={"name": f"{prefix}_{lp.name}"}) for lp in ir.loops],
+            # Nested lists are keys of their parent's rows: only top-level loops are
+            # role variables (their children follow the new parent name).
+            loops=[
+                lp.model_copy(update={"name": f"{prefix}_{lp.name}"})
+                if lp.parent is None
+                else lp.model_copy(update={"parent": f"{prefix}_{lp.parent}"})
+                for lp in ir.loops
+            ],
         )
     except (IRValidationError, ValueError) as exc:
         raise RoleError(str(exc)) from None
@@ -184,7 +191,7 @@ def build_role(
                 diff[v.name] = vv[i]
         for lp, lspec in zip(ir.loops, loops, strict=True):
             lv = lspec.variant_values
-            if lv is not None and i < len(lv) and lv[i] is not None and lv[i] != lp.values_of(text):
+            if lv is not None and i < len(lv) and lv[i] is not None and lv[i] != ir.loop_value(lp):
                 diff[lp.name] = lv[i]
         examples.append((label, diff))
         files.append(

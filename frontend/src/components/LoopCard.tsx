@@ -67,7 +67,13 @@ function short(v: string, n = 28): string {
 function cell(rows: LoopRows, i: number, field: string, scalar: boolean): string {
   const row = rows[i];
   if (row === undefined) return "";
-  return scalar ? (row as string) : ((row as Record<string, string>)[field] ?? "");
+  if (scalar) return row as string;
+  const v = (row as Record<string, unknown>)[field];
+  if (Array.isArray(v)) {
+    // a nested list: values, or a count of its records
+    return v.every((x) => typeof x === "string") ? v.join(", ") : `${v.length} item${v.length === 1 ? "" : "s"}`;
+  }
+  return (v as string | undefined) ?? "";
 }
 
 export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onUpdate }: Props) {
@@ -75,7 +81,10 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
   const blocker = accepted ? null : loopBlocker(loop, items, loops);
   const rows = accepted ? loop.previewRows : loop.rows;
   const shown = Math.min(rows.length, MAX_ROWS);
-  const cols = loop.scalar ? [loop.fields[0]?.name ?? "value"] : loop.fields.map((f) => f.name);
+  const nested = new Set(loop.children.map((c) => c.name));
+  const cols = loop.scalar
+    ? [loop.fields[0]?.name ?? "value"]
+    : [...loop.fields.map((f) => f.name), ...loop.children.map((c) => c.name)];
   const changed = JSON.stringify(loop.previewRows) !== JSON.stringify(loop.rows);
 
   const setCell = (i: number, field: string, value: string) => {
@@ -177,6 +186,11 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
         <code>{` in ${loop.name} %}`}</code>
       </div>
       )}
+      {loop.children.map((c) => (
+        <div key={c.name} class="loop-for nested">
+          <code>{`{% for ${c.item} in ${loop.item}.${c.name} %}`}</code>
+        </div>
+      ))}
       {blocker ? <div class="field-error">Can't make this a loop: {blocker}.</div> : null}
 
       <div class="loop-table-wrap">
@@ -185,7 +199,7 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
             <tr>
               {cols.map((c) => (
                 <th key={c} scope="col">
-                  {accepted && !loop.scalar ? (
+                  {accepted && !loop.scalar && !nested.has(c) ? (
                     <NameInput
                       key={c}
                       class="field-name"
@@ -207,7 +221,7 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
               <tr key={i}>
                 {cols.map((c) => (
                   <td key={c}>
-                    {accepted ? (
+                    {accepted && !nested.has(c) ? (
                       <input
                         value={cell(rows, i, c, loop.scalar)}
                         aria-label={`Row ${i + 1} ${c}`}

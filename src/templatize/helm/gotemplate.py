@@ -37,7 +37,7 @@ _LBRACES = '{{ "{{" }}'
 _VALUES_ACTION = re.compile(r"^\$?\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)$")
 _RANGE_ACTION = re.compile(
     r"^range \$([A-Za-z_][A-Za-z0-9_]*), \$([A-Za-z_][A-Za-z0-9_]*) := "
-    r"\$?\.Values((?:\.[A-Za-z_][A-Za-z0-9_]*)+)$"
+    r"(\$?\.Values(?:\.[A-Za-z_][A-Za-z0-9_]*)+|\$[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*)$"
 )
 _IF_ACTION = re.compile(r"^if \$([A-Za-z_][A-Za-z0-9_]*)$")
 _VAR_ACTION = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?$")
@@ -66,14 +66,19 @@ class RangeEmit:
     var: str
     """Loop variable without ``$`` (``user``)."""
     path: Sequence[str]
-    """Values path of the list."""
-    holes: Sequence[tuple[Span, str]]
+    """Values path of the list (top-level loops)."""
+    holes: Sequence[tuple[Span, str | RangeEmit]]
     """Holes of the first item and their action (``$user.email``, ``$user``,
-    ``$.Values.tenantId``), sorted."""
+    ``$.Values.tenantId``) or a nested loop, sorted."""
+    source: str | None = None
+    """A nested list: the expression to range over (``$server.ports``)."""
+    separator_span: tuple[int, int] | None = None
+    """Where the separator is (between two items of one parent item), if any."""
 
 
-def _index_var(var: str) -> str:
-    return "index" if var == "i" else "i"
+def _index_var(var: str, nested: bool = False) -> str:
+    name = "j" if nested else "i"
+    return f"{name}_index" if var == name else name
 
 
 def emit(
@@ -107,19 +112,24 @@ def emit(
 
 
 def _range(text: str, r: RangeEmit) -> str:
-    if not all(VALUES_KEY_RE.match(k) for k in r.path) or not VALUES_KEY_RE.match(r.var):
+    if not VALUES_KEY_RE.match(r.var) or (
+        r.source is None and not all(VALUES_KEY_RE.match(k) for k in r.path)
+    ):
         raise ValueError(f"invalid loop {r.var!r} over {'.'.join(r.path)!r}")
-    idx = _index_var(r.var)
-    out = ["{{ range $" + idx + ", $" + r.var + " := .Values." + ".".join(r.path) + " }}"]
-    if len(r.items) > 1:
-        sep = text[r.items[0].end : r.items[1].start]
+    idx = _index_var(r.var, nested=r.source is not None)
+    source = r.source if r.source is not None else ".Values." + ".".join(r.path)
+    out = ["{{ range $" + idx + ", $" + r.var + " := " + source + " }}"]
+    if r.separator_span is not None:
+        sep = text[r.separator_span[0] : r.separator_span[1]]
         if sep:
             out += ["{{ if $" + idx + " }}", _escape_literal(sep, before_action=True), "{{ end }}"]
     first = r.items[0]
     pos = first.start
     for sp, action in r.holes:
         out.append(_escape_literal(text[pos : sp.start], before_action=True))
-        out.append("{{ " + action + " }}")
+        out.append(
+            _range(text, action) if isinstance(action, RangeEmit) else "{{ " + action + " }}"
+        )
         pos = sp.end
     out.append(_escape_literal(text[pos : first.end], before_action=True))
     out.append("{{ end }}")
@@ -190,7 +200,7 @@ def _block(tokens: list[tuple[str, str]], i: int, nested: bool) -> tuple[list[An
             return nodes, i
         elif m := _RANGE_ACTION.match(val):
             body, i = _block(tokens, i, nested=True)
-            nodes.append(("range", m.group(1), m.group(2), m.group(3)[1:].split("."), body))
+            nodes.append(("range", m.group(1), m.group(2), m.group(3), body))
         elif m := _IF_ACTION.match(val):
             body, i = _block(tokens, i, nested=True)
             nodes.append(("if", m.group(1), body))
@@ -209,12 +219,19 @@ def _eval(
         if kind == "text":
             out.append(node[1])
         elif kind == "range":
-            _, idx, var, path, body = node
-            items = _lookup(values, path)
+            _, idx, var, source, body = node
+            if source.lstrip("$").startswith(".Values."):
+                path = source.lstrip("$")[len(".Values.") :].split(".")
+                items = _lookup(values, path)
+            else:  # $item.field: a nested list
+                name, field = source[1:].split(".", 1)
+                if name not in scope or not isinstance(scope[name], Mapping):
+                    raise TemplateRenderError(f"undefined variable ${name}")
+                items = scope[name].get(field)
             if items is None:
                 continue
             if not isinstance(items, list):
-                raise TemplateRenderError(f".Values.{'.'.join(path)} is not a list")
+                raise TemplateRenderError(f"{source} is not a list")
             for n, item in enumerate(items):
                 _eval(body, values, {**scope, idx: n, var: item}, out)
         elif kind == "if":

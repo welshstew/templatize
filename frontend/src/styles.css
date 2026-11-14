@@ -526,3 +526,5 @@ pre.doc .dl.loop-first::before {
 .chart-notes summary { cursor: pointer; font-weight: 600; display: flex; gap: 6px; align-items: center; }
 .chart-notes ul { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
 .chart-notes .hint { margin: 4px 0 0; }
+
+.loop-for.nested { padding-left: 14px; margin-top: 2px; }

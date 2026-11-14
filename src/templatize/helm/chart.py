@@ -265,14 +265,15 @@ def build_chart(
         raise ChartError("example labels must be unique")
 
     ir: TemplateIR = make_ir(text, specs, loops)
-    paths = assign_paths([*ir.variables, *ir.loops])
+    top = [lp for lp in ir.loops if lp.parent is None]  # nested lists live in their rows
+    paths = assign_paths([*ir.variables, *top])
     variables = [
         v.model_copy(update={"values_path": p})
         for v, p in zip(ir.variables, paths[: len(ir.variables)], strict=True)
     ]
     chart_loops = [
         lp.model_copy(update={"values_path": p})
-        for lp, p in zip(ir.loops, paths[len(ir.variables) :], strict=True)
+        for lp, p in zip(top, paths[len(ir.variables) :], strict=True)
     ]
     path_of = {v.name: v.values_path or [] for v in variables}
 
@@ -309,7 +310,7 @@ def build_chart(
                 continue
             if r.start < lo or r.end > hi:
                 raise ChartError(f"the list {lp.name!r} crosses the boundary between two resources")
-            ranges.append(_range_emit(lp, variables, path_of, lo))
+            ranges.append(_range_emit(ir, lp, variables, path_of, lo))
         try:
             content = gotemplate.emit(text[lo:hi], mine, ranges)
         except ValueError as exc:
@@ -323,7 +324,7 @@ def build_chart(
                 *((v.values_path or [], v.value) for v in variables),
                 # Maps too are lists of {key, value} rows: Go ranges maps in sorted
                 # key order, which would reorder the output.
-                *((lp.values_path or [], lp.rows_of(text)) for lp in chart_loops),
+                *((lp.values_path or [], ir.loop_rows(lp)) for lp in chart_loops),
             ]
         )
     except values.ValuesError as exc:
@@ -346,7 +347,7 @@ def build_chart(
             lv = spec.variant_values
             if lv is not None and i < len(lv) and lv[i] is not None:
                 rows = _as_rows(lp, lv[i])
-                if rows != lp.rows_of(text):
+                if rows != ir.loop_rows(lp):
                     diff.append((lp.values_path or [], rows))
         overlays.append(
             (
@@ -402,30 +403,48 @@ def _as_rows(lp: Loop, value: object) -> object:
 
 
 def _range_emit(
-    lp: Loop, variables: Sequence[Variable], path_of: dict[str, list[str]], offset: int
+    ir: TemplateIR,
+    lp: Loop,
+    variables: Sequence[Variable],
+    path_of: dict[str, list[str]],
+    offset: int,
+    parent: Loop | None = None,
 ) -> gotemplate.RangeEmit:
     """The loop's first item as a ``range`` body, relative to its resource chunk."""
     first = lp.items[0]
-    holes: list[tuple[Span, str]] = []
+    holes: list[tuple[Span, str | gotemplate.RangeEmit]] = []
     for f in lp.fields:
         ref = f"${lp.item}" if lp.scalar else f"${lp.item}.{f.name}"
         if f.align is not None:  # padded table column; %v, as values may be numbers
             ref = f'printf "%{"-" if f.align == "left" else ""}{f.width}v" {ref}'
         holes.append((f.spans[0], ref))
+    kids = [(c.group_region(0), c) for c in ir.children(lp)]
+    for _, c in kids:
+        holes.append((c.group_region(0), _range_emit(ir, c, variables, path_of, offset, lp)))
     holes += [
         (s, "$.Values." + ".".join(path_of[v.name]))
         for v in variables
         for s in v.spans
-        if first.contains(s)
+        if first.contains(s) and not any(r.contains(s) for r, _ in kids)
     ]
     holes.sort(key=lambda h: h[0].start)
 
     def rel(s: Span) -> Span:
         return Span(start=s.start - offset, end=s.end - offset)
 
+    sep = next(
+        (
+            (lp.items[r[0]].end - offset, lp.items[r[1]].start - offset)
+            for r in lp.group_ranges()
+            if len(r) > 1
+        ),
+        None,
+    )
     return gotemplate.RangeEmit(
         items=[rel(it) for it in lp.items],
         var=lp.item,
         path=lp.values_path or [],
         holes=[(rel(s), a) for s, a in holes],
+        source=f"${parent.item}.{lp.name}" if parent is not None else None,
+        separator_span=sep,
     )

@@ -255,3 +255,49 @@ test("table loops: cells without padding, align sent back", () => {
   const { loops: acc } = acceptLoop([], loops, "loop-rows");
   assert.deepEqual(loopSpecsFor(acc)[0]?.fields.map((f) => f.align), ["left", "right"]);
 });
+
+test("nested lists: rows hold the inner lists, specs send children", () => {
+  const text = "- name: web\n  ports: [80, 443]\n- name: api\n  ports: [8080]\n";
+  const m = new OffsetMap(text);
+  const sp = (s: string, from = 0): Span => ({ start: text.indexOf(s, from), end: text.indexOf(s, from) + s.length });
+  const api = text.indexOf("name: api");
+  const cand: LoopCandidate = {
+    id: "loop-servers",
+    name: "servers",
+    item: "server",
+    items: [{ start: 2, end: text.indexOf("443") + 4 }, { start: api, end: text.indexOf("8080") + 5 }],
+    fields: [{ name: "name", type: "string", spans: [sp("web"), sp("api", api)] }],
+    scalar: false,
+    sources: ["repetition"],
+    detectors: ["loop.yaml_nested"],
+    confidence: 0.85,
+    reason: null,
+    variant_values: null,
+    children: [
+      {
+        id: "c",
+        name: "ports",
+        item: "port",
+        items: [sp("80"), sp("443"), sp("8080")],
+        fields: [{ name: "value", type: "int", spans: [sp("80"), sp("443"), sp("8080")] }],
+        scalar: true,
+        sources: [],
+        detectors: [],
+        confidence: 0.85,
+        reason: null,
+        variant_values: null,
+        groups: [2, 1],
+      },
+    ],
+  };
+  const loops = loopsFromCandidates([cand], m);
+  assert.deepEqual(loops[0]?.rows, [
+    { name: "web", ports: ["80", "443"] },
+    { name: "api", ports: ["8080"] },
+  ]);
+  const { loops: acc } = acceptLoop([], loops, "loop-servers");
+  const spec = loopSpecsFor(acc)[0];
+  assert.deepEqual(spec?.children?.map((c) => [c.name, c.groups]), [["ports", [2, 1]]]);
+  // the inner values are fields: a variable there does not fit the loop
+  assert.equal(fitsLoop([sp("443")], acc[0]!), false);
+});
