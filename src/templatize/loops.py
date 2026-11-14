@@ -898,6 +898,7 @@ def detect_loops(
     out: list[LoopCandidate] = []
     for lp, name, item in zip(loops, names, items, strict=True):
         variant_values: list[LoopValues | None] = []
+        fixed_changes = False
         for vtext, vloops in zip(variants, in_variants, strict=True):
             match = next(
                 (
@@ -907,6 +908,12 @@ def detect_loops(
                 ),
                 None,
             )
+            if match is not None and _skeleton(vtext, match) != _skeleton(text, lp):
+                # The example changes the loop's fixed text ("TO reporting_ro" in every
+                # GRANT line): the loop cannot express that change, so it is not
+                # accepted with the rest; the variables found by the diff are.
+                fixed_changes = True
+                match = None
             variant_values.append(_aligned(vtext, match, lp) if match else None)
         confidence = lp.confidence
         main = loop_values(text, lp)
@@ -929,10 +936,29 @@ def detect_loops(
                     "confidence": confidence,
                     "variant_values": variant_values if variants else None,
                     "children": children,
+                    "auto_accept": lp.auto_accept and not fixed_changes,
                 }
             )
         )
     return out
+
+
+def _skeleton(text: str, lp: LoopCandidate) -> str:
+    """The first item's fixed text: the item with its fields cut out."""
+    item = lp.items[0]
+    holes = sorted(
+        (f.spans[0] for f in lp.fields if f.spans and item.start <= f.spans[0].start),
+        key=lambda s: s.start,
+    )
+    out, pos = [], item.start
+    for h in holes:
+        if h.start < pos or h.end > item.end:
+            continue
+        out.append(text[pos : h.start])
+        out.append("\x00")
+        pos = h.end
+    out.append(text[pos : item.end])
+    return "".join(out)
 
 
 def _aligned(text: str, other: LoopCandidate, ref: LoopCandidate) -> LoopValues | None:

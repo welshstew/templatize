@@ -51,3 +51,34 @@ def test_corpus_round_trip(name: str) -> None:
     ir = make_ir(text, specs, loops)
     emitter = Jinja2Emitter()
     assert emitter.render(emitter.emit(ir), ir.values()) == text
+
+
+def _changed(value: str) -> str:
+    """The value with its last letter or digit changed (an example's value)."""
+    i = next((k for k in range(len(value) - 1, -1, -1) if value[k].isalnum()), None)
+    if i is None:
+        return value + "q"
+    c = value[i]
+    new = ("7" if c != "7" else "8") if c.isdigit() else ("q" if c != "q" else "z")
+    return value[:i] + new + value[i + 1 :]
+
+
+@pytest.mark.parametrize("name", sorted(EXPECT))
+def test_corpus_with_an_example(name: str) -> None:
+    """A second version of the document with every suggested value changed: with it as
+    an example, accepting every suggestion renders both documents byte for byte."""
+    from templatize.ansible import build_role
+
+    text = (CORPUS / name).read_text(encoding="utf-8")
+    edits = sorted((s.start, s.end, c.value) for c in suggest(text).candidates for s in c.spans)
+    out, pos = [], 0
+    for a, b, v in edits:
+        if a >= pos:
+            out += [text[pos:a], _changed(v)]
+            pos = b
+    example = "".join([*out, text[pos:]])
+    res = suggest(text, [example])
+    specs, loops = accept_suggestions(res.candidates, res.loops)
+    role = build_role(text, specs, loops, filename="out", variants=[example])
+    assert role.roundtrip.ok
+    assert role.example_roundtrips[0].ok, role.example_roundtrips[0]
