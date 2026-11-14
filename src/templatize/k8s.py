@@ -170,6 +170,9 @@ def _value_span(node: Node | None) -> Span | None:
     return Span(start=start, end=end) if end > start else None
 
 
+_ENUM_KEYS = frozenset({"pathType"})
+
+
 def structural_spans(text: str) -> list[Span]:
     """Never parameters in a chart: ``apiVersion``/``kind`` values and every mapping
     key (so ``app.kubernetes.io/name:`` is not mistaken for a hostname)."""
@@ -185,6 +188,21 @@ def structural_spans(text: str) -> list[Span]:
             for v in node.value:
                 keys(v)
 
+    def enums(node: Node) -> None:
+        """Schema enums that select behaviour (pathType: Prefix), not values to set."""
+        if isinstance(node, MappingNode):
+            for k, v in node.value:
+                if (
+                    isinstance(k, ScalarNode)
+                    and k.value in _ENUM_KEYS
+                    and isinstance(v, ScalarNode)
+                ) and (span := _value_span(v)) is not None:
+                    out.append(span)
+                enums(v)
+        elif isinstance(node, SequenceNode):
+            for v in node.value:
+                enums(v)
+
     for r in parse_resources(text):
         for key in ("apiVersion", "kind"):
             if (span := _value_span(get(r.root, key))) is not None:
@@ -193,6 +211,7 @@ def structural_spans(text: str) -> list[Span]:
         if r.kind == "Secret" and (span := _value_span(get(r.root, "type"))) is not None:
             out.append(span)
         keys(r.root)
+        enums(r.root)
     return out
 
 

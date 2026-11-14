@@ -356,6 +356,18 @@ _BRAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     # A text message signed at the start: "Larkspur Bank: your verification code is ..."
     (re.compile(rf"\A({_PHRASE}): (?=[a-z])"), "sender"),
+    # "the Senior Site Reliability Engineer role"
+    (
+        re.compile(
+            r"\bthe ((?:[A-Z][\w/&-]*[ ]){1,6}?[A-Z][\w/&-]*) (?:role|position|job|vacancy)\b"
+        ),
+        "job_title",
+    ),
+    # "Hannah Lewis (Engineering Manager)": a person introduced with their title.
+    (
+        re.compile(r"\b([A-Z][a-z]+(?:[ ][A-Z][a-z'-]+){1,2})[ ]\((?:[A-Z][\w&/-]*[ ]?){1,5}\)"),
+        "person_name",
+    ),
 ]
 
 

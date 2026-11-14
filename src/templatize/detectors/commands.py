@@ -204,6 +204,18 @@ def _clients(text: str) -> list[Candidate]:
     return out
 
 
+_PORT_FLAG = re.compile(r"(?<![\w-])-p[ \t]+(\d{2,5})(?![\w.:])")
+
+
+def _ports(text: str) -> list[Candidate]:
+    """``next start -p 3100``, ``http-server -p 8080``: a short -p with a number is a port."""
+    return [
+        _candidate(text, m.start(1), m.end(1), "port", "cmd.flag", FLAG_CONFIDENCE, "-p port")
+        for m in _PORT_FLAG.finditer(text)
+        if 1 <= int(m.group(1)) <= 65535
+    ]
+
+
 def _ssh(text: str) -> list[Candidate]:
     out: list[Candidate] = []
     for m in _SSH.finditer(text):
@@ -258,7 +270,7 @@ class CommandsDetector:
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
         text = ctx.text
-        found = [*_clients(text), *_ssh(text), *_flags(text), *_code_spans(text)]
+        found = [*_clients(text), *_ssh(text), *_flags(text), *_ports(text), *_code_spans(text)]
         # The first detection of a span wins (a client's -h over a generic flag).
         seen: set[tuple[int, int]] = set()
         out: list[Candidate] = []

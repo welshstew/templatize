@@ -227,3 +227,47 @@ def test_csv_rows_are_a_loop() -> None:
     assert find_csv("a;b\n1;2\n3;4\n")[0].field_names == ["a", "b"]
     assert find_csv("1,2\n3,4\n5,6\n") == []  # no header
     assert find_csv("a,b\n1,\n2,3\n") == []  # an empty cell
+
+
+def test_xml_elements_and_attributes() -> None:
+    pom = "<project>\n  <artifactId>invoice-service</artifactId>\n  <java.version>21</java.version>\n</project>\n"
+    assert kv(pom) == {"artifact_id": "invoice-service", "java_version": "21"}
+    cfg = '<?xml version="1.0"?>\n<appSettings>\n  <add key="MaxUploadMb" value="50" />\n</appSettings>\n'
+    assert kv(cfg) == {"max_upload_mb": "50"}
+
+
+def test_toml_inline_tables_and_name_email() -> None:
+    text = 'tokio = { version = "1.41", features = ["full"] }\nauthors = ["Mira Kowalski <mira@example.com>"]\n'
+    assert kv(text) == {"tokio_version": "1.41", "authors_name": "Mira Kowalski"}
+
+
+def test_terraform_variable_blocks() -> None:
+    text = 'variable "node_count" {\n  type    = number\n  default = 5\n}\n'
+    assert kv(text) == {"node_count": "5"}
+
+
+def test_fluent_bit_keywords_and_dotted_keys() -> None:
+    assert (
+        kv("[SERVICE]\n    Flush        5\n    Log_Level    info\n    HTTP_Port    2020\n")[
+            "log_level"
+        ]
+        == "info"
+    )
+    assert "net.core.somaxconn" not in values("net.core.somaxconn = 4096\nvm.swappiness = 10\n")
+
+
+def test_sql_access_control() -> None:
+    text = (
+        "CREATE USER app_ro WITH PASSWORD 'x!9';\nGRANT CONNECT ON DATABASE shop TO app_ro;\n"
+        "GRANT SELECT ON ALL TABLES IN SCHEMA sales TO app_ro;\n"
+    )
+    found = {c.name: (c.value, len(c.spans)) for c in suggest(text).candidates}
+    assert found["role"] == ("app_ro", 3) and found["password"] == ("x!9", 1)
+    assert found["database"] == ("shop", 1) and found["schema"] == ("sales", 1)
+
+
+def test_people_introduced_with_titles_and_roles() -> None:
+    text = "Thanks for applying for the Senior Site Reliability Engineer role.\nYou will meet Hannah Lewis (Engineering Manager).\n"
+    found = values(text)
+    assert found["Senior Site Reliability Engineer"] == "job_title"
+    assert found["Hannah Lewis"] == "person_name"

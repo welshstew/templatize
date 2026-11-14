@@ -1,0 +1,16 @@
+variables:
+  DOCKER_IMAGE: registry.gitlab.example.com/platform/gateway
+  KUBE_NAMESPACE: gateway-staging
+
+stages: [build, deploy]
+
+deploy:
+  stage: deploy
+  image: bitnami/kubectl:1.31
+  environment:
+    name: staging
+    url: https://gateway.staging.example.com
+  script:
+    - kubectl -n $KUBE_NAMESPACE set image deploy/gateway gateway=$DOCKER_IMAGE:$CI_COMMIT_SHORT_SHA
+  only:
+    - main

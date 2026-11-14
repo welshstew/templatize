@@ -10,6 +10,7 @@ from templatize.ir import Candidate, Source, Span, VarType
 from templatize.naming import infer_type, is_file_name, snake_case, type_name
 
 _TOKEN = re.compile(r"[\w](?:[\w.\-:/@]*[\w])?")
+_PROTOCOL = re.compile(r"^(?:HTTP|HTTPS|SPDY|TLS|SSL|SSH|AMQP|MQTT|SMTP|IMAP)v?/?\d(?:\.\d)?$")
 _KEY_AFTER = re.compile(r"[ \t]*[:=]")
 _LINE_START = re.compile(r"(?:^|\n)[ \t]*\Z")
 # Capitalised words in a row ("Bluewater Logistics", "Orbit Analytics GmbH"),
@@ -198,6 +199,8 @@ class RepetitionDetector:
             tok = m.group(0)
             if not _non_trivial(tok) or in_phrase[m.start()]:
                 continue
+            if _PROTOCOL.match(tok):
+                continue  # HTTP/1.1, TLSv1.3: a protocol version, not a value
             if is_file_name(tok) and "/" not in tok:
                 continue  # requirements.txt, config.yaml: a file the document uses
             if text[max(0, m.start() - 2) : m.start()].endswith(("<", "</")):

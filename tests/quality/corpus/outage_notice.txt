@@ -1,0 +1,13 @@
+Subject: Scheduled maintenance on Saturday 22 November
+
+Dear customer,
+
+We will upgrade the payments platform on Saturday 22 November between 01:00 and
+03:00 GMT. During this window, card payments on shop.example.com may be declined.
+
+If you have questions, contact support@example.com or call +44 20 7946 0123.
+
+Kind regards,
+
+Elena Petrova
+Head of Customer Operations

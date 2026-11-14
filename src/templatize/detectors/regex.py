@@ -481,6 +481,7 @@ class RegexDetector:
                     )
                 )
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
+        out = [c for c in out if not (c.type is VarType.HOSTNAME and _is_key(text, c.spans[0]))]
         out = _drop_inner(_shared_hosts(text, _split_shared_datetimes(out)))
         out = _context_names(text, _line_labels(text, _name_ranges(text, out)))
         return DetectorResult(candidates=out)
@@ -721,6 +722,15 @@ def _context_names(text: str, found: list[Candidate]) -> list[Candidate]:
             name = base if base.endswith(kind) else f"{base}_{kind}"
         out.append(c.model_copy(update={"name": name, "name_origin": "context"}))
     return out
+
+
+_KEY_AFTER = re.compile(r"[ \t]*(?:=|:(?![/\d]))")
+
+
+def _is_key(text: str, s: Span) -> bool:
+    """``net.core.somaxconn = 4096``, ``log.retention.hours=168``: a dotted key, not a host."""
+    line_start = text.rfind("\n", 0, s.start) + 1
+    return not text[line_start : s.start].strip() and bool(_KEY_AFTER.match(text, s.end))
 
 
 def _port_mapping(text: str, s: Span) -> bool:

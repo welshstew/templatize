@@ -130,3 +130,105 @@ welcome_email.txt:
   want: [Priya, Acme Robotics, priya.raman, https://acme-robotics.northstar.example.com, Business, "25", 1 March 2027, Tomás García, tomas.garcia@acme-robotics.example.com]
   reject: [Username, Plan]
   names: {priya.raman: username, 1 March 2027: renewal_date}
+
+# --- second batch: new document types ------------------------------------------------
+
+fluent-bit.conf:
+  want: ["5", info, "2020", tail, /var/log/containers/*.log, kube.*, es, logs.internal.example.com, "9200", k8s-logs]
+  reject: [SERVICE, INPUT, OUTPUT, Name]
+
+Caddyfile:
+  want: [shop.example.com, "10.0.4.21:3000", "10.0.4.22:3000", ops@example.com, /var/log/caddy/shop.log]
+  reject: [encode, reverse_proxy]
+
+Cargo.toml:
+  want: [ledger-sync, 0.9.3, "2021", Mira Kowalski, mira@ledger.example.com, "1.41", 0.12.9]
+  reject: [package, dependencies]
+
+pom.xml:
+  want: [com.acme.billing, invoice-service, 3.4.0-SNAPSHOT, "21", 3.3.5]
+  reject: [project, properties, modelVersion]
+
+web.config:
+  want: [Production, https://api.contoso.example.com/v2, "50", sqlprod01, Contoso, web_app, Pa55w0rd!]
+  reject: [configuration, appSettings, add, key]
+  names: {Production: environment, "50": max_upload_mb}
+
+package.json:
+  want: ["@acme/storefront", 4.12.0, "3100", 15.0.3, 19.0.0, ">=22.11.0"]
+  reject: [scripts, dependencies]
+
+.gitlab-ci.yml:
+  want: [registry.gitlab.example.com/platform/gateway, gateway-staging, bitnami/kubectl:1.31, staging, https://gateway.staging.example.com]
+  reject: [stages, script, only]
+
+playbook.yml:
+  want: [Configure web servers, webservers, "8080", www-app, /srv/www/portal, nginx=1.24.0-2ubuntu7, /usr/sbin/nologin]
+  reject: [tasks, "{{ app_user }}"]
+
+variables.tf:
+  want: [orders-eks-prod, "5", 203.0.113.0/24, 198.51.100.0/24]
+  reject: [variable, string, number]
+  names: {orders-eks-prod: cluster_name, "5": node_count}
+
+Chart.yaml:
+  want: [notification-service, Sends email and SMS notifications, 1.7.2, 2.15.0, Platform Team, platform@example.com]
+  reject: [v2, application]
+
+ingress.yaml:
+  want: [docs-portal, docs, letsencrypt-prod, nginx, docs.example.com, docs-example-com-tls, "8080"]
+  reject: [Ingress, Prefix, networking.k8s.io/v1]
+  occurrences: {docs.example.com: 2, docs-portal: 2}
+
+aws_config:
+  want: [us-west-2, json, "arn:aws:iam::210987654321:role/OrganizationAccountAccessRole", eu-west-1, "arn:aws:iam::123456789012:mfa/j.smith"]
+  reject: [profile]
+
+sysctl.conf:
+  want: ["4096", 1024 65000, "10", "2097152"]
+  reject: [net.core.somaxconn]
+
+zone.db:
+  want: [example.org, "3600", ns1.example.org, 192.0.2.10, 192.0.2.25, mail.example.org]
+  reject: [IN, SOA, CNAME]
+
+hosts:
+  want: [10.8.0.10, gitlab.internal, 10.8.0.11, nexus.internal, 10.8.0.12, vault.internal]
+  reject: [localhost]
+
+wg0.conf:
+  want: [10.66.0.1/24, "51820", yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=, xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=, 10.66.0.2/32, "vpn.example.com:51820"]
+  reject: [Interface, Peer]
+
+access.log:
+  want: [203.0.113.45, 198.51.100.7]
+  reject: [GET, HTTP/1.1]
+
+grants.sql:
+  want: [reporting_ro, Rp7!x2Lq, analytics, sales]
+  reject: [GRANT, SELECT, SCHEMA]
+  occurrences: {reporting_ro: 4, sales: 2}
+
+outage_notice.txt:
+  want: [Saturday 22 November, "01:00", "03:00", shop.example.com, support@example.com, +44 20 7946 0123, Elena Petrova, Head of Customer Operations]
+  reject: [Dear, customer]
+  occurrences: {Saturday 22 November: 2}
+  names: {"01:00": start_time, "03:00": end_time, Elena Petrova: sender_name}
+
+interview.txt:
+  want: [Jamal, Senior Site Reliability Engineer, Fernleaf, Tuesday 18 November, "10:30", https://meet.google.example.com/abc-defg-hij, Hannah Lewis, Omar Haddad, Rachel Green, Talent Partner, Fernleaf Ltd]
+  reject: [Google, Meet]
+  names: {Jamal: recipient_first_name, Rachel Green: sender_name}
+
+CHANGELOG.md:
+  want: [2.8.0, 2026-11-02, 2.7.4, 2026-10-15]
+  reject: [Added, Fixed]
+
+table.md:
+  loops: {rows: 3}
+  want: []
+  reject: [Service, Owner]
+
+gitconfig:
+  want: [Sam Rivera, sam.rivera@example.com, 3AA5C34371567BD2, vim, https://github.example.com/]
+  reject: [user, core]
