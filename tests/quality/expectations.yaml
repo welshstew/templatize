@@ -26,7 +26,8 @@ compose:
   # DATABASE_URL is built from POSTGRES_USER/PASSWORD/DB: suggested as those parts.
   want: [ghcr.io/acme/storefront:4.2.1, shop.example.com, s3cretPass, postgres:16.4]
   reject: [services, "postgres://shop:s3cretPass@db:5432/storefront"]
-  occurrences: {shop: 2, s3cretPass: 2, storefront: 2}
+  # ...and its host (also the db service name and depends_on entry) and port.
+  occurrences: {shop: 2, s3cretPass: 2, storefront: 2, db: 3, "5432": 1}
 
 dotenv:
   want: [production, https://app.example.com, db-prod-01.internal.example.com, orders, sk_live_EXAMPLE0000000000000000]

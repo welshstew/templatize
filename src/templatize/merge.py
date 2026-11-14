@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
@@ -168,6 +169,7 @@ def compose_candidates(
             by_value.setdefault(c.value, c)
     extra: dict[str, list[Span]] = defaultdict(list)
     composed: dict[str, list[Candidate]] = {}
+    new_fields: list[Candidate] = []
     for whole in sorted(candidates, key=lambda c: -len(c.value)):
         if whole.id in composed or any(whole.id in [p.id for p in ps] for ps in composed.values()):
             continue
@@ -193,9 +195,16 @@ def compose_candidates(
                         hits.append((s, p))
                     pos = i + 1
         used = {p.id for _, p in hits}
-        if len(used) < MIN_PARTS or not _variants_agree(whole, hits, text):
+        if len(used) < MIN_PARTS:
             continue
-        composed[whole.id] = [p for p in candidates if p.id in used]
+        # The URL's own fields that no part covers (host, port) become variables
+        # too, so the whole value is templated, not half of it.
+        fields = _url_fields(text, whole, hits, candidates)
+        hits_all = hits + [(s, f) for f in fields for s in f.spans if whole_span_of(whole, s)]
+        if not _variants_agree(whole, hits_all, text):
+            continue
+        composed[whole.id] = [p for p in candidates if p.id in used] + fields
+        new_fields.extend(fields)
         for s, p in hits:
             extra[p.id].append(s)
     if not composed:
@@ -216,6 +225,13 @@ def compose_candidates(
                 update={"spans": spans, "reason": reason, "id": candidate_id(c.value, spans)}
             )
         out.append(c)
+    out.extend(new_fields)
+    out.sort(key=lambda c: min(sp.start for sp in c.spans))
+    taken_names = dedupe_names([c.name for c in out])
+    out = [
+        c if c.name == n else c.model_copy(update={"name": n})
+        for c, n in zip(out, taken_names, strict=True)
+    ]
     notices = [
         Notice(
             kind="info",
@@ -247,3 +263,88 @@ def _variants_agree(whole: Candidate, hits: list[tuple[Span, Candidate]], text: 
         if "".join(out) != expected:
             return False
     return True
+
+
+# scheme://user:password@host:port/path: positions of host and port in a URL value.
+_URL = re.compile(
+    r"^[A-Za-z][\w+.-]*://(?:[^:@/?#\s]*(?::[^@/?#\s]*)?@)?"
+    r"(?P<host>\[[^\]\s]+\]|[^:/?#@\s]+)(?::(?P<port>\d{1,5}))?(?=[/?#]|$)"
+)
+_URL_SUFFIX = re.compile(r"_(?:url|uri|dsn|connection_string|conn|connection)$")
+
+
+def whole_span_of(whole: Candidate, s: Span) -> bool:
+    return any(w.contains(s) for w in whole.spans)
+
+
+def _url_fields(
+    text: str,
+    whole: Candidate,
+    hits: list[tuple[Span, Candidate]],
+    candidates: Sequence[Candidate],
+) -> list[Candidate]:
+    """Host and port of a URL being split into parts, when no part covers them:
+    ``database_url`` -> ``database_host`` (also covering other places where the host
+    is a whole value or key, e.g. a compose service name) and ``database_port``."""
+    m = _URL.match(whole.value)
+    if not m:
+        return []
+    base = _URL_SUFFIX.sub("", whole.name) or whole.name
+    occupied = [s for c in candidates for s in c.spans if c.id != whole.id] + [s for s, _ in hits]
+    variants = [_URL.match(v) for v in whole.variant_values or []]
+    if any(v is None for v in variants):
+        return []
+    out: list[Candidate] = []
+    for group, suffix in (("host", "host"), ("port", "port")):
+        if m.group(group) is None:
+            continue
+        value = m.group(group)
+        rel = m.start(group)
+        spans = [Span(start=w.start + rel, end=w.start + rel + len(value)) for w in whole.spans]
+        if any(sp.overlaps(o) for sp in spans for o in occupied):
+            continue
+        vvals = [v.group(group) or "" for v in variants if v is not None] if variants else None
+        if group == "host" and not variants:
+            spans += [
+                s
+                for s in _whole_scalars(text, value)
+                if not any(s.overlaps(o) for o in occupied + spans)
+            ]
+        vtype = VarType.PORT if group == "port" else infer_type(value)
+        if group == "host" and vtype is VarType.STRING:
+            vtype = VarType.HOSTNAME
+        out.append(
+            Candidate(
+                name=f"{base}_{suffix}",
+                name_origin="context",
+                type=vtype,
+                value=value,
+                spans=sorted(spans, key=_sk),
+                sources=[*whole.sources],
+                detectors=["compose.url_field"],
+                confidence=round(min(whole.confidence, 0.8), 3),
+                reason=f"the {group} of {whole.name}",
+                variant_values=vvals,
+            )
+        )
+    return out
+
+
+def _whole_scalars(text: str, value: str) -> list[Span]:
+    """Other places where ``value`` is a whole YAML/flow value or key on its own
+    (``db:``, ``[db]``, ``- db``, ``host: db``), not a word inside something else."""
+    out: list[Span] = []
+    for m in re.finditer(r"(?<![\w./@:-])" + re.escape(value) + r"(?![\w./@-])", text):
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        before = text[line_start : m.start()].rstrip(" \t\"'")
+        after = text[m.end() :].lstrip(" \t\"'")[:1]
+        if (before == "" or before.endswith(("[", ",", ":", "-"))) and after in (
+            "",
+            ":",
+            "]",
+            ",",
+            "\n",
+            "\r",
+        ):
+            out.append(Span(start=m.start(), end=m.end()))
+    return out

@@ -642,8 +642,11 @@ to give them a common prefix: the prefix they share is replaced (`database_host`
 suggested values, each a whole field between URL/DSN separators (`:/@?&=;,`), it is
 suggested as those parts: `DATABASE_URL: postgres://shop:s3cretPass@db:5432/storefront`
 next to `POSTGRES_USER: shop`, `POSTGRES_PASSWORD` and `POSTGRES_DB` becomes
-`postgres://{{ postgres_user }}:{{ postgres_password }}@db:5432/{{ postgres_db }}`,
-so the URL cannot drift from them (a note says so). Words inside names (`ops-admin`,
+`postgres://{{ postgres_user }}:{{ postgres_password }}@{{ database_host }}:{{ database_port }}/{{ postgres_db }}`,
+so the URL cannot drift from them (a note says so). The URL's own fields that no
+other value covers (host, port) become variables named after it (`database_url` →
+`database_host`); the host also covers the places where it is a whole value or key
+on its own, such as the compose service `db:` and `depends_on: [db]`. Words inside names (`ops-admin`,
 `acme-marketing-assets-prod`) do not count, parts must be named values, and with
 examples the parts must explain how the whole changes.
 

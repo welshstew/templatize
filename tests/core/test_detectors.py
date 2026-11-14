@@ -344,9 +344,10 @@ def test_composite_value_is_suggested_as_its_parts() -> None:
 
     built = build(DSN, specs_from_candidates(res.candidates))
     assert built.roundtrip.ok
-    assert "postgres://{{ postgres_user }}:{{ postgres_password }}@db:5432/{{ postgres_db }}" in (
-        built.template.content
-    )
+    assert (
+        "postgres://{{ postgres_user }}:{{ postgres_password }}"
+        "@{{ database_host }}:{{ database_port }}/{{ postgres_db }}"
+    ) in built.template.content
 
 
 def test_composition_needs_two_fields_between_separators() -> None:
@@ -357,8 +358,8 @@ def test_composition_needs_two_fields_between_separators() -> None:
 
 
 def test_composition_must_explain_examples() -> None:
-    # The URL's host changes in the example but no part explains it: keep it whole.
-    other = DSN.replace("@db:", "@db2:").replace("shop", "web")
+    # The URL gains a query in the example; no part explains it: keep it whole.
+    other = DSN.replace("/store\n", "/store?sslmode=require\n", 1).replace("shop", "web")
     res = suggest(DSN, [other])
     assert any(c.value.startswith("postgres://") for c in res.candidates)
     # When the parts explain the change, compose.
@@ -376,3 +377,31 @@ def test_generic_keys_are_qualified_by_their_block_or_section() -> None:
     assert kv(ini) == {"server_host": "0.0.0.0", "smtp_host": "smtp.example.org"}
     braces_in_strings = '{"a": "{ not a block", "listen": {"port": 80}}\n'
     assert kv(braces_in_strings)["listen_port"] == "80"
+
+
+def test_composed_url_also_templates_its_host_and_port() -> None:
+    text = (
+        "web:\n  env:\n    DATABASE_URL: postgres://shop:s3cret@db:5432/store\n  depends_on: [db]\n"
+        "db:\n  env:\n    POSTGRES_USER: shop\n    POSTGRES_PASSWORD: s3cret\n    POSTGRES_DB: store\n"
+        "  volumes: [/var/lib/db]\n"
+    )
+    res = suggest(text)
+    by_name = {c.name: c for c in res.candidates}
+    host = by_name["database_host"]
+    assert host.value == "db" and len(host.spans) == 3  # URL, depends_on, service key
+    assert by_name["database_port"].value == "5432"
+    from templatize.build import build, specs_from_candidates
+
+    built = build(text, specs_from_candidates(res.candidates))
+    assert built.roundtrip.ok
+    assert "@{{ database_host }}:{{ database_port }}/{{ postgres_db }}" in built.template.content
+    # /var/lib/db is not a whole value "db": it is not the host variable.
+    assert built.template.content.count("{{ database_host }}") == 3
+
+
+def test_url_fields_follow_examples() -> None:
+    other = DSN.replace("shop", "web").replace(":5432/", ":6432/")
+    res = suggest(DSN, [other])
+    port = next(c for c in res.candidates if c.name == "database_port")
+    assert port.variant_values == ["6432"]
+    assert not any(c.value.startswith("postgres://") for c in res.candidates)
