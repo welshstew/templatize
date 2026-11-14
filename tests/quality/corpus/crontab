@@ -1,0 +1,5 @@
+# m h dom mon dow command
+MAILTO=ops-alerts@example.com
+15 2 * * * /opt/backup/bin/run-backup.sh --target s3://acme-backups/nightly >> /var/log/backup.log 2>&1
+*/10 * * * * /usr/local/bin/healthcheck https://status.example.com/ping/5f2a91
+0 6 * * 1 /opt/reports/weekly.sh --to finance@example.com

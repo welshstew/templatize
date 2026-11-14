@@ -1,0 +1,16 @@
+Subject: [INC-20931] Elevated 5xx on checkout-api (resolved)
+
+Status: Resolved
+Severity: SEV-2
+Started: 2026-10-03 14:12 UTC
+Resolved: 2026-10-03 15:47 UTC
+Incident commander: Priya Raman
+Affected service: checkout-api (eu-west-1)
+
+Summary:
+Between 14:12 and 15:47 UTC, about 7.5% of checkout requests failed with HTTP 503
+after the connection pool to pg-checkout-primary was exhausted. Deploy v3.18.2 was
+rolled back to v3.18.1 at 15:31 UTC.
+
+Follow-up owner: Daniel Kim (daniel.kim@example.com)
+Postmortem: https://wiki.example.com/postmortems/INC-20931

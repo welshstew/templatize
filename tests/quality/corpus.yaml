@@ -1,0 +1,132 @@
+# Detection quality on documents the detectors were not written against (corpus/).
+# Same keys as expectations.yaml (want / reject / occurrences / names / loops);
+# loops are only checked when given. Heuristic detectors only, no examples.
+
+terraform.tfvars:
+  want: [eu-west-2, staging, 10.42.0.0/16, t3.medium, "2", "6", db.r6g.large, orders, staging.shop.example.com, "arn:aws:acm:eu-west-2:123456789012:certificate/8f2c1d4e-5a6b-4c7d-9e8f-0a1b2c3d4e5f", platform-team, CC-4410]
+  reject: [region, tags, Owner]
+  names: {eu-west-2: region, staging: environment, 10.42.0.0/16: vpc_cidr, t3.medium: instance_type}
+
+ssh_config:
+  want: [bastion.prod.example.com, ops, "2222", ~/.ssh/prod_ed25519, deploy, ~/.ssh/deploy_ed25519]
+  reject: [Host, HostName, User, Port, IdentityFile]
+
+haproxy.cfg:
+  want: ["4096", /etc/haproxy/certs/www.example.com.pem, "10.0.1.11:8080", "10.0.1.12:8080"]
+  reject: [global, defaults, frontend, backend, http]
+
+vhost.conf:
+  want: [intranet.example.org, www.intranet.example.org, /var/www/intranet/public, /etc/ssl/certs/intranet.example.org.crt, /etc/ssl/private/intranet.example.org.key, http://127.0.0.1:9000/api]
+  reject: [VirtualHost, ServerName, "on"]
+
+prometheus.yml:
+  want: [15s, 30s, "alertmanager.monitoring.svc:9093", "api.prod.example.com:8443", /internal/metrics]
+  reject: [scrape_configs, static_configs, targets]
+
+deploy.yml:
+  want: [ghcr.io/acme, billing-api, us-east-1, ubuntu-24.04, billing]
+  reject: [jobs, steps, name, main]
+
+Dockerfile:
+  want: [python:3.12.7-slim-bookworm, 2.4.1, /srv/app, "8000", info, "10001"]
+  reject: [FROM, WORKDIR, COPY, RUN]
+  names: {2.4.1: app_version, info: log_level}
+
+application.properties:
+  want: [inventory-service, "8081", inventory_app, Xk2!pQ9vLm, validate, DEBUG]
+  reject: [spring, datasource]
+  names: {inventory-service: spring_application_name, "8081": server_port}
+
+appsettings.json:
+  want: [Information, Warning, sql-prod-02.corp.example.com, Payroll, payroll_svc, Tr0ub4dor&3, smtp.example.com, "587", payroll-noreply@example.com, payroll.example.com]
+  reject: [Logging, LogLevel, Default, Server, Database]
+
+postgresql.conf:
+  want: [10.20.0.5, "5433", "300", 8GB, 24GB, 32MB, replica, Europe/London]
+  reject: [port, wal_level]
+
+crontab:
+  want: [ops-alerts@example.com, s3://acme-backups/nightly, https://status.example.com/ping/5f2a91, finance@example.com, /var/log/backup.log]
+  reject: [MAILTO, "*", "2>&1"]
+
+secret.yaml:
+  want: [payments-db, payments-prod, payments-db.cluster-abc123.eu-west-1.rds.amazonaws.com, payments, 7hS#e2!kW9qz, payments-config, "checkout_v2,fraud_scoring", https://hooks.example.com/payments/9c1e]
+  reject: [Secret, ConfigMap, Opaque, v1]
+  occurrences: {payments-prod: 2}
+
+inventory.ini:
+  want: [web-01.prod.example.com, 10.10.1.21, web-02.prod.example.com, 10.10.1.22, db-01.prod.example.com, 10.10.2.31, "2222", deploy, /usr/bin/python3]
+  reject: [web, db, ansible_host]
+
+redis.conf:
+  want: [10.30.0.7, "6380", s3cr3t-redis-pass, 4gb, allkeys-lru, /var/lib/redis/6380, /var/log/redis/redis-6380.log]
+  reject: [bind, port, maxmemory]
+
+incident.txt:
+  want: [INC-20931, checkout-api, SEV-2, "2026-10-03 14:12", "2026-10-03 15:47", Priya Raman, eu-west-1, v3.18.2, v3.18.1, Daniel Kim, daniel.kim@example.com, https://wiki.example.com/postmortems/INC-20931]
+  reject: [Status, Resolved, Summary, HTTP]
+  names: {Priya Raman: incident_commander, Daniel Kim: follow_up_owner}
+
+shipping.txt:
+  want: [Marcus, A-778213, DPD, "15501234567890", Friday 14 November, "Flat 3, 27 Elm Grove\nLeeds LS6 2AB", https://track.example.com/A-778213, Larkspur Home]
+  reject: [Carrier, Good]
+  names: {Friday 14 November: estimated_delivery}
+
+receipt.txt:
+  want: [R-55120, "12/11/2026", "16:42", "87.95", "14.66", support@larkspur.example.com, 0113 496 0721]
+  reject: [Subtotal, Total]
+
+invite.ics:
+  want: [7d1b2c4e-9f0a-4b3c-8d2e-1f6a5b4c3d2e, 20261120T140000Z, 20261120T150000Z, Quarterly architecture review, "Room 4.12, Harbour House", Lena Fischer, lena.fischer@acme.example.com, Tom Baker, tom.baker@acme.example.com]
+  reject: [VEVENT, VCALENDAR, BEGIN]
+  names: {20261120T140000Z: dtstart, Quarterly architecture review: summary}
+
+contact.vcf:
+  want: [Grace Liu, Brightline Analytics, Head of Data Engineering, +1 646 555 0187, grace.liu@brightline.example.com]
+  reject: [VCARD, WORK]
+
+us_letter.txt:
+  want: [Harper & Lane LLP, "1200 Market Street, Suite 800\nPhiladelphia, PA 19107", "November 3, 2026", David, Chen, Operations Director, Keystone Freight Inc., "455 Industrial Parkway\nAllentown, PA 18109", "$12,500", "December 1, 2026", (215) 555-0143, jordan.hale@harperlane.example.com, Jordan Hale, Partner]
+  reject: [Dear, Sincerely]
+  names: {"November 3, 2026": letter_date, Chen: recipient_last_name, Keystone Freight Inc.: recipient_company, Jordan Hale: sender_name}
+  occurrences: {Keystone Freight Inc.: 2}
+
+runbook.md:
+  want: [pg-orders-replica.internal, monitor, ops, /var/lib/postgresql/16/main, orders-api, orders-prod, P7X2KQ1, +44 20 7946 0958]
+  reject: [Failover, psql, select]
+
+users.csv:
+  loops: {rows: 3}
+  want: []
+  reject: [id, email, role]
+
+main.tf:
+  want: [eu-central-1, acme-web-assets-prod, ami-0a1b2c3d4e5f67890, t3.micro, subnet-0f1e2d3c4b5a69788, ops-2026, bastion-prod]
+  reject: [aws, resource, provider, aws_instance]
+
+server.properties:
+  want: ["3", /data/kafka/logs, "12", "168", kafka-3.prod.example.com]
+  reject: [PLAINTEXT, SSL]
+
+.npmrc:
+  want: [https://npm.internal.example.com/, npm_7Qx2vLk9PzR4sT1uW8yB3nM6cD5fG0hJ]
+  reject: [registry, "true"]
+
+values.yaml:
+  want: ["3", registry.example.com/platform/search-api, 5.2.0, IfNotPresent, ClusterIP, "8080", nginx, search.example.com, search-example-com-tls, 500m, 768Mi, "https://es.internal.example.com:9200", "300"]
+  reject: [image, service, enabled]
+
+kubeconfig:
+  want: [prod-eu, "https://k8s-api.prod-eu.example.com:6443", ci-deployer, platform]
+  reject: [Config, clusters, contexts]
+  occurrences: {prod-eu: 4, ci-deployer: 2}
+
+sms.txt:
+  want: ["482913", 0800 555 0199, Larkspur Bank]
+  reject: ["10"]
+  names: {"482913": verification_code}
+
+welcome_email.txt:
+  want: [Priya, Acme Robotics, priya.raman, https://acme-robotics.northstar.example.com, Business, "25", 1 March 2027, Tomás García, tomas.garcia@acme-robotics.example.com]
+  reject: [Username, Plan]
+  names: {priya.raman: username, 1 March 2027: renewal_date}

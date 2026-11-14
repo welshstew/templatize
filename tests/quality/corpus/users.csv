@@ -1,0 +1,4 @@
+id,email,first_name,last_name,role,created_at
+1001,ana.souza@example.com,Ana,Souza,admin,2026-01-12
+1002,ben.okoro@example.com,Ben,Okoro,editor,2026-02-03
+1003,chloe.martin@example.com,Chloe,Martin,viewer,2026-03-27

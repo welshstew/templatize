@@ -1,0 +1,10 @@
+Host bastion
+    HostName bastion.prod.example.com
+    User ops
+    Port 2222
+    IdentityFile ~/.ssh/prod_ed25519
+
+Host app-*
+    ProxyJump bastion
+    User deploy
+    IdentityFile ~/.ssh/deploy_ed25519

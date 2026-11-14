@@ -1,0 +1,13 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Acme//Calendar//EN
+BEGIN:VEVENT
+UID:7d1b2c4e-9f0a-4b3c-8d2e-1f6a5b4c3d2e@acme.example.com
+DTSTART:20261120T140000Z
+DTEND:20261120T150000Z
+SUMMARY:Quarterly architecture review
+LOCATION:Room 4.12, Harbour House
+ORGANIZER;CN=Lena Fischer:mailto:lena.fischer@acme.example.com
+ATTENDEE;CN=Tom Baker:mailto:tom.baker@acme.example.com
+END:VEVENT
+END:VCALENDAR

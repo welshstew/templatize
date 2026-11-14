@@ -1,0 +1,19 @@
+name: deploy
+on:
+  push:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io/acme
+  IMAGE_NAME: billing-api
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t $REGISTRY/$IMAGE_NAME:${{ github.sha }} .
+      - name: Deploy
+        run: helm upgrade --install billing-api ./chart --namespace billing --set image.tag=${{ github.sha }}

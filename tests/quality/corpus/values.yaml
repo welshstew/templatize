@@ -1,0 +1,25 @@
+replicaCount: 3
+
+image:
+  repository: registry.example.com/platform/search-api
+  tag: "5.2.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: nginx
+  host: search.example.com
+  tlsSecret: search-example-com-tls
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 768Mi
+
+env:
+  ELASTIC_URL: https://es.internal.example.com:9200
+  CACHE_TTL_SECONDS: "300"

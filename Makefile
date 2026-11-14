@@ -27,6 +27,15 @@ frontend-dev:
 frontend-test:
 	cd frontend && npm test
 
+# The UI end to end, against a running app (make up): every sample and corpus document
+# is analyzed, accepted and round-tripped in Chrome; suggestions go to frontend/e2e-report/.
+e2e:
+	cd frontend && npx playwright test
+
+# Detection quality on tests/quality/corpus: what is missed and what is noise.
+corpus-report:
+	uv run python scripts/corpus-report.py
+
 # Refresh tests/quality/samples.json from the editor's samples (frontend/src/sample.ts).
 samples:
 	cd frontend && node scripts/export-samples.mjs
