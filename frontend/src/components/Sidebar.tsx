@@ -57,6 +57,21 @@ function ValuesPathField({ item, onUpdate }: { item: Item; onUpdate: Props["onUp
   );
 }
 
+/** Rows drawn per list before "show all": thousands of cards make the page sluggish. */
+const SHOWN = 200;
+
+function ShowAll({ total, shown, onShow }: { total: number; shown: number; onShow: () => void }) {
+  if (total <= shown) return null;
+  return (
+    <p class="hint">
+      Showing the first {shown} of {total}.{" "}
+      <button class="link" onClick={onShow}>
+        Show all
+      </button>
+    </p>
+  );
+}
+
 const SOURCE_LABEL: Record<string, string> = {
   diff: "examples",
   key_value: "key",
@@ -261,6 +276,8 @@ export function Sidebar({
   chartStyle = "exact",
 }: Props) {
   const [showRejected, setShowRejected] = useState(false);
+  const [allVars, setAllVars] = useState(false);
+  const [allSugs, setAllSugs] = useState(false);
   const liveLoops = loops
     .filter((l) => l.status !== "rejected")
     .sort((a, b) => (a.status === b.status ? (b.confidence ?? 0) - (a.confidence ?? 0) : a.status === "accepted" ? -1 : 1));
@@ -310,7 +327,7 @@ export function Sidebar({
           <p class="hint">Accept suggestions below, or select any text in the document to make it a variable.</p>
         ) : (
           <ul class="list">
-            {acc.map((i) => (
+            {(allVars ? acc : acc.slice(0, SHOWN)).map((i) => (
               <VariableRow
                 key={i.id}
                 item={i}
@@ -325,6 +342,7 @@ export function Sidebar({
             ))}
           </ul>
         )}
+        {!allVars ? <ShowAll total={acc.length} shown={SHOWN} onShow={() => setAllVars(true)} /> : null}
       </section>
 
       <section>
@@ -339,7 +357,7 @@ export function Sidebar({
         </h2>
         {sug.length === 0 ? <p class="hint">No pending suggestions.</p> : null}
         <ul class="list">
-          {sug.map((i) => (
+          {(allSugs ? sug : sug.slice(0, SHOWN)).map((i) => (
             <SuggestionRow
               key={i.id}
               item={i}
@@ -352,6 +370,7 @@ export function Sidebar({
             />
           ))}
         </ul>
+        {!allSugs ? <ShowAll total={sug.length} shown={SHOWN} onShow={() => setAllSugs(true)} /> : null}
       </section>
 
       {notices.length > 0 ? (

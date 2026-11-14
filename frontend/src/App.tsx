@@ -196,6 +196,16 @@ export function App() {
   useDebouncedEffect(
     (signal) => {
       if (mode !== "review" || output === "helm") return;
+      if (specs.length > limits.max_variables) {
+        setBuildError(
+          `${specs.length.toLocaleString()} variables is more than the ${limits.max_variables.toLocaleString()} a template can have. ` +
+            (loops.some((l) => l.status !== "rejected")
+              ? "Accept the suggested lists first: a list replaces one variable per row."
+              : "Remove some, or keep repeated values as one variable."),
+        );
+        setBuild(null);
+        return;
+      }
       setBuildPending(true);
       api.build(text, specs, loopSpecs, signal).then(
         (b) => {

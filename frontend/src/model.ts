@@ -344,17 +344,80 @@ export function canAccept(items: Item[], id: string, loops: LoopItem[] = []): bo
   );
 }
 
+/** Disjoint spans sorted by start: overlap tests look only at the neighbours. */
+export class SpanIndex {
+  private readonly starts: number[] = [];
+  private readonly ends: number[] = [];
+
+  constructor(spans: Span[] = []) {
+    for (const s of [...spans].sort((a, b) => a.start - b.start)) {
+      this.starts.push(s.start);
+      this.ends.push(s.end);
+    }
+  }
+
+  /** Index of the first span starting after ``x``. */
+  private upper(x: number): number {
+    let lo = 0;
+    let hi = this.starts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((this.starts[mid] ?? 0) <= x) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  overlaps(s: Span): boolean {
+    const i = this.upper(s.start) - 1;
+    for (const j of [i, i + 1]) {
+      const a = this.starts[j];
+      const b = this.ends[j];
+      if (a !== undefined && b !== undefined && a < s.end && s.start < b) return true;
+    }
+    return false;
+  }
+
+  add(s: Span): void {
+    const i = this.upper(s.start);
+    this.starts.splice(i, 0, s.start);
+    this.ends.splice(i, 0, s.end);
+  }
+}
+
+/** Set the status of many items at once. Accepting follows ``canAccept`` and
+ * ``uniqueName`` one item at a time, with an index of accepted spans and name
+ * counts kept up to date (linear-ish, not quadratic, for thousands of items). */
 export function setStatus(items: Item[], ids: Set<string>, status: Status, loops: LoopItem[] = []): Item[] {
-  let next = items;
-  for (const id of ids) {
-    if (status === "accepted" && !canAccept(next, id, loops)) continue;
-    next = next.map((i) => {
-      if (i.id !== id) return i;
-      if (status === "accepted") {
-        return { ...i, status, name: uniqueName(i.name, next, i.id) };
-      }
-      return { ...i, status, previewValue: i.value };
-    });
+  const next = [...items];
+  const pos = new Map(next.map((i, k) => [i.id, k]));
+  if (status === "accepted") {
+    const occupied = new SpanIndex(accepted(next).flatMap((i) => i.spans));
+    const names = new Map<string, number>();
+    for (const i of next) if (i.status !== "rejected") names.set(i.name, (names.get(i.name) ?? 0) + 1);
+    const liveLoops = loops.filter((l) => l.status === "accepted");
+    for (const id of ids) {
+      const k = pos.get(id);
+      const item = k === undefined ? undefined : next[k];
+      if (k === undefined || !item || item.status === "accepted") continue;
+      if (liveLoops.some((l) => !fitsLoop(item.spans, l))) continue;
+      if (item.spans.some((s) => occupied.overlaps(s))) continue;
+      // Taken = used by another non-rejected item (this one counts itself unless rejected).
+      const own = item.status !== "rejected" ? 1 : 0;
+      const taken = (n: string) => (names.get(n) ?? 0) - (n === item.name ? own : 0) > 0;
+      let name = item.name;
+      for (let n = 2; taken(name); n++) name = `${item.name}_${n}`;
+      if (own) names.set(item.name, (names.get(item.name) ?? 1) - 1);
+      names.set(name, (names.get(name) ?? 0) + 1);
+      for (const s of item.spans) occupied.add(s);
+      next[k] = { ...item, status, name };
+    }
+  } else {
+    for (const id of ids) {
+      const k = pos.get(id);
+      const item = k === undefined ? undefined : next[k];
+      if (k !== undefined && item) next[k] = { ...item, status, previewValue: item.value };
+    }
   }
   // Removing a manual variable deletes it rather than leaving a rejected ghost.
   return next.filter((i) => !(i.manual && i.status !== "accepted"));
@@ -494,18 +557,38 @@ export function loopsFromCandidates(cands: LoopCandidate[], map: OffsetMap): Loo
 /** Can a variable with ``spans`` coexist with ``loop``? Outside it, always. Inside, only
  * as an outer variable: exactly one span per item, at the same place in each, and not
  * on a field (mirrors templatize.loops.compatible_candidates). */
+const fieldIndexes = new WeakMap<LoopItem, SpanIndex>();
+
+/** The item containing ``s`` (items are sorted and disjoint), or -1. */
+function itemIndex(items: Span[], s: Span): number {
+  let lo = 0;
+  let hi = items.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((items[mid]?.start ?? 0) <= s.start) lo = mid + 1;
+    else hi = mid;
+  }
+  const it = items[lo - 1];
+  return it && it.start <= s.start && s.end <= it.end ? lo - 1 : -1;
+}
+
 export function fitsLoop(spans: Span[], loop: LoopItem): boolean {
   const region = loopRegion(loop);
   const inside = spans.filter((s) => overlaps(s, region));
   if (!inside.length) return true;
   if (inside.length !== loop.items.length) return false;
+  let fields = fieldIndexes.get(loop);
+  if (!fields) {
+    fields = new SpanIndex(loop.fields.flatMap((f) => f.spans));
+    fieldIndexes.set(loop, fields);
+  }
   const offsets = new Set<string>();
   const hit = new Set<number>();
   for (const s of inside) {
-    const idx = loop.items.findIndex((it) => it.start <= s.start && s.end <= it.end);
+    const idx = itemIndex(loop.items, s);
     const it = loop.items[idx];
     if (!it) return false;
-    if (loop.fields.some((f) => f.spans.some((fs) => overlaps(fs, s)))) return false;
+    if (fields.overlaps(s)) return false;
     offsets.add(`${s.start - it.start}:${s.end - it.start}`);
     hit.add(idx);
   }

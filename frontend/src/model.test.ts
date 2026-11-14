@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { Candidate } from "./api.ts";
+import type { Item } from "./model.ts";
 import {
   addManual,
+  canAccept,
   findOccurrencesU16,
   itemsFromCandidates,
   segments,
@@ -179,4 +181,55 @@ test("LLM review: renames untouched suggestions, flags fixed text, adds non-over
   assert.equal(byId.d?.confidence, 0.35);
   assert.ok(byId.n1 && !byId.n2); // overlapping addition dropped
   assert.deepEqual([out.renamed, out.flagged, out.added], [1, 1, 1]);
+});
+
+// The old, quadratic setStatus: the fast one must give exactly the same result.
+function referenceSetStatus(items: Item[], ids: Set<string>, status: Item["status"]): Item[] {
+  let next = items;
+  for (const id of ids) {
+    if (status === "accepted" && !canAccept(next, id)) continue;
+    next = next.map((i) => {
+      if (i.id !== id) return i;
+      if (status === "accepted") return { ...i, status, name: uniqueName(i.name, next, i.id) };
+      return { ...i, status, previewValue: i.value };
+    });
+  }
+  return next.filter((i) => !(i.manual && i.status !== "accepted"));
+}
+
+test("setStatus: same result as the reference on random inputs", () => {
+  let seed = 7;
+  const rnd = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  for (let round = 0; round < 300; round++) {
+    const cands = Array.from({ length: 1 + rnd(12) }, (_, k) => {
+      const spans = Array.from({ length: 1 + rnd(3) }, () => {
+        const start = rnd(40);
+        return { start, end: start + 1 + rnd(5) };
+      });
+      return {
+        id: `c${k}`,
+        name: ["a", "b", "a_2", "c"][rnd(4)] ?? "a",
+        name_origin: "key",
+        type: "string",
+        value: "v",
+        spans,
+        sources: ["key_value"],
+        detectors: [],
+        confidence: 0.5,
+        reason: null,
+        variant_values: null,
+      };
+    });
+    let items = itemsFromCandidates(cands);
+    // some pre-existing statuses
+    items = items.map((i) => (rnd(4) === 0 ? { ...i, status: "rejected" as const } : i));
+    const pre = new Set(items.filter(() => rnd(3) === 0).map((i) => i.id));
+    items = referenceSetStatus(items, pre, "accepted");
+    const ids = new Set(items.filter(() => rnd(2) === 0).map((i) => i.id));
+    const status = (["accepted", "rejected", "suggested"] as const)[rnd(3)] ?? "accepted";
+    assert.deepEqual(setStatus(items, ids, status), referenceSetStatus(items, ids, status), `round ${round}`);
+  }
 });
