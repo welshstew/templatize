@@ -26,6 +26,7 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from templatize.detectors.address import find_addresses
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.detectors.regex import RegexDetector
 from templatize.ir import Candidate, NameOrigin, Notice, Source, Span, VarType
@@ -256,7 +257,7 @@ def _snap_to_anchors(text: str, spans: list[tuple[int, int]]) -> list[tuple[int,
         c.spans[0]
         for c in RegexDetector().detect(DetectionContext(text=text)).candidates
         if c.type in _ANCHOR_TYPES
-    ]
+    ] + find_addresses(text)
     out: list[tuple[int, int]] = []
     for s1, s2 in spans:
         for an in anchors:
@@ -264,6 +265,17 @@ def _snap_to_anchors(text: str, spans: list[tuple[int, int]]) -> list[tuple[int,
                 s1, s2 = min(s1, an.start), max(s2, an.end)
         out.append((s1, s2))
     return out
+
+
+def _same_edges(value: str, variant: str) -> str:
+    """A region snapped to a multi-line anchor (an address) can map onto a change that
+    runs to the end of the line in the example: drop line breaks at the edges that the
+    document's own value does not have."""
+    while variant[-1:] in ("\n", "\r") and variant and value[-1:] not in ("\n", "\r"):
+        variant = variant[:-1]
+    while variant[:1] in ("\n", "\r") and variant and value[:1] not in ("\n", "\r"):
+        variant = variant[1:]
+    return variant
 
 
 Region = tuple[int, int, tuple[str, ...]]
@@ -351,7 +363,9 @@ class DiffDetector:
                 (
                     a[s1:s2],
                     *(
-                        ctx.variants[k][_map_start(segs, s1) : _map_end(segs, s2)]
+                        _same_edges(
+                            a[s1:s2], ctx.variants[k][_map_start(segs, s1) : _map_end(segs, s2)]
+                        )
                         for k, segs in enumerate(per_variant)
                     ),
                 ),

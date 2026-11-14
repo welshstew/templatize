@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from templatize.detectors.address import AddressDetector
 from templatize.detectors.base import (
     AsyncDetector,
     DetectionContext,
@@ -24,6 +25,7 @@ from templatize.detectors.sql import SqlDetector
 
 HEURISTIC_DETECTORS: dict[str, Callable[[], Detector]] = {
     "regex": RegexDetector,
+    "address": AddressDetector,
     "key_value": KeyValueDetector,
     "repetition": RepetitionDetector,
     "diff": DiffDetector,
