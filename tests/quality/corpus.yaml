@@ -86,7 +86,7 @@ contact.vcf:
   reject: [VCARD, WORK]
 
 us_letter.txt:
-  want: [Harper & Lane LLP, "1200 Market Street, Suite 800\nPhiladelphia, PA 19107", "November 3, 2026", David, Chen, Operations Director, Keystone Freight Inc., "455 Industrial Parkway\nAllentown, PA 18109", "$12,500", "December 1, 2026", (215) 555-0143, jordan.hale@harperlane.example.com, Jordan Hale, Partner]
+  want: [Harper & Lane LLP, "1200 Market Street, Suite 800\nPhiladelphia, PA 19107", "November 3, 2026", David, Chen, Operations Director, Keystone Freight Inc., "455 Industrial Parkway\nAllentown, PA 18109", "12,500", "December 1, 2026", (215) 555-0143, jordan.hale@harperlane.example.com, Jordan Hale, Partner]
   reject: [Dear, Sincerely]
   names: {"November 3, 2026": letter_date, Chen: recipient_last_name, Keystone Freight Inc.: recipient_company, Jordan Hale: sender_name}
   occurrences: {Keystone Freight Inc.: 2}

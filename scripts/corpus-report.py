@@ -1,6 +1,6 @@
 """Detection quality on tests/quality/corpus: what is missed, what is noise, per document.
 
-    uv run python scripts/corpus-report.py [name ...]
+uv run python scripts/corpus-report.py [name ...]
 """
 
 from __future__ import annotations
@@ -49,7 +49,9 @@ def main() -> None:
         if problems and len(names) == 1:
             text = (HERE / "corpus" / name).read_text(encoding="utf-8")
             for c in suggest(text).candidates:
-                print(f"      {c.confidence:.2f} {c.name} = {c.value!r} x{len(c.spans)} {c.detectors}")
+                print(
+                    f"      {c.confidence:.2f} {c.name} = {c.value!r} x{len(c.spans)} {c.detectors}"
+                )
     print(f"\n{total} problems in {len(names)} documents")
 
 

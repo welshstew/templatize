@@ -265,6 +265,57 @@ PATTERNS: list[Pattern] = [
         name="token",
     ),
     Pattern(
+        "regex.arn",
+        VarType.STRING,
+        re.compile(r"\barn:aws[\w-]*:[\w-]*:[\w-]*:\d{0,12}:[\w/:.+=@-]*[\w/=+@-]"),
+        0.85,
+        name="arn",
+    ),
+    Pattern(
+        "regex.region",
+        VarType.STRING,
+        # AWS (eu-west-2, ap-southeast-1) and GCP (europe-west4, us-central1) regions.
+        re.compile(
+            r"(?<![\w-])(?:(?:us|eu|ap|sa|ca|me|af|il|mx)(?:-gov)?-(?:north|south|east|west|central|"
+            r"northeast|southeast|northwest|southwest)-\d"
+            r"|(?:us|europe|asia|australia|northamerica|southamerica|me|africa)-(?:north|south|east|west|"
+            r"central|northeast|southeast|northwest|southwest)\d)(?![\w-])"
+        ),
+        0.8,
+        name="region",
+    ),
+    Pattern(
+        "regex.reference",
+        VarType.STRING,
+        # Ticket, order and document references: "INC-20931", "#A-778213", "PO-55821".
+        re.compile(r"(?<![\w-])#?([A-Z]{1,6}-\d{3,}(?:-\d+)*)(?![\w-])"),
+        0.75,
+        group=1,
+        name="reference",
+    ),
+    Pattern(
+        "regex.opaque_id",
+        VarType.STRING,
+        # Upper-case IDs that mix letters and digits: "P7X2KQ1" (not "SHA256" or "HTTP2").
+        re.compile(r"(?<![\w-])(?=[A-Z0-9]{6,12}(?![\w-]))(?:[A-Z]+\d+){2,}[A-Z]*(?![\w-])"),
+        0.6,
+        name="id",
+    ),
+    Pattern(
+        "regex.amount",
+        VarType.FLOAT,
+        # Money: "$12,500", "£45.00", "GBP 87.95", "18,450.00"; a bare "14.66" only at the
+        # end of a padded receipt line.
+        re.compile(
+            r"(?:(?<=[$£€¥])|(?<=\b(?:USD|GBP|EUR|CHF|JPY|AUD|CAD) ))\d{1,3}(?:,\d{3})*(?:\.\d{2})?(?![\d.,]\d)"
+            r"|(?<![\w.,])\d{1,3}(?:,\d{3})+\.\d{2}(?![\d.,]\d)"
+            r"|(?<=[ \t]{2})\d+\.\d{2}(?=[ \t]*\r?$)",
+            re.MULTILINE,
+        ),
+        0.7,
+        name="amount",
+    ),
+    Pattern(
         "regex.datetime",
         VarType.DATETIME,
         re.compile(
@@ -321,7 +372,8 @@ PATTERNS: list[Pattern] = [
         VarType.STRING,
         # "PIN 66 41 09", "Passcode: 4417", "Meeting ID 845 2210 9931", "access code #1234"
         re.compile(
-            r"\b(PIN|Passcode|Pass code|Access code|Meeting ID|Conference ID|Participant code)"
+            r"\b(PIN|Passcode|Pass code|Access code|Meeting ID|Conference ID|Participant code|"
+            r"Verification code|Security code|One-time code|OTP|Confirmation code)"
             r"(?:[ \t]*[:#]|[ \t]+(?:is|code)?)?[ \t]*#?[ \t]*(\d[\d \t-]{2,16}\d)(?![\w-])",
             re.IGNORECASE,
         ),
@@ -419,7 +471,8 @@ class RegexDetector:
                 )
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
         out = _drop_inner(_shared_hosts(text, out))
-        return DetectorResult(candidates=_line_labels(text, _name_ranges(text, out)))
+        out = _context_names(text, _line_labels(text, _name_ranges(text, out)))
+        return DetectorResult(candidates=out)
 
 
 # "from 14:00 to 15:30", "9 July - 12 July", "between 9:00 and 10:00": the ends of a range
@@ -438,6 +491,7 @@ _WHOLE = frozenset(
         "regex.datetime",
         "regex.date_text",
         "regex.phone",
+        "regex.arn",
     }
 )
 
@@ -523,6 +577,108 @@ def _line_labels(text: str, found: list[Candidate]) -> list[Candidate]:
         label = snake_case(m.group(1))
         suffix = "phone" if c.type is VarType.PHONE else c.name
         name = label if label.endswith(suffix) else f"{label}_{suffix}"
+        out.append(c.model_copy(update={"name": name, "name_origin": "context"}))
+    return out
+
+
+_CONTEXT_NAMED = {"regex.reference": "reference", "regex.opaque_id": "id", "regex.amount": "amount"}
+_CONTEXT_SKIP = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "of",
+        "is",
+        "are",
+        "was",
+        "be",
+        "to",
+        "for",
+        "on",
+        "at",
+        "in",
+        "by",
+        "with",
+        "and",
+        "or",
+        "your",
+        "our",
+        "my",
+        "its",
+        "this",
+        "that",
+        "number",
+        "no",
+        "nr",
+        "ref",
+        "id",
+        "code",
+        "usd",
+        "gbp",
+        "eur",
+        "chf",
+        "jpy",
+        "aud",
+        "cad",
+        "subject",
+        "re",
+        "fw",
+        "fwd",
+    ]
+)
+_MONEY_WORDS = frozenset(
+    [
+        "total",
+        "subtotal",
+        "vat",
+        "tax",
+        "amount",
+        "price",
+        "balance",
+        "fee",
+        "fees",
+        "cost",
+        "charge",
+        "deposit",
+        "discount",
+        "refund",
+        "salary",
+        "budget",
+        "payment",
+    ]
+)
+_WORD_BEFORE = re.compile(r"([A-Za-z][A-Za-z-]*)[^A-Za-z\n]*$")
+
+
+def _context_names(text: str, found: list[Candidate]) -> list[Candidate]:
+    """References, IDs and amounts named after the word before them: "order #A-778213"
+    -> order_reference, "service P7X2KQ1" -> service_id, "Subtotal  87.95" -> subtotal."""
+    out: list[Candidate] = []
+    for c in found:
+        kind = _CONTEXT_NAMED.get(c.detectors[0])
+        if kind is None or c.name_origin != "type":
+            out.append(c)
+            continue
+        s = c.spans[0]
+        line_start = text.rfind("\n", 0, s.start) + 1
+        before = text[line_start : s.start]
+        word = None
+        for _ in range(4):
+            m = _WORD_BEFORE.search(before)
+            if m is None:
+                break
+            if m.group(1).lower() not in _CONTEXT_SKIP:
+                word = m.group(1)
+                break
+            before = before[: m.start()]
+        if word is None:
+            out.append(c)
+            continue
+        base = snake_case(word)
+        if kind == "amount":
+            name = base if base in _MONEY_WORDS or base.endswith("_amount") else f"{base}_amount"
+        else:
+            name = base if base.endswith(kind) else f"{base}_{kind}"
         out.append(c.model_copy(update={"name": name, "name_origin": "context"}))
     return out
 

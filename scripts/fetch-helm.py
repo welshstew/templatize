@@ -23,9 +23,10 @@ SHA256 = {
 
 def main() -> int:
     dest = Path(sys.argv[1])
-    arch = (sys.argv[2] if len(sys.argv) > 2 else "") or {"x86_64": "amd64", "aarch64": "arm64"}.get(
-        platform.machine(), platform.machine()
-    )
+    arch = (sys.argv[2] if len(sys.argv) > 2 else "") or {
+        "x86_64": "amd64",
+        "aarch64": "arm64",
+    }.get(platform.machine(), platform.machine())
     if arch not in SHA256:
         print(f"unsupported architecture {arch!r}", file=sys.stderr)
         return 1
