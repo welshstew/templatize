@@ -272,6 +272,8 @@ class KeyValueDetector:
                     value, s = _unquote(raw_value, vstart)
                 else:
                     value, s = _strip_comment(raw_value), vstart
+                if " " in key and len(raw_value.split()) >= 3 and raw_value.rstrip()[-1:] in ".!?":
+                    continue  # "Good news: your order has shipped." is a sentence
                 parent = stack[-1][1] if stack else None
                 # Kubernetes-style "- name: FOO" / "value: bar" pairs: name the value FOO.
                 if key == "value" and last_name and last_name[0] == indent:

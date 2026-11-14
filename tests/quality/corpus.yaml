@@ -73,7 +73,7 @@ shipping.txt:
   names: {Friday 14 November: estimated_delivery}
 
 receipt.txt:
-  want: [R-55120, "12/11/2026", "16:42", "87.95", "14.66", support@larkspur.example.com, 0113 496 0721]
+  want: [R-55120, "12/11/2026 16:42", "87.95", "14.66", support@larkspur.example.com, 0113 496 0721]
   reject: [Subtotal, Total]
 
 invite.ics:

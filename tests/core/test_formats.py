@@ -181,3 +181,37 @@ def test_url_wins_over_its_parts_and_shared_hosts_split() -> None:
 def test_template_expressions_are_not_values() -> None:
     found = values("run: docker build -t app:${{ github.sha }} .\nimage: app:${{ github.sha }}\n")
     assert "github.sha" not in found
+
+
+@pytest.mark.parametrize(
+    ("text", "name", "value"),
+    [
+        ("Thanks for shopping with Larkspur Home.\n", "company", "Larkspur Home"),
+        ("Cheers,\nThe Northstar team\n", "company", "Northstar"),
+        ("Welcome to Northstar! Your account is ready.\n", "product", "Northstar"),
+        (
+            "Your account for the Acme Robotics workspace is ready.\n",
+            "workspace_name",
+            "Acme Robotics",
+        ),
+        ("Larkspur Bank: your verification code is 482913.\n", "sender", "Larkspur Bank"),
+    ],
+)
+def test_brand_phrases(text: str, name: str, value: str) -> None:
+    assert values(text).get(value) == name
+
+
+def test_sentence_after_a_label_is_not_a_value() -> None:
+    assert "your order" not in values("Good news: your order #A-778213 has shipped.\n")
+
+
+def test_date_and_time_together() -> None:
+    assert values("Date: 12/11/2026 16:42\n")["12/11/2026 16:42"] in ("date", "timestamp")
+    # ...but not when the date is also written on its own: one variable each.
+    found = values("Subject: Review, 9 July 14:00\n\nJoin on 9 July at 14:00.\n")
+    assert found.get("9 July") and found.get("14:00")
+
+
+def test_secret_type_is_structure() -> None:
+    text = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db\ntype: Opaque\nstringData:\n  PASSWORD: x7#kq\n"
+    assert "Opaque" not in values(text)

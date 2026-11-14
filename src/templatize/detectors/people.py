@@ -336,6 +336,46 @@ def _letter_date(text: str) -> list[Candidate]:
     return []
 
 
+# Brand and organisation names in the stock phrases of transactional messages.
+_PHRASE = r"[A-Z][\w&'-]*(?: (?:&|[A-Z][\w&'-]*)){0,3}"
+_BRAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(
+            rf"\b(?:shopping|ordering|banking|booking|choosing|flying|travelling|traveling|"
+            rf"staying|signing up|working|partnering) with ({_PHRASE})(?=[.,!\s]|$)"
+        ),
+        "company",
+    ),
+    (re.compile(rf"^[ \t]*(?:The|the) ({_PHRASE}) [Tt]eam[ \t.!]*$", re.MULTILINE), "company"),
+    (re.compile(rf"\bWelcome to ({_PHRASE})(?=[.,!\s]|$)"), "product"),
+    (
+        re.compile(
+            rf"\bthe ({_PHRASE}) (workspace|account|organization|organisation|tenant|project)\b"
+        ),
+        "",
+    ),
+    # A text message signed at the start: "Larkspur Bank: your verification code is ..."
+    (re.compile(rf"\A({_PHRASE}): (?=[a-z])"), "sender"),
+]
+
+
+def _brands(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    seen: set[str] = set()
+    for pattern, role in _BRAND_PATTERNS:
+        for m in pattern.finditer(text):
+            value = m.group(1)
+            if value in seen or value.lower() in _NOT_NAMES:
+                continue
+            seen.add(value)
+            name = role or f"{m.group(2).lower()}_name"
+            span = Span(start=m.start(1), end=m.end(1))
+            out.append(
+                _elsewhere(text, _candidate(text, span, name, f"the {name.replace('_', ' ')}"))
+            )
+    return out
+
+
 class PeopleDetector:
     name = "people"
 
@@ -360,4 +400,8 @@ class PeopleDetector:
             _elsewhere(text, c) if c.name in ("recipient_company", "recipient_name") else c
             for c in recipient
         ]
-        return DetectorResult(candidates=[*named, *recipient, *greeting, *_letter_date(text)])
+        taken_values = {c.value for c in [*named, *recipient, *greeting]}
+        brands = [c for c in _brands(text) if c.value not in taken_values]
+        return DetectorResult(
+            candidates=[*named, *recipient, *greeting, *brands, *_letter_date(text)]
+        )

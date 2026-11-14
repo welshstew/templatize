@@ -189,6 +189,9 @@ def structural_spans(text: str) -> list[Span]:
         for key in ("apiVersion", "kind"):
             if (span := _value_span(get(r.root, key))) is not None:
                 out.append(span)
+        # A Secret's type (Opaque, kubernetes.io/tls) is what the resource is, like kind.
+        if r.kind == "Secret" and (span := _value_span(get(r.root, "type"))) is not None:
+            out.append(span)
         keys(r.root)
     return out
 

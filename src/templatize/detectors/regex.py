@@ -326,6 +326,17 @@ PATTERNS: list[Pattern] = [
         _valid_iso_date,
     ),
     Pattern(
+        "regex.datetime_text",
+        VarType.DATETIME,
+        # A date and a time together: "12/11/2026 16:42", "3 March 2026 at 14:00",
+        # "2026-10-03 14:12 UTC" is the ISO form above.
+        re.compile(
+            rf"(?<![\w/.-])(?:\d{{1,2}}([/.-])\d{{1,2}}\1\d{{4}}|\b{TEXT_DATE})"
+            rf",?[ \t]+(?:at[ \t]+)?{TIME}(?![\w:]|\.\d)"
+        ),
+        0.8,
+    ),
+    Pattern(
         "regex.date_iso",
         VarType.DATE,
         re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?![\w-])"),
@@ -470,7 +481,7 @@ class RegexDetector:
                     )
                 )
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
-        out = _drop_inner(_shared_hosts(text, out))
+        out = _drop_inner(_shared_hosts(text, _split_shared_datetimes(out)))
         out = _context_names(text, _line_labels(text, _name_ranges(text, out)))
         return DetectorResult(candidates=out)
 
@@ -489,11 +500,31 @@ _WHOLE = frozenset(
         "regex.email",
         "regex.host_port",
         "regex.datetime",
+        "regex.datetime_text",
         "regex.date_text",
         "regex.phone",
         "regex.arn",
     }
 )
+
+
+def _split_shared_datetimes(found: list[Candidate]) -> list[Candidate]:
+    """ "Thursday 9 July, 14:00" stays a date and a time when that date or time is also
+    written on its own elsewhere ("on Thursday 9 July from 14:00"): one variable each."""
+    combined = [c for c in found if c.detectors[0] == "regex.datetime_text"]
+    if not combined:
+        return found
+    parts = [c for c in found if c.type in (VarType.DATE, VarType.TIME)]
+
+    def inside(p: Candidate, w: Candidate) -> bool:
+        return w.spans[0].start <= p.spans[0].start and p.spans[0].end <= w.spans[0].end
+
+    drop = set()
+    for w in combined:
+        mine = {p.value for p in parts if inside(p, w)}
+        if any(p.value in mine and not inside(p, w) for p in parts):
+            drop.add(id(w))
+    return [c for c in found if id(c) not in drop]
 
 
 def _shared_hosts(text: str, found: list[Candidate]) -> list[Candidate]:
