@@ -154,3 +154,14 @@ def test_no_greeting_or_no_name_no_recipient() -> None:
     assert recipient("Accounts Payable", "Sir or Madam") == {}
     text = "Sarah Okafor\nCalder plc\n\nThanks.\n"
     assert PeopleDetector().detect(DetectionContext(text=text)).candidates == []
+
+
+@pytest.mark.parametrize("date", ["3 March 2026", "March 3, 2026", "2026-03-03", "03/03/2026"])
+def test_letter_date(date: str) -> None:
+    text = f"Northwind Ltd\n\n{date}\n\nDear Sarah,\n\nSee you on 9 July 2026.\n"
+    assert people(text) == {"letter_date": date}
+
+
+def test_no_letter_date_without_a_greeting_or_in_prose() -> None:
+    assert people("3 March 2026\n\nRelease notes\n") == {}
+    assert people("Sent on 3 March 2026.\n\nDear Sarah,\n") == {}

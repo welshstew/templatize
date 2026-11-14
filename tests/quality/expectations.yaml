@@ -69,7 +69,7 @@ letter:
   want: [Sarah, Okafor, Procurement Manager, Calder Engineering plc, "Unit 7, Riverside Park\nLeeds LS10 1AB", "14 Harbour Road\nBristol BS1 6AA", PO-55821, "18,450.00", 3 March 2026, 17 March 2026]
   reject: [Procurement, Manager, Calder, Riverside, "7,", "Unit 7, Riverside Park"]
   # Found without NER or the LLM: the name of the email, the signature, the companies.
-  names: {Sarah: recipient_first_name, Okafor: recipient_last_name, Procurement Manager: recipient_title, "Unit 7, Riverside Park\nLeeds LS10 1AB": recipient_address, Ravi Patel: contact_name, "+44 117 555 0142": phone_number, Helen Clarke: sender_name, Sales Director: sender_title, Northwind Components Ltd: sender_company, Calder Engineering plc: recipient_company, "14 Harbour Road\nBristol BS1 6AA": sender_address}
+  names: {3 March 2026: letter_date, Sarah: recipient_first_name, Okafor: recipient_last_name, Procurement Manager: recipient_title, "Unit 7, Riverside Park\nLeeds LS10 1AB": recipient_address, Ravi Patel: contact_name, "+44 117 555 0142": phone_number, Helen Clarke: sender_name, Sales Director: sender_title, Northwind Components Ltd: sender_company, Calder Engineering plc: recipient_company, "14 Harbour Road\nBristol BS1 6AA": sender_address}
 
 invoice:
   loops: {rows: 2}  # line items: a table with padded columns

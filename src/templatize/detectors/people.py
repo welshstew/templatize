@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from templatize.detectors.address import address_roles, find_addresses
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span, VarType
+from templatize.naming import infer_type
 
 CONFIDENCE = 0.7
 
@@ -238,6 +239,21 @@ def _recipient(text: str) -> list[Candidate]:
     return out
 
 
+def _letter_date(text: str) -> list[Candidate]:
+    """A date alone on its line above "Dear ...," is the letter's date."""
+    m = _GREETING.search(text)
+    if m is None:
+        return []
+    for line in re.finditer(r"[^\r\n]+", text[: m.start()]):
+        value = line.group(0).strip()
+        if value and infer_type(value) in (VarType.DATE, VarType.DATETIME):
+            start = line.start() + line.group(0).index(value)
+            span = Span(start=start, end=start + len(value))
+            c = _candidate(text, span, "letter_date", "the date of the letter")
+            return [c.model_copy(update={"type": infer_type(value)})]
+    return []
+
+
 class PeopleDetector:
     name = "people"
 
@@ -252,4 +268,6 @@ class PeopleDetector:
             if not any(sp.overlaps(t) for sp in c.spans for t in taken)
         ]
         companies = [c for c in _companies(text) if not any(sp in taken for sp in c.spans)]
-        return DetectorResult(candidates=[*contacts, *_signature(text), *companies, *recipient])
+        return DetectorResult(
+            candidates=[*contacts, *_signature(text), *companies, *recipient, *_letter_date(text)]
+        )
