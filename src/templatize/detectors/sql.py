@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span
@@ -29,7 +30,7 @@ _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?![\w.])")
 _GENERIC = frozenset(
     {"id", "name", "type", "status", "value", "key", "code", "title", "kind", "label"}
 )
-_MAX_ROWS = 500
+_MAX_ROWS = 10_000  # = templatize.ir.MAX_LOOP_ITEMS
 
 
 def _ident(raw: str) -> str:
@@ -95,6 +96,50 @@ def _row_values(text: str, pos: int) -> Iterator[tuple[int, tuple[int, int] | No
         pos += 1
 
 
+@dataclass(frozen=True)
+class InsertRow:
+    span: tuple[int, int]
+    """The row's ``( ... )``, parentheses included."""
+    values: dict[int, tuple[int, int]]
+    """Column index -> literal value span (expressions and NULLs are absent)."""
+
+
+@dataclass(frozen=True)
+class InsertStatement:
+    table: str
+    """Unqualified, unquoted table name as written (``users``)."""
+    columns: list[str]
+    rows: list[InsertRow]
+
+
+def insert_statements(text: str) -> Iterator[InsertStatement]:
+    """``INSERT INTO t (cols) VALUES (...), (...)`` statements and their rows."""
+    for m in _INSERT.finditer(text):
+        cols = [_ident(c.strip()) for c in m.group(2).split(",")]
+        rows: list[InsertRow] = []
+        pos = m.end()
+        for _ in range(_MAX_ROWS):
+            pos = _skip_ws(text, pos)
+            if pos >= len(text) or text[pos] != "(":
+                break
+            start, end = pos, None
+            values: dict[int, tuple[int, int]] = {}
+            for col, span in _row_values(text, pos):
+                if col == -1 and span is not None:
+                    end = span[1]
+                elif span is not None and col < len(cols):
+                    values[col] = span
+            if end is None:
+                break
+            rows.append(InsertRow(span=(start, end), values=values))
+            pos = _skip_ws(text, end)
+            if pos < len(text) and text[pos] == ",":
+                pos += 1
+            else:
+                break
+        yield InsertStatement(table=_ident(m.group(1)), columns=cols, rows=rows)
+
+
 class SqlDetector:
     name = "sql"
 
@@ -103,27 +148,11 @@ class SqlDetector:
         if not re.search(r"\b(?:INSERT|UPDATE)\b", text, re.IGNORECASE):
             return DetectorResult(candidates=[])
         out: list[Candidate] = []
-        for m in _INSERT.finditer(text):
-            table = _singular(m.group(1))
-            cols = [_ident(c.strip()) for c in m.group(2).split(",")]
-            pos = m.end()
-            for _ in range(_MAX_ROWS):
-                pos = _skip_ws(text, pos)
-                if pos >= len(text) or text[pos] != "(":
-                    break
-                end = None
-                for col, span in _row_values(text, pos):
-                    if col == -1 and span is not None:
-                        end = span[1]
-                    elif span is not None and col < len(cols):
-                        self._add(out, text, table, cols[col], span, "sql.insert", 0.75)
-                if end is None:
-                    break
-                pos = _skip_ws(text, end)
-                if pos < len(text) and text[pos] == ",":
-                    pos += 1
-                else:
-                    break
+        for stmt in insert_statements(text):
+            table = _singular(stmt.table)
+            for row in stmt.rows:
+                for col, span in row.values.items():
+                    self._add(out, text, table, stmt.columns[col], span, "sql.insert", 0.75)
         for m in _UPDATE.finditer(text):
             table = _singular(m.group(1))
             stop = text.find(";", m.end())

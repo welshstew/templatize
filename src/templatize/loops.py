@@ -1,0 +1,493 @@
+"""Loop suggestions: repeated blocks (list items, SQL rows, keyword lines).
+
+Finding a loop has two steps:
+
+1. A *finder* proposes item boundaries for one kind of structure:
+   YAML/JSON sequences (parser node offsets), ``INSERT ... VALUES`` rows, inline
+   lists (``BROKERS = ["a", "b"]``) and runs of lines that start with the same
+   keyword (``server 10.0.0.1:8080;``).
+2. :func:`infer_fields` compares the items with the diff machinery: what differs
+   between them are the fields, the rest is the skeleton, which must be identical in
+   every item (the same check :class:`templatize.ir.Loop` validates).
+
+Examples (variants) are searched the same way; a loop found in the main text and an
+example is matched by name, and its lists become ``variant_values``.
+"""
+
+from __future__ import annotations
+
+import itertools
+import re
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
+
+import yaml
+from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
+
+from templatize.detectors.diff import _char_segments, _map_end, _map_start, _name_for, _widen
+from templatize.detectors.sql import insert_statements
+from templatize.ir import (
+    Candidate,
+    LoopCandidate,
+    LoopFieldCandidate,
+    LoopValues,
+    Notice,
+    Source,
+    Span,
+    VarType,
+)
+from templatize.naming import dedupe_names, infer_type, snake_case
+
+try:
+    _Loader: type = yaml.CSafeLoader
+except AttributeError:  # pragma: no cover
+    _Loader = yaml.SafeLoader
+
+MIN_ITEMS = 2
+MAX_LOOPS = 50
+VARIANT_CONFIDENCE = 0.97
+
+
+@dataclass
+class Found:
+    """Item boundaries proposed by a finder."""
+
+    name: str
+    items: list[Span]
+    detector: str
+    confidence: float
+    reason: str
+    names: list[tuple[Span, str]] = field(default_factory=list)
+    """Named regions of the first item (absolute): a field inside one takes its name
+    (SQL column names)."""
+
+
+# --- field inference -------------------------------------------------------------
+
+
+def infer_fields(text: str, items: Sequence[Span]) -> list[list[Span]] | None:
+    """Field spans (one list per field, one span per item) or None if the items do
+    not share one skeleton."""
+    if len(items) < MIN_ITEMS:
+        return None
+    first = items[0]
+    a = text[first.start : first.end]
+    per_item = []
+    regions: list[tuple[int, int]] = []
+    for it in items[1:]:
+        b = text[it.start : it.end]
+        segs = _widen(a, b, _char_segments(a, b))
+        per_item.append(segs)
+        for s in segs:
+            if s.equal:
+                continue
+            if s.a1 == s.a2 or s.b1 == s.b2:
+                return None  # text inserted/removed: the shapes differ
+            regions.append((s.a1, s.a2))
+    if not regions:
+        return None
+    regions.sort()
+    union: list[list[int]] = []
+    for r1, r2 in regions:
+        if union and r1 <= union[-1][1]:
+            union[-1][1] = max(union[-1][1], r2)
+        else:
+            union.append([r1, r2])
+    fields: list[list[Span]] = []
+    for r1, r2 in union:
+        spans = [Span(start=first.start + r1, end=first.start + r2)]
+        for it, segs in zip(items[1:], per_item, strict=True):
+            b1, b2 = _map_start(segs, r1), _map_end(segs, r2)
+            if b2 <= b1:
+                return None
+            spans.append(Span(start=it.start + b1, end=it.start + b2))
+        fields.append(spans)
+    skeletons = {_pieces(text, it, [f[i] for f in fields]) for i, it in enumerate(items)}
+    return fields if len(skeletons) == 1 else None
+
+
+def _pieces(text: str, item: Span, holes: list[Span]) -> tuple[str, ...]:
+    out, pos = [], item.start
+    for h in holes:
+        out.append(text[pos : h.start])
+        pos = h.end
+    out.append(text[pos : item.end])
+    return tuple(out)
+
+
+def _same_separator(text: str, items: Sequence[Span]) -> bool:
+    seps = {text[a.end : b.start] for a, b in itertools.pairwise(items)}
+    return len(seps) <= 1 and all(a.end <= b.start for a, b in itertools.pairwise(items))
+
+
+# --- finders ---------------------------------------------------------------------
+
+
+def _trimmed(text: str, start: int, end: int) -> Span | None:
+    while end > start and text[end - 1] in " \t\r\n":
+        end -= 1
+    return Span(start=start, end=end) if end > start else None
+
+
+def _scalar_span(text: str, node: ScalarNode) -> Span | None:
+    start, end = node.start_mark.index, node.end_mark.index
+    if node.style in ("'", '"') and end - start >= 2:
+        return Span(start=start + 1, end=end - 1) if end - start > 2 else None
+    if node.style in ("|", ">"):
+        return None
+    return _trimmed(text, start, end)
+
+
+def find_yaml(text: str) -> list[Found]:
+    """Sequences of >= 2 scalars, or of >= 2 mappings with the same keys."""
+    try:
+        docs = list(yaml.compose_all(text, Loader=_Loader))
+    except (yaml.YAMLError, ValueError):
+        return []
+    out: list[Found] = []
+
+    def walk(node: Node | None, key: str | None) -> None:
+        if isinstance(node, MappingNode):
+            for k, v in node.value:
+                walk(v, k.value if isinstance(k, ScalarNode) else None)
+        elif isinstance(node, SequenceNode):
+            kids = node.value
+            if len(kids) >= MIN_ITEMS:
+                items: list[Span | None] = []
+                if all(isinstance(k, ScalarNode) for k in kids):
+                    # Same quoting for every item: the quotes are part of the separator.
+                    if len({k.style for k in kids if isinstance(k, ScalarNode)}) == 1:
+                        items = [_scalar_span(text, k) for k in kids]
+                elif all(isinstance(k, MappingNode) for k in kids):
+                    keysets = {tuple(sorted(str(kk.value) for kk, _ in k.value)) for k in kids}
+                    if len(keysets) == 1:
+                        items = [_trimmed(text, k.start_mark.index, k.end_mark.index) for k in kids]
+                if items and all(items):
+                    spans = [s for s in items if s is not None]
+                    prose = all(isinstance(k, ScalarNode) and " " in str(k.value) for k in kids)
+                    out.append(
+                        Found(
+                            name=snake_case(key or "items"),
+                            items=spans,
+                            detector="loop.yaml",
+                            confidence=0.65 if prose else 0.8,
+                            reason=f"items of the list {key!r}" if key else "list items",
+                        )
+                    )
+            for k in kids:
+                walk(k, key)
+
+    for d in docs:
+        walk(d, None)
+    return out
+
+
+def find_sql(text: str) -> list[Found]:
+    out: list[Found] = []
+    for stmt in insert_statements(text):
+        if len(stmt.rows) < MIN_ITEMS:
+            continue
+        first = stmt.rows[0]
+        out.append(
+            Found(
+                name=snake_case(stmt.table),
+                items=[Span(start=r.span[0], end=r.span[1]) for r in stmt.rows],
+                detector="loop.sql",
+                confidence=0.85,
+                reason=f"rows inserted into {stmt.table}",
+                names=[
+                    (Span(start=s, end=e), stmt.columns[c]) for c, (s, e) in first.values.items()
+                ],
+            )
+        )
+    return out
+
+
+_LIST_START = re.compile(r"([A-Za-z_][\w.-]*)[\"']?[ \t]*[:=][ \t]*\[")
+_LIST_ITEM = re.compile(
+    r"\s*(?:\"((?:[^\"\\\n]|\\.)*)\"|'((?:[^'\\\n]|\\.)*)'|(-?\d+(?:\.\d+)?))\s*"
+)
+
+
+def find_inline_lists(text: str) -> list[Found]:
+    """``KEY = ["a", "b"]`` / ``key: [1, 2]`` lists of literals (Python, HCL, TOML,
+    JSON and YAML flow lists)."""
+    out: list[Found] = []
+    for m in _LIST_START.finditer(text):
+        pos = m.end()
+        items: list[Span] = []
+        kinds: set[int] = set()
+        while True:
+            lm = _LIST_ITEM.match(text, pos)
+            if not lm:
+                break
+            g = next(i for i in (1, 2, 3) if lm.group(i) is not None)
+            if lm.end(g) <= lm.start(g):
+                break
+            items.append(Span(start=lm.start(g), end=lm.end(g)))
+            kinds.add(g)
+            pos = lm.end()
+            if text.startswith(",", pos):
+                pos += 1
+                continue
+            break
+        rest = text[pos : pos + 1]
+        if rest == "]" and len(items) >= MIN_ITEMS and len(kinds) == 1:
+            out.append(
+                Found(
+                    name=snake_case(m.group(1)),
+                    items=items,
+                    detector="loop.list",
+                    confidence=0.75,
+                    reason=f"items of the list {m.group(1)}",
+                )
+            )
+    return out
+
+
+_KEYWORD_LINE = re.compile(r"^([ \t]*)([A-Za-z][\w-]*)(?=[ \t])(?![ \t]*[:=])", re.MULTILINE)
+
+
+def find_keyword_lines(text: str) -> list[Found]:
+    """Runs of consecutive lines with the same indent that start with the same keyword
+    (``server 10.0.0.1:8080 weight=5;``)."""
+    out: list[Found] = []
+    run: list[tuple[str, str, Span]] = []
+
+    def flush() -> None:
+        if len(run) >= MIN_ITEMS:
+            kw = run[0][1]
+            out.append(
+                Found(
+                    name=_plural(snake_case(kw)),
+                    items=[s for _, _, s in run],
+                    detector="loop.lines",
+                    confidence=0.6,
+                    reason=f"lines starting with {kw!r}",
+                )
+            )
+        run.clear()
+
+    pos = 0
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        m = _KEYWORD_LINE.match(body)
+        if m and body.strip():
+            start = pos + len(m.group(1))
+            span = Span(start=start, end=pos + len(body.rstrip()))
+            key = (m.group(1), m.group(2))
+            if run and (run[-1][0], run[-1][1]) == key and run[-1][2].end < start:
+                gap = text[run[-1][2].end : start]
+                if gap.strip() == "" and gap.count("\n") + gap.count("\r") - gap.count("\r\n") == 1:
+                    run.append((*key, span))
+                    pos += len(line)
+                    continue
+            flush()
+            run.append((*key, span))
+        else:
+            flush()
+        pos += len(line)
+    flush()
+    return out
+
+
+FINDERS = (find_sql, find_yaml, find_inline_lists, find_keyword_lines)
+
+
+# --- candidates ------------------------------------------------------------------
+
+
+def _candidate(text: str, found: Found) -> LoopCandidate | None:
+    if not _same_separator(text, found.items):
+        return None
+    fields = infer_fields(text, found.items)
+    if fields is None:
+        return None
+    scalar = len(fields) == 1 and fields[0] == found.items
+    names: list[str] = []
+    types: list[VarType] = []
+    for spans in fields:
+        first = spans[0]
+        value = text[first.start : first.end]
+        named = next((n for region, n in found.names if region.contains(first)), None)
+        if scalar:
+            name = "value"
+        elif named:
+            name = snake_case(named)
+        else:
+            name, _, _ = _name_for(text, first.start, value)
+        names.append(name)
+        types.append(infer_type(value))
+    names = dedupe_names(names)
+    return LoopCandidate(
+        name=found.name,
+        item=found.name,  # placeholder; final names in detect_loops
+        items=found.items,
+        fields=[
+            LoopFieldCandidate(name=n, type=t, spans=s)
+            for n, t, s in zip(names, types, fields, strict=True)
+        ],
+        scalar=scalar,
+        sources=[Source.REPETITION],
+        detectors=[found.detector],
+        confidence=found.confidence,
+        reason=found.reason,
+    )
+
+
+def find_loops(text: str) -> list[LoopCandidate]:
+    """Non-overlapping loop candidates in ``text``, most confident first wins."""
+    cands = [
+        c for finder in FINDERS for f in finder(text) if (c := _candidate(text, f)) is not None
+    ]
+    cands.sort(key=lambda c: (c.confidence, len(c.items)), reverse=True)
+    kept: list[LoopCandidate] = []
+    for c in cands:
+        if not any(c.region.overlaps(k.region) for k in kept):
+            kept.append(c)
+        if len(kept) >= MAX_LOOPS:
+            break
+    kept.sort(key=lambda c: c.region.start)
+    return kept
+
+
+def loop_values(text: str, loop: LoopCandidate) -> LoopValues:
+    if loop.scalar:
+        return [text[s.start : s.end] for s in loop.fields[0].spans]
+    return [
+        {f.name: text[f.spans[i].start : f.spans[i].end] for f in loop.fields}
+        for i in range(len(loop.items))
+    ]
+
+
+def _plural(name: str) -> str:
+    return name if name.endswith("s") else name + "s"
+
+
+def singular(name: str) -> str:
+    if name.endswith("ies") and len(name) > 4:
+        return name[:-3] + "y"
+    if name.endswith("s") and not name.endswith("ss") and len(name) > 3:
+        return name[:-1]
+    return f"{name}_item"
+
+
+def _item_names(names: Sequence[str], taken: Iterable[str]) -> list[str]:
+    """``users`` -> ``user``; if that is taken (a scalar suggestion with the same name),
+    ``user_item`` reads better than ``user_2``."""
+    used = set(taken)
+    out: list[str] = []
+    for n in names:
+        options = [singular(n), f"{n}_item"]
+        pick = next((o for o in options if o not in used), None)
+        if pick is None:
+            pick = dedupe_names([options[1]], taken=used)[0]
+        used.add(pick)
+        out.append(pick)
+    return out
+
+
+def detect_loops(
+    text: str, variants: Sequence[str], taken_names: Iterable[str] = ()
+) -> list[LoopCandidate]:
+    loops = find_loops(text)
+    if not loops:
+        return []
+    in_variants = [find_loops(v) for v in variants]
+    names = dedupe_names([lp.name for lp in loops], taken=taken_names)
+    items = _item_names(names, taken=[*taken_names, *names])
+    out: list[LoopCandidate] = []
+    for lp, name, item in zip(loops, names, items, strict=True):
+        variant_values: list[LoopValues | None] = []
+        for vtext, vloops in zip(variants, in_variants, strict=True):
+            match = next(
+                (
+                    v
+                    for v in vloops
+                    if v.name == lp.name and v.detectors == lp.detectors and v.scalar == lp.scalar
+                ),
+                None,
+            )
+            variant_values.append(_aligned(vtext, match, lp) if match else None)
+        confidence = lp.confidence
+        main = loop_values(text, lp)
+        if any(v is not None and v != main for v in variant_values):
+            confidence = max(confidence, VARIANT_CONFIDENCE)
+        out.append(
+            LoopCandidate.model_validate(
+                lp.model_dump()
+                | {
+                    "id": "",
+                    "name": name,
+                    "item": item,
+                    "confidence": confidence,
+                    "variant_values": variant_values if variants else None,
+                }
+            )
+        )
+    return out
+
+
+def _aligned(text: str, other: LoopCandidate, ref: LoopCandidate) -> LoopValues | None:
+    """An example's list, keyed by the main loop's field names (fields are matched by
+    their inferred names; a field the example lacks makes the list unusable)."""
+    vals = loop_values(text, other)
+    if ref.scalar:
+        return vals
+    want = [f.name for f in ref.fields]
+    rows = [v for v in vals if isinstance(v, dict)]
+    if any(set(want) - set(r) for r in rows):
+        return None
+    return [{k: r[k] for k in want} for r in rows]
+
+
+def explained_notices(notices: Sequence[Notice], loops: Sequence[LoopCandidate]) -> list[Notice]:
+    """Drop "structural difference" notices inside a loop: an example with more or
+    fewer items is what the loop expresses."""
+    return [
+        n
+        for n in notices
+        if not (
+            n.kind == "structural_difference"
+            and n.span is not None
+            and any(_near(lp.region, n.span) for lp in loops)
+        )
+    ]
+
+
+def _near(region: Span, span: Span) -> bool:
+    return region.start <= span.start <= region.end + 1
+
+
+# --- accepting loops ---------------------------------------------------------------
+
+
+def compatible_candidates(
+    candidates: Sequence[Candidate], loops: Sequence[LoopCandidate]
+) -> list[Candidate]:
+    """Scalar candidates that can be accepted together with ``loops``: spans inside a
+    loop are kept only if the candidate sits at the same place in every item (an outer
+    variable such as a tenant id in every row) and not on a field."""
+    out: list[Candidate] = []
+    for c in candidates:
+        spans = list(c.spans)
+        for lp in loops:
+            inside = [s for s in spans if lp.region.overlaps(s)]
+            if not inside:
+                continue
+            fields = [s for f in lp.fields for s in f.spans]
+            offsets = set()
+            ok = len(inside) == len(lp.items)
+            for s in inside:
+                it = next((it for it in lp.items if it.contains(s)), None)
+                if it is None or any(s.overlaps(fs) for fs in fields):
+                    ok = False
+                    break
+                offsets.add((s.start - it.start, s.end - it.start))
+            hit = {i for i, it in enumerate(lp.items) for s in inside if it.contains(s)}
+            ok = ok and len(offsets) == 1 and len(hit) == len(lp.items)
+            if not ok:
+                spans = [s for s in spans if s not in inside]
+        if spans:
+            out.append(c if spans == c.spans else c.model_copy(update={"spans": spans}))
+    return out

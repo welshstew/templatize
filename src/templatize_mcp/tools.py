@@ -11,9 +11,12 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from templatize.ansible import RoleError, build_role
 from templatize.build import (
+    LoopSpec,
     VariableInput,
     VariableResolutionError,
+    accept_suggestions,
     build,
     resolve_inputs,
     specs_from_candidates,
@@ -27,6 +30,7 @@ from templatize.helm import build as build_helm_chart
 from templatize.helm.coverage import CoverageReport
 from templatize.ir import MAX_INPUT_CHARS, Candidate, IRValidationError, Notice, VarType
 from templatize.k8s import DocumentProfile
+from templatize.loops import loop_values
 from templatize.roundtrip import RoundTripResult
 from templatize.suggest import SuggestResult, check_limits, suggest
 from templatize.validate import validate_template as core_validate
@@ -43,6 +47,10 @@ def _suggest(text: str, variants: list[str]) -> SuggestResult:
     return suggest(text, variants, detectors=detectors)
 
 
+RenderValue = str | list[str] | list[dict[str, str]]
+"""A variable's string, or a loop's list (strings, or one mapping per item)."""
+
+
 class ToolInputError(ValueError):
     """Raised for bad arguments; the SDK reports it to the client as a tool error."""
 
@@ -57,8 +65,23 @@ NEXT_STEP_HELM = (
 )
 
 
+class SuggestedLoop(BaseModel):
+    name: str
+    item: str
+    items: int
+    """How many repeated items were found."""
+    fields: list[str]
+    """Keys of each item (empty for a list of plain values)."""
+    values: list[dict[str, str]] | list[str]
+    confidence: float
+    reason: str | None = None
+
+
 class SuggestParametersResult(BaseModel):
     candidates: list[Candidate]
+    loops: list[SuggestedLoop] = []
+    """Repeated blocks (list items, SQL rows): generate_template turns them into
+    {% for %} loops when called without `variables`."""
     notices: list[Notice]
     profile: DocumentProfile = DocumentProfile()
     """format="kubernetes" with helm_suggested=true means a Helm chart can be generated."""
@@ -78,7 +101,9 @@ class GenerateTemplateResult(BaseModel):
     template_filename: str
     template: str
     env: str
-    """Contents of the .env file (KEY="value" lines)."""
+    """Contents of the values file: .env (KEY="value" lines), or values.yaml when the
+    template has loops (see values_filename)."""
+    values_filename: str = ".env"
     render_script: str
     """render.py: `uv run render.py > output.txt` renders template + .env."""
     variables: list[GeneratedVariable]
@@ -118,6 +143,19 @@ def suggest_parameters(
         raise ToolInputError(str(exc)) from None
     return SuggestParametersResult(
         candidates=[c for c in res.candidates if c.confidence >= min_confidence],
+        loops=[
+            SuggestedLoop(
+                name=lp.name,
+                item=lp.item,
+                items=len(lp.items),
+                fields=[] if lp.scalar else [f.name for f in lp.fields],
+                values=loop_values(text, lp),
+                confidence=lp.confidence,
+                reason=lp.reason,
+            )
+            for lp in res.loops
+            if lp.confidence >= min_confidence
+        ],
         notices=res.notices,
         profile=res.profile,
         next_step=NEXT_STEP_HELM if res.profile.helm_suggested else NEXT_STEP,
@@ -159,15 +197,25 @@ def generate_helm_chart(
     variants = variants or []
     try:
         check_limits(text, variants)
+        loops: list[LoopSpec] = []
         if variables is None:
-            cands = [
-                c for c in _suggest(text, variants).candidates if c.confidence >= min_confidence
-            ]
-            specs = specs_from_candidates(cands)
+            res = _suggest(text, variants)
+            cands = [c for c in res.candidates if c.confidence >= min_confidence]
+            if style == "exact":
+                found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+                specs, loops = accept_suggestions(cands, found)
+            else:
+                specs = specs_from_candidates(cands)
         else:
             specs = resolve_inputs(text, variables)
         result = build_helm_chart(
-            style, text, specs, variants, chart_name=chart_name, variant_labels=variant_labels
+            style,
+            text,
+            specs,
+            variants,
+            chart_name=chart_name,
+            variant_labels=variant_labels,
+            loops=loops,
         )
     except (VariableResolutionError, IRValidationError, ChartError, ValueError) as exc:
         raise ToolInputError(str(exc)) from None
@@ -199,14 +247,15 @@ def generate_template(
     variants = variants or []
     try:
         check_limits(text, variants)
+        loops: list[LoopSpec] = []
         if variables is None:
-            cands = [
-                c for c in _suggest(text, variants).candidates if c.confidence >= min_confidence
-            ]
-            specs = specs_from_candidates(cands)
+            res = _suggest(text, variants)
+            cands = [c for c in res.candidates if c.confidence >= min_confidence]
+            found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+            specs, loops = accept_suggestions(cands, found)
         else:
             specs = resolve_inputs(text, variables)
-        result = build(text, specs, engine=engine)
+        result = build(text, specs, engine=engine, loops=loops)
     except (VariableResolutionError, IRValidationError, ValueError) as exc:
         raise ToolInputError(str(exc)) from None
     runner = result.runner[0].content if result.runner else ""
@@ -215,6 +264,7 @@ def generate_template(
         template_filename=result.template.path,
         template=result.template.content,
         env=result.env.content,
+        values_filename=result.env.path,
         render_script=runner,
         variables=[
             GeneratedVariable(
@@ -229,7 +279,7 @@ def generate_template(
 
 def render_template(
     template: str,
-    values: dict[str, str] | None = None,
+    values: dict[str, RenderValue] | None = None,
     newline: Newline | None = None,
     engine: str = "jinja2",
 ) -> RenderTemplateResult:
@@ -252,7 +302,7 @@ def render_template(
 
 def validate_template(
     template: str,
-    values: dict[str, str] | None = None,
+    values: dict[str, RenderValue] | None = None,
     expected_text: str | None = None,
     engine: str = "jinja2",
 ) -> ValidateTemplateResult:
@@ -278,3 +328,57 @@ __all__ = [
     "suggest_parameters",
     "validate_template",
 ]
+
+
+class GenerateAnsibleRoleResult(BaseModel):
+    role_name: str
+    files: list[ChartFile]
+    """<role>/defaults/main.yml, tasks/main.yml, templates/<file>.j2, meta/main.yml,
+    README.md, examples/<label>.yml per variant, and playbook.yml."""
+    roundtrip: RoundTripResult
+    """ok=true: rendering the role's template with defaults/main.yml (as Ansible reads
+    it, with byte-exact template options) reproduces the input."""
+    example_roundtrips: list[RoundTripResult]
+    used_suggestions: bool
+
+
+def generate_ansible_role(
+    text: str,
+    variables: list[VariableInput] | None = None,
+    variants: list[str] | None = None,
+    role_name: str = "config",
+    filename: str = "config",
+    dest: str | None = None,
+    variant_labels: list[str] | None = None,
+    min_confidence: float = 0.5,
+) -> GenerateAnsibleRoleResult:
+    variants = variants or []
+    try:
+        check_limits(text, variants)
+        loops: list[LoopSpec] = []
+        if variables is None:
+            res = _suggest(text, variants)
+            cands = [c for c in res.candidates if c.confidence >= min_confidence]
+            found = [lp for lp in res.loops if lp.confidence >= min_confidence]
+            specs, loops = accept_suggestions(cands, found)
+        else:
+            specs = resolve_inputs(text, variables)
+        result = build_role(
+            text,
+            specs,
+            loops,
+            role_name=role_name,
+            filename=filename,
+            dest=dest,
+            variants=variants,
+            variant_labels=variant_labels,
+        )
+    except (VariableResolutionError, IRValidationError, RoleError, ValueError) as exc:
+        raise ToolInputError(str(exc)) from None
+    return GenerateAnsibleRoleResult(
+        role_name=result.role_name,
+        files=[ChartFile(path=f.path, content=f.content) for f in result.files],
+        roundtrip=result.roundtrip,
+        example_roundtrips=result.example_roundtrips,
+        used_suggestions=variables is None,
+    )

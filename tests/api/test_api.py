@@ -187,3 +187,55 @@ def test_unhandled_errors_log_type_only(
     assert r.status_code == 500 and r.json() == {"detail": "internal error"}
     assert "RuntimeError" in caplog.text
     assert SECRET not in caplog.text and SECRET not in r.text
+
+
+def test_build_with_loops_and_render_lists(client: TestClient) -> None:
+    text = "hosts:\n- a.example\n- b.example\n"
+    a, b = text.index("a.example"), text.index("b.example")
+    loop = {
+        "name": "hosts",
+        "items": [{"start": a, "end": a + 9}, {"start": b, "end": b + 9}],
+        "scalar": True,
+    }
+    built = client.post("/build", json={"text": text, "loops": [loop]}).json()
+    assert built["roundtrip"]["ok"] is True
+    assert built["env"]["path"] == "values.yaml"
+    assert built["loops"][0]["item"] == "host"
+    rendered = client.post(
+        "/render",
+        json={"template": built["template"]["content"], "values": {"hosts": ["x", "y", "z"]}},
+    ).json()
+    assert rendered == {"ok": True, "output": "hosts:\n- x\n- y\n- z\n", "error": None}
+    bad = client.post("/build", json={"text": text, "loops": [{**loop, "name": "for"}]})
+    assert bad.status_code == 422 and "reserved" in bad.json()["detail"]
+
+
+def test_suggest_returns_loops(client: TestClient) -> None:
+    text = (
+        "INSERT INTO users (email, role) VALUES ('a@x.example', 'admin'), ('b@x.example', 'dev');\n"
+    )
+    res = client.post("/suggest", json={"text": text}).json()
+    (loop,) = res["loops"]
+    assert (loop["name"], loop["item"], len(loop["items"])) == ("users", "user", 2)
+    assert [f["name"] for f in loop["fields"]] == ["email", "role"]
+
+
+def test_role_and_download(client: TestClient) -> None:
+    text = "host = db.example.com\nport = 5432\n"
+    i = text.index("db.example.com")
+    body = {
+        "text": text,
+        "variables": [{"name": "host", "spans": [{"start": i, "end": i + 14}]}],
+        "role_name": "db",
+        "filename": "app.ini",
+    }
+    res = client.post("/role", json=body).json()
+    assert res["ok"] is True and res["role_name"] == "db"
+    paths = {f["path"] for f in res["files"]}
+    assert {"db/templates/app.ini.j2", "db/defaults/main.yml", "playbook.yml"} <= paths
+    dl = client.post("/role/download", json=body)
+    assert dl.status_code == 200 and dl.headers["x-roundtrip"] == "pass"
+    with zipfile.ZipFile(io.BytesIO(dl.content)) as zf:
+        assert "db/tasks/main.yml" in zf.namelist()
+    bad = client.post("/role", json={**body, "role_name": "Bad-Name"})
+    assert bad.status_code == 422 and "invalid role name" in bad.json()["detail"]

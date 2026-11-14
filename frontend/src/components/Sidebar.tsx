@@ -2,7 +2,8 @@ import { useState } from "preact/hooks";
 
 import type { LlmStatus } from "../App.tsx";
 import type { Notice } from "../api.ts";
-import { canAccept, type Item, parseValuesPath, VAR_TYPES, validateName } from "../model.ts";
+import { canAccept, type Item, type LoopItem, parseValuesPath, VAR_TYPES, validateName } from "../model.ts";
+import { LoopCard } from "./LoopCard.tsx";
 
 interface Props {
   llm: LlmStatus;
@@ -12,8 +13,12 @@ interface Props {
   onSelect: (id: string | null) => void;
   onStatus: (ids: string[], status: Item["status"]) => void;
   onUpdate: (id: string, patch: Partial<Item>) => void;
+  loops?: LoopItem[];
+  onLoopStatus?: (id: string, status: LoopItem["status"]) => void;
+  onLoopUpdate?: (id: string, patch: Partial<LoopItem>) => void;
   /** Helm chart output: show and edit each variable's values.yaml path. */
   helm?: boolean;
+  chartStyle?: "exact" | "scaffold";
 }
 
 /** values.yaml key for an item: its own path, or derived from the name like the server does. */
@@ -79,13 +84,14 @@ function Sources({ item }: { item: Item }) {
   );
 }
 
-function VariableRow({ item, items, selected, onSelect, onStatus, onUpdate, helm }: {
+function VariableRow({ item, items, loops, selected, onSelect, onStatus, onUpdate, helm }: {
   item: Item;
   items: Item[];
+  loops: LoopItem[];
   selected: boolean;
 } & Pick<Props, "onSelect" | "onStatus" | "onUpdate" | "helm">) {
   const [draft, setDraft] = useState(item.name);
-  const error = draft === item.name ? null : validateName(draft, items, item.id);
+  const error = draft === item.name ? null : validateName(draft, items, item.id, loops);
   const commit = () => {
     if (!error && draft !== item.name) onUpdate(item.id, { name: draft });
     else if (error) setDraft(item.name);
@@ -155,12 +161,13 @@ function VariableRow({ item, items, selected, onSelect, onStatus, onUpdate, helm
   );
 }
 
-function SuggestionRow({ item, items, selected, onSelect, onStatus, helm }: {
+function SuggestionRow({ item, items, loops, selected, onSelect, onStatus, helm }: {
   item: Item;
   items: Item[];
+  loops: LoopItem[];
   selected: boolean;
 } & Pick<Props, "onSelect" | "onStatus" | "helm">) {
-  const acceptable = canAccept(items, item.id);
+  const acceptable = canAccept(items, item.id, loops);
   return (
     <li class={`sug ${selected ? "selected" : ""}`} onClick={() => onSelect(item.id)}>
       <div class="row">
@@ -173,7 +180,7 @@ function SuggestionRow({ item, items, selected, onSelect, onStatus, helm }: {
         ) : null}
         <button
           class="icon accept"
-          title={acceptable ? "Accept" : "Overlaps an accepted variable"}
+          title={acceptable ? "Accept" : "Overlaps an accepted variable or list"}
           aria-label={`Accept ${item.name}`}
           disabled={!acceptable}
           onClick={(e) => {
@@ -239,8 +246,25 @@ function LlmPill({ llm }: { llm: LlmStatus }) {
   );
 }
 
-export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, onUpdate, helm = false }: Props) {
+export function Sidebar({
+  llm,
+  items,
+  notices,
+  selectedId,
+  onSelect,
+  onStatus,
+  onUpdate,
+  loops = [],
+  onLoopStatus = () => undefined,
+  onLoopUpdate = () => undefined,
+  helm = false,
+  chartStyle = "exact",
+}: Props) {
   const [showRejected, setShowRejected] = useState(false);
+  const liveLoops = loops
+    .filter((l) => l.status !== "rejected")
+    .sort((a, b) => (a.status === b.status ? (b.confidence ?? 0) - (a.confidence ?? 0) : a.status === "accepted" ? -1 : 1));
+  const rejLoops = loops.filter((l) => l.status === "rejected");
   const acc = items.filter((i) => i.status === "accepted");
   const sug = items
     .filter((i) => i.status === "suggested")
@@ -250,6 +274,34 @@ export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, o
   return (
     <aside class="sidebar" aria-label="Variables and suggestions">
       <LlmPill llm={llm} />
+      {liveLoops.length > 0 ? (
+        <section>
+          <h2>
+            Lists <span class="count">{liveLoops.filter((l) => l.status === "accepted").length}</span>
+          </h2>
+          <p class="hint">
+            {!helm
+              ? "Repeated blocks. As a loop, the template takes any number of items."
+              : chartStyle === "exact"
+                ? "In the chart a list is a range loop over a list in values.yaml."
+                : "The helm create style keeps lists as plain text; use Exact for range loops."}
+          </p>
+          <ul class="list">
+            {liveLoops.map((l) => (
+              <LoopCard
+                key={l.id}
+                loop={l}
+                items={items}
+                loops={loops}
+                selected={l.id === selectedId}
+                onSelect={onSelect}
+                onStatus={onLoopStatus}
+                onUpdate={onLoopUpdate}
+              />
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <section>
         <h2>
           Variables <span class="count">{acc.length}</span>
@@ -263,6 +315,7 @@ export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, o
                 key={i.id}
                 item={i}
                 items={items}
+                loops={loops}
                 selected={i.id === selectedId}
                 onSelect={onSelect}
                 onStatus={onStatus}
@@ -291,6 +344,7 @@ export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, o
               key={i.id}
               item={i}
               items={items}
+              loops={loops}
               selected={i.id === selectedId}
               onSelect={onSelect}
               onStatus={onStatus}
@@ -306,6 +360,22 @@ export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, o
           <ul class="notices">
             {notices.map((n, idx) => (
               <li key={idx}>{n.message}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {rejLoops.length > 0 ? (
+        <section>
+          <h2>Rejected lists</h2>
+          <ul class="list">
+            {rejLoops.map((l) => (
+              <li key={l.id} class="rej">
+                <span class="name">{l.name}</span> <span class="muted">{l.items.length} items</span>
+                <button class="link" onClick={() => onLoopStatus(l.id, "suggested")}>
+                  restore
+                </button>
+              </li>
             ))}
           </ul>
         </section>

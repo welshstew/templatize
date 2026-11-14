@@ -13,6 +13,10 @@ from templatize.envfile import serialize_env
 from templatize.ir import (
     Candidate,
     IRValidationError,
+    Loop,
+    LoopCandidate,
+    LoopField,
+    LoopValues,
     Source,
     Span,
     TemplateIR,
@@ -20,9 +24,11 @@ from templatize.ir import (
     Variable,
     VarType,
 )
+from templatize.loops import compatible_candidates, singular
 from templatize.naming import infer_type
 from templatize.roundtrip import RoundTripResult, check_roundtrip
 from templatize.suggest import check_limits
+from templatize.valuesfile import serialize_values
 
 
 class VariableSpec(BaseModel):
@@ -43,6 +49,56 @@ class VariableSpec(BaseModel):
     them to per-example values files). Missing means "same as in the main text"."""
 
 
+class LoopFieldSpec(BaseModel):
+    name: str
+    spans: list[Span] = Field(min_length=1)
+    """One per item, in item order."""
+    type: VarType | None = None
+
+
+class LoopSpec(BaseModel):
+    """A repeated block chosen by a user/client (see :class:`templatize.ir.Loop`)."""
+
+    name: str
+    item: str | None = None
+    """Loop variable; defaults to the singular of ``name`` (``users`` -> ``user``)."""
+    items: list[Span] = Field(min_length=1)
+    fields: list[LoopFieldSpec] = Field(default_factory=list)
+    scalar: bool = False
+    """Items are single values: a list of strings. ``fields`` may be omitted."""
+    sources: list[Source] = Field(default_factory=lambda: [Source.MANUAL])
+    confidence: float | None = None
+    description: str | None = None
+    values_path: ValuesPath | None = None
+    """Helm charts only: where the list goes in values.yaml (default: from the name)."""
+    variant_values: list[LoopValues | None] | None = None
+    """The list in each example document (Helm charts write it to the example's values
+    file). Missing or None means "same as in the main text"."""
+
+
+def make_loop(text: str, spec: LoopSpec) -> Loop:
+    items = sorted(spec.items, key=lambda s: s.start)
+    fields = spec.fields
+    if spec.scalar and not fields:
+        fields = [LoopFieldSpec(name="value", spans=items)]
+    out: list[LoopField] = []
+    for f in fields:
+        spans = sorted(f.spans, key=lambda s: s.start)
+        first = text[spans[0].start : spans[0].end] if spans[0].end <= len(text) else ""
+        out.append(LoopField(name=f.name, type=f.type or infer_type(first), spans=spans))
+    return Loop(
+        name=spec.name,
+        item=spec.item or singular(spec.name),
+        items=items,
+        fields=out,
+        scalar=spec.scalar,
+        sources=spec.sources,
+        confidence=spec.confidence,
+        description=spec.description,
+        values_path=spec.values_path,
+    )
+
+
 class BuildResult(BaseModel):
     engine: str
     ir: TemplateIR
@@ -56,7 +112,7 @@ class BuildResult(BaseModel):
         return [self.template, self.env, *self.runner]
 
 
-def make_ir(text: str, specs: Sequence[VariableSpec]) -> TemplateIR:
+def make_ir(text: str, specs: Sequence[VariableSpec], loops: Sequence[LoopSpec] = ()) -> TemplateIR:
     check_limits(text)
     variables: list[Variable] = []
     for spec in specs:
@@ -83,7 +139,7 @@ def make_ir(text: str, specs: Sequence[VariableSpec]) -> TemplateIR:
                 values_path=spec.values_path,
             )
         )
-    return TemplateIR(text=text, variables=variables)
+    return TemplateIR(text=text, variables=variables, loops=[make_loop(text, lp) for lp in loops])
 
 
 def specs_from_candidates(candidates: Iterable[Candidate]) -> list[VariableSpec]:
@@ -103,6 +159,31 @@ def specs_from_candidates(candidates: Iterable[Candidate]) -> list[VariableSpec]
     ]
 
 
+def specs_from_loop_candidates(loops: Iterable[LoopCandidate]) -> list[LoopSpec]:
+    return [
+        LoopSpec(
+            name=lp.name,
+            item=lp.item,
+            items=lp.items,
+            fields=[LoopFieldSpec(name=f.name, spans=f.spans, type=f.type) for f in lp.fields],
+            scalar=lp.scalar,
+            sources=lp.sources,
+            confidence=lp.confidence,
+            description=lp.reason,
+            variant_values=lp.variant_values,
+        )
+        for lp in loops
+    ]
+
+
+def accept_suggestions(
+    candidates: Sequence[Candidate], loops: Sequence[LoopCandidate]
+) -> tuple[list[VariableSpec], list[LoopSpec]]:
+    """Specs for accepting ``loops`` and the scalar ``candidates`` compatible with them."""
+    kept = compatible_candidates(candidates, loops)
+    return specs_from_candidates(kept), specs_from_loop_candidates(loops)
+
+
 def build_ir(ir: TemplateIR, engine: str = "jinja2") -> BuildResult:
     emitter = get_emitter(engine)
     template = emitter.emit(ir)
@@ -110,14 +191,23 @@ def build_ir(ir: TemplateIR, engine: str = "jinja2") -> BuildResult:
         engine=engine,
         ir=ir,
         template=EmittedFile(path=emitter.template_filename, content=template),
-        env=EmittedFile(path=".env", content=serialize_env(ir)),
+        env=(
+            EmittedFile(path="values.yaml", content=serialize_values(ir))
+            if ir.loops
+            else EmittedFile(path=".env", content=serialize_env(ir))
+        ),
         runner=emitter.runner_files(ir),
         roundtrip=check_roundtrip(ir, emitter, template),
     )
 
 
-def build(text: str, variables: Sequence[VariableSpec], engine: str = "jinja2") -> BuildResult:
-    return build_ir(make_ir(text, variables), engine)
+def build(
+    text: str,
+    variables: Sequence[VariableSpec],
+    engine: str = "jinja2",
+    loops: Sequence[LoopSpec] = (),
+) -> BuildResult:
+    return build_ir(make_ir(text, variables, loops), engine)
 
 
 _WORDISH = re.compile(r"\w")

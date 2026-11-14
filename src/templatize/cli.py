@@ -17,8 +17,16 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-from templatize.build import BuildResult, VariableSpec, build, specs_from_candidates
-from templatize.bundle import make_chart_zip, make_zip
+from templatize.ansible import RoleError, build_role
+from templatize.build import (
+    BuildResult,
+    LoopSpec,
+    VariableSpec,
+    accept_suggestions,
+    build,
+    specs_from_candidates,
+)
+from templatize.bundle import make_chart_zip, make_role_zip, make_zip
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, apply_review, review_candidates
 from templatize.emitters import EMITTERS
 from templatize.helm import ChartError
@@ -47,6 +55,14 @@ def _print_candidates(res: SuggestResult, min_conf: float) -> None:
         )
         if c.variant_values:
             print(f"{'':>45}variants: {', '.join(_short(v, 20) for v in c.variant_values)}")
+    for lp in res.loops:
+        if lp.confidence < min_conf:
+            continue
+        fields = "scalar" if lp.scalar else ", ".join(f.name for f in lp.fields)
+        print(
+            f"loop {lp.confidence:.2f}  {lp.name} ({len(lp.items)} x {lp.item}: {fields})"
+            f"  {','.join(lp.detectors)}"
+        )
     for n in res.notices:
         where = f" at {n.span.start}" if n.span else ""
         print(f"note: {n.kind}{where}: {n.message}")
@@ -79,8 +95,11 @@ def _suggest(text: str, variants: list[str], llm_url: str | None) -> SuggestResu
     except LlmUnavailable as exc:
         print(f"warning: LLM review skipped: {exc}", file=sys.stderr)
         return res
-    return SuggestResult(
-        candidates=apply_review(res.candidates, review), notices=[*res.notices, *review.notices]
+    return res.model_copy(
+        update={
+            "candidates": apply_review(res.candidates, review),
+            "notices": [*res.notices, *review.notices],
+        }
     )
 
 
@@ -96,12 +115,20 @@ def cmd_suggest(args: argparse.Namespace) -> int:
 def cmd_build(args: argparse.Namespace) -> int:
     text = _read(args.file)
     specs: list[VariableSpec]
+    loops: list[LoopSpec] = []
     if args.vars:
         specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
     else:
         res = _suggest(text, [_read(v) for v in args.variant], args.llm_url)
-        specs = specs_from_candidates(_select(res, args.min_confidence))
-    result = build(text, specs, engine=args.engine)
+        chosen = _select(res, args.min_confidence)
+        if args.no_loops or args.loops:
+            specs = specs_from_candidates(chosen)
+        else:
+            found = [lp for lp in res.loops if lp.confidence >= args.min_confidence]
+            specs, loops = accept_suggestions(chosen, found)
+    if args.loops:
+        loops = TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())
+    result = build(text, specs, engine=args.engine, loops=loops)
     _write_outputs(result, args.output, args.zip)
 
     if args.json:
@@ -118,7 +145,9 @@ def cmd_build(args: argparse.Namespace) -> int:
     rt = result.roundtrip
     verdict = "PASS" if rt.ok else "FAIL"
     print(
-        f"round-trip: {verdict} ({len(result.ir.variables)} variables, {rt.expected_bytes} bytes)"
+        f"round-trip: {verdict} ({len(result.ir.variables)} variables"
+        + (f", {len(result.ir.loops)} loops" if result.ir.loops else "")
+        + f", {rt.expected_bytes} bytes)"
         + (f": {rt.error} at char {rt.first_difference}" if not rt.ok else ""),
         file=sys.stderr,
     )
@@ -129,14 +158,22 @@ def cmd_chart(args: argparse.Namespace) -> int:
     text = _read(args.file)
     variants = [_read(v) for v in args.variant]
     specs: list[VariableSpec]
+    loops: list[LoopSpec] = []
     if args.vars:
         specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
     else:
         res = _suggest(text, variants, args.llm_url)
-        specs = specs_from_candidates(_select(res, args.min_confidence))
+        chosen = _select(res, args.min_confidence)
+        if args.no_loops or args.style == "scaffold":
+            specs = specs_from_candidates(chosen)
+        else:
+            found = [lp for lp in res.loops if lp.confidence >= args.min_confidence]
+            specs, loops = accept_suggestions(chosen, found)
+    if args.loops:
+        loops = TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())
     labels = args.label or None
     result = build_helm_chart(
-        args.style, text, specs, variants, chart_name=args.name, variant_labels=labels
+        args.style, text, specs, variants, chart_name=args.name, variant_labels=labels, loops=loops
     )
     if args.output:
         root = args.output / result.chart_name
@@ -199,6 +236,15 @@ def make_parser() -> argparse.ArgumentParser:
     sel = b.add_mutually_exclusive_group(required=True)
     sel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
     sel.add_argument("--vars", help="JSON file with a list of variable specs")
+    b.add_argument(
+        "--loops",
+        help="JSON file with a list of loop specs (repeated blocks; values go to values.yaml)",
+    )
+    b.add_argument(
+        "--no-loops",
+        action="store_true",
+        help="with --accept-all: keep repeated blocks as separate variables",
+    )
     b.add_argument("--min-confidence", type=float, default=0.0)
     b.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
     b.add_argument("--engine", default="jinja2", choices=sorted(EMITTERS))
@@ -222,6 +268,12 @@ def make_parser() -> argparse.ArgumentParser:
     csel = c.add_mutually_exclusive_group(required=True)
     csel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
     csel.add_argument("--vars", help="JSON file with a list of variable specs")
+    c.add_argument("--loops", help="JSON file with a list of loop specs (exact style)")
+    c.add_argument(
+        "--no-loops",
+        action="store_true",
+        help="with --accept-all: keep repeated blocks as separate variables",
+    )
     c.add_argument("--name", help="chart name (default: the first workload's name)")
     c.add_argument(
         "--style",
@@ -236,7 +288,81 @@ def make_parser() -> argparse.ArgumentParser:
     c.add_argument("--zip", type=Path, help="write the chart as a zip")
     c.add_argument("--json", action="store_true", help="print the full result as JSON")
     c.set_defaults(func=cmd_chart)
+
+    r = sub.add_parser("role", help="generate an Ansible role that renders the document")
+    r.add_argument("file", help="input file ('-' for stdin)")
+    r.add_argument("--variant", action="append", default=[], help="another example of the document")
+    r.add_argument("--label", action="append", default=[], help="label for each --variant")
+    rsel = r.add_mutually_exclusive_group(required=True)
+    rsel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
+    rsel.add_argument("--vars", help="JSON file with a list of variable specs")
+    r.add_argument("--loops", help="JSON file with a list of loop specs")
+    r.add_argument(
+        "--no-loops",
+        action="store_true",
+        help="with --accept-all: keep repeated blocks as separate variables",
+    )
+    r.add_argument("--name", default="config", help="role name, also the variable prefix")
+    r.add_argument("--file-name", help="rendered file name (default: the input file's name)")
+    r.add_argument("--dest", help="default destination path (role variable <name>_dest)")
+    r.add_argument("--min-confidence", type=float, default=0.0)
+    r.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
+    r.add_argument("-o", "--output", type=Path, help="write the role (and playbook.yml) here")
+    r.add_argument("--zip", type=Path, help="write the role as a zip")
+    r.add_argument("--json", action="store_true", help="print the full result as JSON")
+    r.set_defaults(func=cmd_role)
     return p
+
+
+def cmd_role(args: argparse.Namespace) -> int:
+    text = _read(args.file)
+    variants = [_read(v) for v in args.variant]
+    specs: list[VariableSpec]
+    loops: list[LoopSpec] = []
+    if args.vars:
+        specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
+    else:
+        res = _suggest(text, variants, args.llm_url)
+        chosen = _select(res, args.min_confidence)
+        if args.no_loops:
+            specs = specs_from_candidates(chosen)
+        else:
+            found = [lp for lp in res.loops if lp.confidence >= args.min_confidence]
+            specs, loops = accept_suggestions(chosen, found)
+    if args.loops:
+        loops = TypeAdapter(list[LoopSpec]).validate_json(Path(args.loops).read_bytes())
+    filename = args.file_name or (Path(args.file).name if args.file != "-" else "config")
+    result = build_role(
+        text,
+        specs,
+        loops,
+        role_name=args.name,
+        filename=filename,
+        dest=args.dest,
+        variants=variants,
+        variant_labels=args.label or None,
+    )
+    if args.output:
+        for f in result.files:
+            target = args.output / f.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(f.content.encode("utf-8", "surrogatepass"))
+        print(f"wrote role {result.role_name!r} and playbook.yml to {args.output}", file=sys.stderr)
+    if args.zip:
+        args.zip.write_bytes(make_role_zip(result))
+        print(f"wrote {args.zip}", file=sys.stderr)
+    if args.json:
+        print(result.model_dump_json(indent=2))
+    elif not (args.output or args.zip):
+        for f in result.files:
+            sys.stdout.write(f"# --- {f.path}\n{f.content}")
+    checks = [("defaults", result.roundtrip)] + [
+        (f"example {i + 2}", rt) for i, rt in enumerate(result.example_roundtrips)
+    ]
+    for label, rt in checks:
+        verdict = "PASS" if rt.ok else f"FAIL: {rt.error}"
+        print(f"round-trip ({label}): {verdict}", file=sys.stderr)
+    return 0 if all(rt.ok for _, rt in checks) else 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -248,6 +374,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         InputLimitError,
         IRValidationError,
         ChartError,
+        RoleError,
         ValidationError,
         UnicodeDecodeError,
         OSError,

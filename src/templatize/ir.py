@@ -16,12 +16,13 @@ import itertools
 import keyword
 import re
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-IR_VERSION = 1
+IR_VERSION: Final = 2
 MAX_INPUT_CHARS = 1_000_000
+MAX_LOOP_ITEMS = 10_000
 MAX_VARIANTS = 3
 
 NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -174,6 +175,43 @@ class Candidate(BaseModel):
         return self
 
 
+class LoopFieldCandidate(BaseModel):
+    name: str
+    type: VarType = VarType.STRING
+    spans: list[Span] = Field(min_length=1)
+    """One per item, in item order."""
+
+
+LoopValues = list[dict[str, str]] | list[str]
+
+
+class LoopCandidate(BaseModel):
+    """A suggested repeated block (see :class:`Loop`)."""
+
+    id: str = ""
+    name: str
+    item: str
+    items: list[Span] = Field(min_length=1)
+    fields: list[LoopFieldCandidate] = Field(min_length=1)
+    scalar: bool = False
+    sources: list[Source]
+    detectors: list[str]
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str | None = None
+    variant_values: list[LoopValues | None] | None = None
+    """The list in each example document (None where the example has no such loop)."""
+
+    @model_validator(mode="after")
+    def _fill_id(self) -> LoopCandidate:
+        if not self.id:
+            self.id = "loop-" + candidate_id(self.name, self.items)
+        return self
+
+    @property
+    def region(self) -> Span:
+        return Span(start=self.items[0].start, end=self.items[-1].end)
+
+
 def candidate_id(value: str, spans: list[Span]) -> str:
     key = value + "|" + ",".join(f"{s.start}-{s.end}" for s in sorted(spans, key=_span_key))
     return hashlib.sha1(key.encode("utf-8", "surrogatepass")).hexdigest()[:12]
@@ -208,14 +246,60 @@ class Variable(BaseModel):
         return self.name.upper()
 
 
+class LoopField(BaseModel):
+    """One hole of a loop's items whose value differs per item (``user.email``)."""
+
+    name: str
+    type: VarType = VarType.STRING
+    spans: list[Span] = Field(min_length=1)
+    """Absolute, one per item, in item order."""
+
+
+class Loop(BaseModel):
+    """A repeated block: ``items`` share one shape (the skeleton) and are joined by an
+    identical separator. Rendered as ``{% for item in name %}...{% endfor %}``.
+
+    Holes in an item are the loop's fields (one span per item) and outer variables
+    (a :class:`Variable` with a span at the same place in every item). A *scalar*
+    loop has one field covering each whole item: its values are a list of strings.
+    """
+
+    name: str
+    item: str
+    items: list[Span] = Field(min_length=1, max_length=MAX_LOOP_ITEMS)
+    fields: list[LoopField] = Field(min_length=1)
+    scalar: bool = False
+    sources: list[Source] = Field(default_factory=lambda: [Source.MANUAL])
+    confidence: float | None = None
+    description: str | None = None
+    values_path: ValuesPath | None = None
+
+    @property
+    def region(self) -> Span:
+        return Span(start=self.items[0].start, end=self.items[-1].end)
+
+    def separator(self, text: str) -> str:
+        return text[self.items[0].end : self.items[1].start] if len(self.items) > 1 else ""
+
+    def values_of(self, text: str) -> list[dict[str, str]] | list[str]:
+        """The list this loop renders: one dict per item (or one string, if scalar)."""
+        if self.scalar:
+            return [text[s.start : s.end] for s in self.fields[0].spans]
+        return [
+            {f.name: text[f.spans[i].start : f.spans[i].end] for f in self.fields}
+            for i in range(len(self.items))
+        ]
+
+
 class IRValidationError(ValueError):
     pass
 
 
 class TemplateIR(BaseModel):
-    ir_version: Literal[1] = 1
+    ir_version: Literal[1, 2] = IR_VERSION
     text: str
     variables: list[Variable]
+    loops: list[Loop] = []
 
     @model_validator(mode="after")
     def _check(self) -> TemplateIR:
@@ -226,6 +310,15 @@ class TemplateIR(BaseModel):
         occ = [(s, v) for v in self.variables for s in v.spans]
         occ.sort(key=lambda p: p[0].start)
         return occ
+
+    def values(self) -> dict[str, str | list[dict[str, str]] | list[str]]:
+        """Render context that reproduces the text: variables and loop lists."""
+        out: dict[str, str | list[dict[str, str]] | list[str]] = {
+            v.name: v.value for v in self.variables
+        }
+        for lp in self.loops:
+            out[lp.name] = lp.values_of(self.text)
+        return out
 
 
 def validate_name(name: str) -> None:
@@ -278,3 +371,83 @@ def validate_ir(ir: TemplateIR) -> None:
             raise IRValidationError(
                 f"overlapping spans: {an!r} {a.start}-{a.end} and {bn!r} {b.start}-{b.end}"
             )
+    _validate_loops(ir, seen, [sp for sp, _ in all_spans])
+
+
+def _validate_loops(ir: TemplateIR, names: set[str], var_spans: list[Span]) -> None:
+    regions: list[tuple[Span, str]] = []
+    for lp in ir.loops:
+        for n in (lp.name, lp.item):
+            validate_name(n)
+            if n in names:
+                raise IRValidationError(f"loop name {n!r} is already used")
+            names.add(n)
+        if lp.values_path is not None:
+            validate_values_path(lp.values_path)
+        if lp.scalar and len(lp.fields) != 1:
+            raise IRValidationError(f"scalar loop {lp.name!r} must have exactly one field")
+        for a, b in itertools.pairwise(lp.items):
+            if b.start < a.end:
+                raise IRValidationError(f"items of loop {lp.name!r} overlap or are out of order")
+        if lp.items[-1].end > len(ir.text):
+            raise IRValidationError(f"loop {lp.name!r} is outside the text")
+        seps = {ir.text[a.end : b.start] for a, b in itertools.pairwise(lp.items)}
+        if len(seps) > 1:
+            raise IRValidationError(
+                f"loop {lp.name!r}: the text between items differs ({sorted(seps)!r})"
+            )
+        field_names = [f.name for f in lp.fields]
+        if len(set(field_names)) != len(field_names):
+            raise IRValidationError(f"loop {lp.name!r} has duplicate field names")
+        for f in lp.fields:
+            if not VALUES_KEY_RE.match(f.name) or f.name in RESERVED_NAMES:
+                raise IRValidationError(f"invalid field name {f.name!r} in loop {lp.name!r}")
+            if len(f.spans) != len(lp.items):
+                raise IRValidationError(
+                    f"field {f.name!r} of loop {lp.name!r} needs one span per item "
+                    f"({len(lp.items)}), got {len(f.spans)}"
+                )
+            for sp, it in zip(f.spans, lp.items, strict=True):
+                if not it.contains(sp):
+                    raise IRValidationError(
+                        f"field {f.name!r} of loop {lp.name!r}: span {sp.start}-{sp.end} is "
+                        f"outside its item {it.start}-{it.end}"
+                    )
+            if lp.scalar and any(sp != it for sp, it in zip(f.spans, lp.items, strict=True)):
+                raise IRValidationError(
+                    f"scalar loop {lp.name!r}: the field must cover each whole item"
+                )
+        for sp in var_spans:
+            if lp.region.overlaps(sp) and not any(it.contains(sp) for it in lp.items):
+                raise IRValidationError(
+                    f"a variable at {sp.start}-{sp.end} crosses the items of loop {lp.name!r}"
+                )
+        skeletons = {_skeleton(ir, lp, i) for i in range(len(lp.items))}
+        if len(skeletons) != 1:
+            raise IRValidationError(
+                f"items of loop {lp.name!r} do not have the same shape outside their fields"
+            )
+        regions.append((lp.region, lp.name))
+    regions.sort(key=lambda p: p[0].start)
+    for (a, an), (b, bn) in itertools.pairwise(regions):
+        if a.overlaps(b):
+            raise IRValidationError(f"loops {an!r} and {bn!r} overlap")
+
+
+def _skeleton(ir: TemplateIR, lp: Loop, i: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Item ``i`` as (literal pieces, hole names): equal for every item of a valid loop."""
+    item = lp.items[i]
+    holes: list[tuple[Span, str]] = [(f.spans[i], "." + f.name) for f in lp.fields]
+    for v in ir.variables:
+        holes += [(sp, v.name) for sp in v.spans if item.contains(sp)]
+    holes.sort(key=lambda h: h[0].start)
+    for (a, an), (b, bn) in itertools.pairwise(holes):
+        if a.overlaps(b):
+            raise IRValidationError(f"{an!r} and {bn!r} overlap in loop {lp.name!r}")
+    pieces: list[str] = []
+    pos = item.start
+    for sp, _ in holes:
+        pieces.append(ir.text[pos : sp.start])
+        pos = sp.end
+    pieces.append(ir.text[pos : item.end])
+    return tuple(pieces), tuple(n for _, n in holes)

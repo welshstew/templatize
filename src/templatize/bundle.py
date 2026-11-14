@@ -1,10 +1,11 @@
-"""Zip bundle: template, .env, runner script and a short README."""
+"""Zip bundle: template, values (.env or values.yaml), runner script and a short README."""
 
 from __future__ import annotations
 
 import io
 import zipfile
 
+from templatize.ansible import RoleResult
 from templatize.build import BuildResult
 from templatize.emitters import get_emitter
 from templatize.helm import ChartResult
@@ -17,7 +18,7 @@ README = """\
 Files:
 
 - `{template}`: the template ({engine})
-- `.env`: the extracted values ({count} variables)
+- `{values_file}`: the extracted values ({count})
 - {runners}
 
 Render it (needs [uv](https://docs.astral.sh/uv/), which installs the dependencies):
@@ -26,11 +27,17 @@ Render it (needs [uv](https://docs.astral.sh/uv/), which installs the dependenci
 
 Or with pip:
 
-    pip install jinja2 python-dotenv
+    pip install jinja2 {loader_pip}
     python render.py -o output.txt
 
-Edit `.env` to change values. Round-trip check when generated: {verdict}.
+Edit `{values_file}` to change values{lists}. Round-trip check when generated: {verdict}.
 """
+
+
+def _count(result: BuildResult) -> str:
+    n, k = len(result.ir.variables), len(result.ir.loops)
+    out = f"{n} variable{'' if n == 1 else 's'}"
+    return out + (f", {k} loop{'' if k == 1 else 's'}" if k else "")
 
 
 def bundle_readme(result: BuildResult) -> str:
@@ -38,7 +45,14 @@ def bundle_readme(result: BuildResult) -> str:
     return README.format(
         template=result.template.path,
         engine=result.engine,
-        count=len(result.ir.variables),
+        values_file=result.env.path,
+        count=_count(result),
+        loader_pip="pyyaml" if result.ir.loops else "python-dotenv",
+        lists=(
+            ": the lists are loops, so adding an item adds a block to the output"
+            if result.ir.loops
+            else ""
+        ),
         runners=", ".join(
             f"`{f.path}`: renders the template with the values" for f in result.runner
         )
@@ -96,6 +110,18 @@ def make_chart_zip(result: ChartResult) -> bytes:
             files.append(type(files[0])(path="README.md", content=chart_readme(result)))
         for f in files:
             info = zipfile.ZipInfo(f"{result.chart_name}/{f.path}", date_time=_FIXED_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            zf.writestr(info, f.content.encode("utf-8", "surrogatepass"))
+    return buf.getvalue()
+
+
+def make_role_zip(result: RoleResult) -> bytes:
+    """``<role>/...`` plus ``playbook.yml``: unzip into a directory and run the playbook."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for f in result.files:
+            info = zipfile.ZipInfo(f.path, date_time=_FIXED_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             zf.writestr(info, f.content.encode("utf-8", "surrogatepass"))

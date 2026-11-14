@@ -26,8 +26,11 @@ def test_every_sample_has_expectations() -> None:
 @pytest.mark.parametrize("sample", SAMPLES, ids=lambda s: s["id"])
 def test_sample_quality(sample: dict[str, Any]) -> None:
     exp = EXPECT[sample["id"]]
-    values = {c.value for c in suggest(sample["text"], sample["variants"]).candidates}
+    res = suggest(sample["text"], sample["variants"])
+    values = {c.value for c in res.candidates}
     missing = [str(v) for v in exp.get("want") or [] if str(v) not in values]
     noise = [str(v) for v in exp.get("reject") or [] if str(v) in values]
     assert not missing, f"not suggested: {missing}\nsuggested: {sorted(values)}"
     assert not noise, f"should not be suggested: {noise}"
+    found = {lp.name: len(lp.items) for lp in res.loops}
+    assert found == (exp.get("loops") or {}), f"loops: {found}"

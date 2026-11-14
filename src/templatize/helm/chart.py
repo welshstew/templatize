@@ -21,16 +21,16 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Sequence
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
-from templatize.build import VariableSpec, make_ir
+from templatize.build import LoopSpec, VariableSpec, make_ir
 from templatize.detectors.k8s import camel
 from templatize.emitters.base import EmittedFile, TemplateRenderError
 from templatize.helm import gotemplate, values
 from templatize.helm.coverage import CoverageReport
-from templatize.ir import Span, TemplateIR, Variable
+from templatize.ir import Loop, Span, TemplateIR, ValuesPath, Variable
 from templatize.k8s import Resource, parse_resources
 from templatize.roundtrip import EXCERPT_RADIUS
 from templatize.suggest import check_limits
@@ -101,6 +101,8 @@ class ChartResult(BaseModel):
     """Scaffold style: field-by-field comparison of real ``helm template`` output."""
     notes: list[str] = []
     """Things the user should know (e.g. what the scaffold cannot express)."""
+    loops: list[Loop] = []
+    """Exact style: lists rendered with ``range``, with their final ``values_path``."""
     filled: list[FilledValue] = []
     """Scaffold style: values that differ from the ``helm create`` defaults."""
 
@@ -137,7 +139,14 @@ def _template_names(resources: Sequence[Resource]) -> list[str]:
     return [f"templates/{n}.yaml" for n in names]
 
 
-def assign_paths(variables: Sequence[Variable], reserved: Iterable[str] = ()) -> list[list[str]]:
+class _Named(Protocol):
+    @property
+    def name(self) -> str: ...
+    @property
+    def values_path(self) -> ValuesPath | None: ...
+
+
+def assign_paths(variables: Sequence[_Named], reserved: Iterable[str] = ()) -> list[list[str]]:
     """Final values path per variable: its own, or derived from its name; made unique
     and prefix-free (``image`` and ``image.tag`` cannot both be values). ``reserved``
     top-level keys are already in use (the scaffold's own values)."""
@@ -228,6 +237,7 @@ def build_chart(
     *,
     chart_name: str | None = None,
     variant_labels: Sequence[str] | None = None,
+    loops: Sequence[LoopSpec] = (),
 ) -> ChartResult:
     check_limits(text, variants)
     resources = parse_resources(text)
@@ -250,15 +260,29 @@ def build_chart(
     if len(set(labels)) != len(labels):
         raise ChartError("example labels must be unique")
 
-    ir: TemplateIR = make_ir(text, specs)
-    paths = assign_paths(ir.variables)
+    ir: TemplateIR = make_ir(text, specs, loops)
+    paths = assign_paths([*ir.variables, *ir.loops])
     variables = [
-        v.model_copy(update={"values_path": p}) for v, p in zip(ir.variables, paths, strict=True)
+        v.model_copy(update={"values_path": p})
+        for v, p in zip(ir.variables, paths[: len(ir.variables)], strict=True)
     ]
+    chart_loops = [
+        lp.model_copy(update={"values_path": p})
+        for lp, p in zip(ir.loops, paths[len(ir.variables) :], strict=True)
+    ]
+    path_of = {v.name: v.values_path or [] for v in variables}
 
-    # Templates: one per resource chunk.
+    # Templates: one per resource chunk. Variable spans inside loop items are emitted
+    # with the loop (as $.Values references).
+    regions = [lp.region for lp in chart_loops]
     occurrences = sorted(
-        ((s, v.values_path or []) for v in variables for s in v.spans), key=lambda o: o[0].start
+        (
+            (s, v.values_path or [])
+            for v in variables
+            for s in v.spans
+            if not any(r.contains(s) for r in regions)
+        ),
+        key=lambda o: o[0].start,
     )
     templates: list[EmittedFile] = []
     infos: list[ChartTemplate] = []
@@ -274,15 +298,28 @@ def build_chart(
                     f"boundary between two resources"
                 )
             mine.append((Span(start=span.start - lo, end=span.end - lo), vpath))
+        ranges = []
+        for lp in chart_loops:
+            r = lp.region
+            if r.end <= lo or r.start >= hi:
+                continue
+            if r.start < lo or r.end > hi:
+                raise ChartError(f"the list {lp.name!r} crosses the boundary between two resources")
+            ranges.append(_range_emit(lp, variables, path_of, lo))
         try:
-            content = gotemplate.emit(text[lo:hi], mine)
+            content = gotemplate.emit(text[lo:hi], mine, ranges)
         except ValueError as exc:
             raise ChartError(str(exc)) from None
         templates.append(EmittedFile(path=path, content=content))
         infos.append(ChartTemplate(path=path, kind=res.kind, name=res.name, span=res.chunk))
 
     try:
-        main_tree = values.build_tree((v.values_path or [], v.value) for v in variables)
+        main_tree = values.build_tree(
+            [
+                *((v.values_path or [], v.value) for v in variables),
+                *((lp.values_path or [], lp.values_of(text)) for lp in chart_loops),
+            ]
+        )
     except values.ValuesError as exc:
         raise ChartError(str(exc)) from None
     values_yaml = values.dump(
@@ -294,11 +331,15 @@ def build_chart(
     by_name = {s.name: s for s in specs}
     overlays: list[tuple[str, str]] = []
     for i, label in enumerate(labels):
-        diff: list[tuple[list[str], str]] = []
+        diff: list[tuple[list[str], object]] = []
         for v in variables:
             vv = by_name[v.name].variant_values
             if vv is not None and i < len(vv) and vv[i] != v.value:
                 diff.append((v.values_path or [], vv[i]))
+        for lp, spec in zip(chart_loops, loops, strict=True):
+            lv = spec.variant_values
+            if lv is not None and i < len(lv) and lv[i] is not None and lv[i] != lp.values_of(text):
+                diff.append((lp.values_path or [], lv[i]))
         overlays.append(
             (
                 f"values-{label}.yaml",
@@ -335,5 +376,37 @@ def build_chart(
         *templates,
     ]
     return ChartResult(
-        chart_name=name, files=files, templates=infos, variables=variables, roundtrips=roundtrips
+        chart_name=name,
+        files=files,
+        templates=infos,
+        variables=variables,
+        roundtrips=roundtrips,
+        loops=chart_loops,
+    )
+
+
+def _range_emit(
+    lp: Loop, variables: Sequence[Variable], path_of: dict[str, list[str]], offset: int
+) -> gotemplate.RangeEmit:
+    """The loop's first item as a ``range`` body, relative to its resource chunk."""
+    first = lp.items[0]
+    holes: list[tuple[Span, str]] = [
+        (f.spans[0], f"${lp.item}" if lp.scalar else f"${lp.item}.{f.name}") for f in lp.fields
+    ]
+    holes += [
+        (s, "$.Values." + ".".join(path_of[v.name]))
+        for v in variables
+        for s in v.spans
+        if first.contains(s)
+    ]
+    holes.sort(key=lambda h: h[0].start)
+
+    def rel(s: Span) -> Span:
+        return Span(start=s.start - offset, end=s.end - offset)
+
+    return gotemplate.RangeEmit(
+        items=[rel(it) for it in lp.items],
+        var=lp.item,
+        path=lp.values_path or [],
+        holes=[(rel(s), a) for s, a in holes],
     )

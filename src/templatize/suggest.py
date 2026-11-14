@@ -8,8 +8,9 @@ from pydantic import BaseModel
 
 from templatize.detectors import DetectionContext, Detector, default_detectors
 from templatize.detectors.k8s import split_spans
-from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, Notice
+from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice
 from templatize.k8s import DocumentProfile, detect_profile, structural_spans
+from templatize.loops import detect_loops, explained_notices
 from templatize.merge import merge_candidates
 
 
@@ -22,6 +23,8 @@ class SuggestResult(BaseModel):
     notices: list[Notice]
     profile: DocumentProfile = DocumentProfile()
     """What kind of document this is (e.g. Kubernetes manifests: a Helm chart can be built)."""
+    loops: list[LoopCandidate] = []
+    """Repeated blocks (list items, SQL rows, keyword lines) that can become loops."""
 
 
 def check_limits(text: str, variants: Sequence[str] = ()) -> None:
@@ -64,4 +67,11 @@ def suggest(
                 ]
             )
         ]
-    return SuggestResult(candidates=merge_candidates(raw), notices=notices, profile=profile)
+    candidates = merge_candidates(raw)
+    loops = detect_loops(text, variants, taken_names=[c.name for c in candidates])
+    return SuggestResult(
+        candidates=candidates,
+        notices=explained_notices(notices, loops),
+        profile=profile,
+        loops=loops,
+    )

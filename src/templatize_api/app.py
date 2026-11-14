@@ -20,8 +20,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from templatize import __version__
+from templatize.ansible import RoleError, RoleResult, build_role
 from templatize.build import BuildResult, build
-from templatize.bundle import make_chart_zip, make_zip
+from templatize.bundle import make_chart_zip, make_role_zip, make_zip
 from templatize.detectors import HEURISTIC_DETECTORS, Detector, default_detectors
 from templatize.detectors import ner as ner_detector
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, check_health, review_candidates
@@ -50,6 +51,8 @@ from templatize_api.schemas import (
     LlmReviewResponse,
     RenderRequest,
     RenderResponse,
+    RoleRequest,
+    RoleResponse,
     SuggestRequest,
 )
 from templatize_api.settings import Settings
@@ -78,7 +81,7 @@ def _validation_message(exc: ValidationError) -> str:
 
 def _run_build(req: BuildRequest) -> BuildResult:
     try:
-        return build(req.text, req.variables, engine=req.engine)
+        return build(req.text, req.variables, engine=req.engine, loops=req.loops)
     except InputLimitError as exc:
         raise ApiError(413, str(exc)) from None
     except ValidationError as exc:
@@ -96,6 +99,7 @@ def _run_chart(req: ChartRequest) -> ChartResult:
             req.variants,
             chart_name=req.chart_name,
             variant_labels=req.variant_labels,
+            loops=req.loops,
         )
     except InputLimitError as exc:
         raise ApiError(413, str(exc)) from None
@@ -297,6 +301,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             env=result.env,
             runner=result.runner,
             variables=result.ir.variables,
+            loops=result.ir.loops,
             roundtrip=result.roundtrip,
         )
 
@@ -397,6 +402,61 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={
                 "content-disposition": f'attachment; filename="{result.chart_name}-chart.zip"',
                 "x-roundtrip": "pass" if result.ok else "fail",
+            },
+        )
+
+    def _run_role(req: RoleRequest) -> RoleResult:
+        try:
+            return build_role(
+                req.text,
+                req.variables,
+                req.loops,
+                role_name=req.role_name,
+                filename=req.filename,
+                dest=req.dest,
+                variants=req.variants,
+                variant_labels=req.variant_labels,
+            )
+        except InputLimitError as exc:
+            raise ApiError(413, str(exc)) from None
+        except ValidationError as exc:
+            raise ApiError(422, _validation_message(exc)) from None
+        except (RoleError, IRValidationError, ValueError) as exc:
+            raise ApiError(422, str(exc)) from None
+
+    @app.post("/role", tags=["ansible"], responses=ERRORS)
+    def role_endpoint(req: RoleRequest) -> RoleResponse:
+        """Package the template as an Ansible role (defaults, tasks, template, meta,
+        README, a vars file per example) plus a playbook.yml to try it. The round trip
+        renders the template with defaults/main.yml as Ansible reads it."""
+        result = _run_role(req)
+        ok = result.roundtrip.ok and all(rt.ok for rt in result.example_roundtrips)
+        return RoleResponse(
+            role_name=result.role_name,
+            files=result.files,
+            roundtrip=result.roundtrip,
+            example_roundtrips=result.example_roundtrips,
+            ok=ok,
+        )
+
+    @app.post(
+        "/role/download",
+        tags=["ansible"],
+        responses={
+            **ERRORS,
+            200: {"content": {"application/zip": {}}, "description": "Role and playbook as a zip"},
+        },
+        response_class=Response,
+    )
+    def role_download_endpoint(req: RoleRequest) -> Response:
+        """Same input as /role; returns ``<role>/...`` and ``playbook.yml`` as a zip."""
+        result = _run_role(req)
+        return Response(
+            content=make_role_zip(result),
+            media_type="application/zip",
+            headers={
+                "content-disposition": f'attachment; filename="{result.role_name}-role.zip"',
+                "x-roundtrip": "pass" if result.roundtrip.ok else "fail",
             },
         )
 

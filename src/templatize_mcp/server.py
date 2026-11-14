@@ -39,7 +39,8 @@ Typical flow:
 2. generate_template(text, variables=[{name, value}...]) -> template, .env,
    render.py and a round-trip verdict. Identify variables by `value` (the exact text);
    you never need character offsets. Omit `variables` to accept suggestions above
-   `min_confidence` automatically.
+   `min_confidence` automatically, including `loops`: repeated blocks (list items,
+   SQL rows) become {% for %} loops and their values go to values.yaml instead of .env.
 3. render_template / validate_template to try other values or check a template
    that you edited.
 Everything runs locally; nothing is stored or sent anywhere.
@@ -189,11 +190,54 @@ def create_server() -> MCPServer:
             )
 
     @server.tool(annotations=READ_ONLY)
+    def generate_ansible_role(
+        text: Annotated[str, Field(description="The document to render with Ansible.")],
+        variables: Annotated[
+            list[VariableInput] | None,
+            Field(description="Variables, as for generate_template. Omit to accept suggestions."),
+        ] = None,
+        variants: Annotated[
+            list[str] | None,
+            Field(
+                description="Other versions of the document: each becomes examples/<label>.yml.",
+                max_length=3,
+            ),
+        ] = None,
+        role_name: Annotated[
+            str, Field(description="Role name (lowercase, _); also the variable prefix.")
+        ] = "config",
+        filename: Annotated[str, Field(description="Name of the rendered file.")] = "config",
+        dest: Annotated[
+            str | None, Field(description="Default destination path (<role>_dest).")
+        ] = None,
+        variant_labels: Annotated[
+            list[str] | None, Field(description="Labels for the variants.", max_length=3)
+        ] = None,
+        min_confidence: Annotated[
+            float,
+            Field(ge=0, le=1, description="Threshold when accepting suggestions automatically."),
+        ] = 0.5,
+    ) -> tools.GenerateAnsibleRoleResult:
+        """Package the document as an Ansible role: templates/<file>.j2, defaults/main.yml
+        (variables prefixed with the role name; loops are lists), tasks/main.yml with
+        byte-exact template options, a vars file per variant, and a playbook.yml."""
+        with _tool_errors("generate_ansible_role"):
+            return tools.generate_ansible_role(
+                text, variables, variants, role_name, filename, dest, variant_labels, min_confidence
+            )
+
+    @server.tool(annotations=READ_ONLY)
     def render_template(
         template: Annotated[str, Field(description="Jinja2 template source.")],
         values: Annotated[
-            dict[str, str] | None,
-            Field(description="Values by variable name (or .env key; case-insensitive)."),
+            dict[str, tools.RenderValue] | None,
+            Field(
+                description=(
+                    "Values by variable name (or .env key; case-insensitive). A loop "
+                    "(`{% for user in users %}`) takes a list: of strings, or of objects "
+                    '(`[{"email": "a@x", "role": "admin"}]`).'
+                )
+            ),
         ] = None,
         newline: Annotated[
             Literal["\n", "\r\n", "\r"] | None,
@@ -209,7 +253,8 @@ def create_server() -> MCPServer:
     def validate_template(
         template: Annotated[str, Field(description="Jinja2 template source.")],
         values: Annotated[
-            dict[str, str] | None, Field(description="Values by variable name.")
+            dict[str, tools.RenderValue] | None,
+            Field(description="Values by variable name; loops take lists (see render_template)."),
         ] = None,
         expected_text: Annotated[
             str | None,

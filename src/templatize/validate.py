@@ -4,6 +4,7 @@ it reproduces an expected document byte for byte."""
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -38,7 +39,7 @@ class ValidationReport(BaseModel):
 
 def validate_template(
     template: str,
-    values: Mapping[str, str],
+    values: Mapping[str, Any],
     expected: str | None = None,
     engine: str = "jinja2",
 ) -> ValidationReport:
