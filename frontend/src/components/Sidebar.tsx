@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 
 import type { LlmStatus } from "../App.tsx";
 import type { Notice } from "../api.ts";
-import { canAccept, type Item, VAR_TYPES, validateName } from "../model.ts";
+import { canAccept, type Item, parseValuesPath, VAR_TYPES, validateName } from "../model.ts";
 
 interface Props {
   llm: LlmStatus;
@@ -12,6 +12,44 @@ interface Props {
   onSelect: (id: string | null) => void;
   onStatus: (ids: string[], status: Item["status"]) => void;
   onUpdate: (id: string, patch: Partial<Item>) => void;
+  /** Helm chart output: show and edit each variable's values.yaml path. */
+  helm?: boolean;
+}
+
+/** values.yaml key for an item: its own path, or derived from the name like the server does. */
+function derivedPath(item: Item): string {
+  if (item.valuesPath) return item.valuesPath.join(".");
+  const parts = item.name.split(/_+/).filter(Boolean);
+  return parts.length ? parts[0] + parts.slice(1).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("") : "value";
+}
+
+function ValuesPathField({ item, onUpdate }: { item: Item; onUpdate: Props["onUpdate"] }) {
+  const current = item.valuesPath?.join(".") ?? "";
+  const [draft, setDraft] = useState(current);
+  const { error } = parseValuesPath(draft);
+  return (
+    <>
+      <label class="value values-path">
+        <span>.Values.</span>
+        <input
+          value={draft}
+          placeholder={derivedPath(item)}
+          aria-label={`values.yaml path for ${item.name}`}
+          aria-invalid={error ? "true" : "false"}
+          spellcheck={false}
+          onClick={(e) => e.stopPropagation()}
+          onInput={(e) => setDraft((e.target as HTMLInputElement).value)}
+          onBlur={() => {
+            const parsed = parseValuesPath(draft);
+            if (parsed.error) setDraft(current);
+            else if ((parsed.path?.join(".") ?? "") !== current) onUpdate(item.id, { valuesPath: parsed.path });
+          }}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+        />
+      </label>
+      {error ? <div class="field-error">{error}</div> : null}
+    </>
+  );
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -41,11 +79,11 @@ function Sources({ item }: { item: Item }) {
   );
 }
 
-function VariableRow({ item, items, selected, onSelect, onStatus, onUpdate }: {
+function VariableRow({ item, items, selected, onSelect, onStatus, onUpdate, helm }: {
   item: Item;
   items: Item[];
   selected: boolean;
-} & Pick<Props, "onSelect" | "onStatus" | "onUpdate">) {
+} & Pick<Props, "onSelect" | "onStatus" | "onUpdate" | "helm">) {
   const [draft, setDraft] = useState(item.name);
   const error = draft === item.name ? null : validateName(draft, items, item.id);
   const commit = () => {
@@ -98,6 +136,7 @@ function VariableRow({ item, items, selected, onSelect, onStatus, onUpdate }: {
           onInput={(e) => onUpdate(item.id, { previewValue: (e.target as HTMLInputElement).value })}
         />
       </label>
+      {helm ? <ValuesPathField key={item.valuesPath?.join(".") ?? ""} item={item} onUpdate={onUpdate} /> : null}
       <div class="meta">
         {item.previewValue !== item.value ? (
           <span class="muted">
@@ -116,11 +155,11 @@ function VariableRow({ item, items, selected, onSelect, onStatus, onUpdate }: {
   );
 }
 
-function SuggestionRow({ item, items, selected, onSelect, onStatus }: {
+function SuggestionRow({ item, items, selected, onSelect, onStatus, helm }: {
   item: Item;
   items: Item[];
   selected: boolean;
-} & Pick<Props, "onSelect" | "onStatus">) {
+} & Pick<Props, "onSelect" | "onStatus" | "helm">) {
   const acceptable = canAccept(items, item.id);
   return (
     <li class={`sug ${selected ? "selected" : ""}`} onClick={() => onSelect(item.id)}>
@@ -161,6 +200,7 @@ function SuggestionRow({ item, items, selected, onSelect, onStatus }: {
         {item.spans.length > 1 ? <span class="muted">×{item.spans.length}</span> : null}
         <Sources item={item} />
       </div>
+      {helm ? <div class="meta muted values-hint">.Values.{derivedPath(item)}</div> : null}
       {item.llmNote ? <div class="meta llm-note">{item.llmNote}</div> : null}
       {item.variantValues?.length ? (
         <div class="meta muted">
@@ -199,7 +239,7 @@ function LlmPill({ llm }: { llm: LlmStatus }) {
   );
 }
 
-export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, onUpdate }: Props) {
+export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, onUpdate, helm = false }: Props) {
   const [showRejected, setShowRejected] = useState(false);
   const acc = items.filter((i) => i.status === "accepted");
   const sug = items
@@ -227,6 +267,7 @@ export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, o
                 onSelect={onSelect}
                 onStatus={onStatus}
                 onUpdate={onUpdate}
+                helm={helm}
               />
             ))}
           </ul>
@@ -253,6 +294,7 @@ export function Sidebar({ llm, items, notices, selectedId, onSelect, onStatus, o
               selected={i.id === selectedId}
               onSelect={onSelect}
               onStatus={onStatus}
+              helm={helm}
             />
           ))}
         </ul>

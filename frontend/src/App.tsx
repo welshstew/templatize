@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 
-import { api, type BuildResponse, type Info, type Notice, type RenderResponse } from "./api.ts";
+import {
+  api,
+  type BuildResponse,
+  type ChartResponse,
+  type DocumentProfile,
+  type Info,
+  type Notice,
+  type RenderResponse,
+  type RoundTrip,
+} from "./api.ts";
+import { ChartView } from "./components/ChartView.tsx";
 import { DocumentView, type TextSelection } from "./components/DocumentView.tsx";
 import { Editor } from "./components/Editor.tsx";
 import { OutputPanel } from "./components/OutputPanel.tsx";
@@ -45,6 +55,12 @@ function isAbort(e: unknown): boolean {
   return e instanceof DOMException && e.name === "AbortError";
 }
 
+function describeResources(profile: DocumentProfile): string {
+  const shown = profile.resources.slice(0, 4).map((r) => `${r.kind} ${r.name}`);
+  const more = profile.resources.length - shown.length;
+  return shown.join(", ") + (more > 0 ? ` and ${more} more` : "");
+}
+
 export function App() {
   const [info, setInfo] = useState<Info | null>(null);
   const [mode, setMode] = useState<"edit" | "review">("edit");
@@ -63,6 +79,13 @@ export function App() {
   const reviewedText = useRef("");
   const [llm, setLlm] = useState<LlmStatus>({ state: "off" });
   const llmAbort = useRef<AbortController | null>(null);
+  const [profile, setProfile] = useState<DocumentProfile | null>(null);
+  const [output, setOutput] = useState<"jinja" | "helm">("jinja");
+  const [helmDismissed, setHelmDismissed] = useState(false);
+  const [chart, setChart] = useState<ChartResponse | null>(null);
+  const [chartError, setChartError] = useState<string | null>(null);
+  const [chartName, setChartName] = useState("");
+  const reviewedVariants = useRef<string[]>([]);
 
   const limits = info?.limits ?? DEFAULT_LIMITS;
   const map = useMemo(() => new OffsetMap(text), [text]);
@@ -78,9 +101,17 @@ export function App() {
     setBusy(true);
     setError(null);
     try {
-      const res = await api.suggest(text, variants.filter((v) => v.length > 0));
+      const docVariants = variants.filter((v) => v.length > 0);
+      const res = await api.suggest(text, docVariants);
       setItems(itemsFromCandidates(res.candidates));
       setNotices(res.notices);
+      setProfile(res.profile ?? null);
+      setOutput("jinja");
+      setHelmDismissed(false);
+      setChart(null);
+      setChartError(null);
+      setChartName("");
+      reviewedVariants.current = docVariants;
       setSelectedId(null);
       setSelection(null);
       setBuild(null);
@@ -141,12 +172,15 @@ export function App() {
     setBuild(null);
     setPreview(null);
     setSelection(null);
+    setProfile(null);
+    setChart(null);
+    setOutput("jinja");
   };
 
   // Build (template, .env, render.py, round-trip) whenever the accepted variables change.
   useDebouncedEffect(
     (signal) => {
-      if (mode !== "review") return;
+      if (mode !== "review" || output === "helm") return;
       setBuildPending(true);
       api.build(text, specs, signal).then(
         (b) => {
@@ -161,7 +195,29 @@ export function App() {
         },
       );
     },
-    [mode, text, specsKey],
+    [mode, output, text, specsKey],
+    250,
+  );
+
+  // Helm chart (when chosen): rebuilt whenever the variables or the chart name change.
+  useDebouncedEffect(
+    (signal) => {
+      if (mode !== "review" || output !== "helm") return;
+      setBuildPending(true);
+      api.chart(text, reviewedVariants.current, specs, { chartName: chartName || null }, signal).then(
+        (c) => {
+          setChart(c);
+          setChartError(null);
+          setBuildPending(false);
+        },
+        (e) => {
+          if (isAbort(e)) return;
+          setChartError(e instanceof Error ? e.message : String(e));
+          setBuildPending(false);
+        },
+      );
+    },
+    [mode, output, text, specsKey, chartName],
     250,
   );
 
@@ -198,11 +254,14 @@ export function App() {
   const download = async () => {
     setError(null);
     try {
-      const blob = await api.download(text, specs);
+      const helm = output === "helm";
+      const blob = helm
+        ? await api.chartDownload(text, reviewedVariants.current, specs, { chartName: chartName || null })
+        : await api.download(text, specs);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "template-bundle.zip";
+      a.download = helm ? `${chart?.chart_name ?? "chart"}-chart.zip` : "template-bundle.zip";
       document.body.append(a);
       a.click();
       a.remove();
@@ -213,6 +272,12 @@ export function App() {
   };
 
   const acceptedCount = accepted(items).length;
+  const isK8s = profile?.format === "kubernetes";
+  const helm = output === "helm";
+  // One badge for the chart: the first failing round trip, or the input's.
+  const chartRT = chart ? (chart.roundtrips.find((x) => !x.ok) ?? chart.roundtrips[0]) : undefined;
+  const chartRoundTrip: RoundTrip | null = chartRT ? { ...chartRT, engine: "helm" } : null;
+  const chartScope = chart && chart.roundtrips.length > 1 ? `input + ${chart.roundtrips.length - 1} example${chart.roundtrips.length > 2 ? "s" : ""}` : null;
   const suggestedCount = items.filter((i) => i.status === "suggested").length;
 
   return (
@@ -226,14 +291,35 @@ export function App() {
         </h1>
         {mode === "review" ? (
           <>
-            <RoundTripBadge result={build?.roundtrip ?? null} pending={buildPending} />
+            <RoundTripBadge
+              result={helm ? chartRoundTrip : (build?.roundtrip ?? null)}
+              pending={buildPending}
+              scope={helm ? chartScope : null}
+              failedDocument={helm ? (chart?.roundtrips.find((r) => !r.ok)?.document ?? null) : null}
+            />
+            {isK8s ? (
+              <span class="seg" role="group" aria-label="Output format">
+                <button aria-pressed={!helm} class={!helm ? "on" : ""} onClick={() => setOutput("jinja")}>
+                  Jinja2 template
+                </button>
+                <button
+                  aria-pressed={helm}
+                  class={helm ? "on" : ""}
+                  disabled={!profile?.helm_suggested}
+                  title={profile?.helm_suggested ? "Build a Helm chart from these manifests" : (profile?.reason ?? "")}
+                  onClick={() => setOutput("helm")}
+                >
+                  Helm chart
+                </button>
+              </span>
+            ) : null}
             <span class="spacer" />
             <span class="muted counts">
               {acceptedCount} variable{acceptedCount === 1 ? "" : "s"} · {suggestedCount} pending
             </span>
             <button onClick={backToEdit}>Edit text</button>
-            <button class="primary" onClick={download} disabled={!build || buildPending}>
-              Download .zip
+            <button class="primary" onClick={download} disabled={(helm ? !chart || !!chartError : !build) || buildPending}>
+              {helm ? "Download chart" : "Download .zip"}
             </button>
           </>
         ) : (
@@ -250,6 +336,23 @@ export function App() {
           <button class="icon" aria-label="Dismiss" onClick={() => setError(null)}>
             ×
           </button>
+        </div>
+      ) : null}
+
+      {mode === "review" && profile?.helm_suggested && !helm && !helmDismissed ? (
+        <div class="banner helm" role="status">
+          <span>
+            <b>Kubernetes manifests detected</b>: {describeResources(profile)}. Turn them into a Helm chart with a
+            values.yaml{reviewedVariants.current.length ? " and a values file per example" : ""}?
+          </span>
+          <span class="row">
+            <button class="primary" onClick={() => setOutput("helm")}>
+              Build Helm chart
+            </button>
+            <button class="icon" aria-label="Dismiss" onClick={() => setHelmDismissed(true)}>
+              ×
+            </button>
+          </span>
         </div>
       ) : null}
 
@@ -282,7 +385,7 @@ export function App() {
           </section>
         </main>
       ) : (
-        <main class="review-layout">
+        <main class={`review-layout ${helm ? "helm" : ""}`}>
           <section class="doc-pane" aria-label="Document">
             <div class="pane-head">
               <h2>Document</h2>
@@ -313,14 +416,26 @@ export function App() {
             onSelect={setSelectedId}
             onStatus={onStatus}
             onUpdate={onUpdate}
+            helm={helm}
           />
-          <OutputPanel
-            build={build}
-            buildError={buildError}
-            preview={preview}
-            previewChanged={previewChanged(items)}
-            original={reviewedText.current}
-          />
+          {helm ? (
+            <ChartView
+              chart={chart}
+              error={chartError}
+              pending={buildPending}
+              documents={[reviewedText.current, ...reviewedVariants.current]}
+              chartName={chartName}
+              onChartName={setChartName}
+            />
+          ) : (
+            <OutputPanel
+              build={build}
+              buildError={buildError}
+              preview={preview}
+              previewChanged={previewChanged(items)}
+              original={reviewedText.current}
+            />
+          )}
         </main>
       )}
 

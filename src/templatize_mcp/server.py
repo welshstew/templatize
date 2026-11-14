@@ -134,6 +134,51 @@ def create_server() -> MCPServer:
             return tools.generate_template(text, variables, variants, min_confidence)
 
     @server.tool(annotations=READ_ONLY)
+    def generate_helm_chart(
+        text: Annotated[
+            str, Field(description="Kubernetes manifests (one resource per --- document).")
+        ],
+        variables: Annotated[
+            list[VariableInput] | None,
+            Field(
+                description=(
+                    "Variables to create, as for generate_template, plus an optional "
+                    '`values_path` (e.g. ["image", "tag"]) for values.yaml. Omit to accept '
+                    "suggestions automatically (they carry Helm-style paths)."
+                )
+            ),
+        ] = None,
+        variants: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "The same manifests for other environments: each becomes "
+                    "values-<label>.yaml with only the values that differ."
+                ),
+                max_length=3,
+            ),
+        ] = None,
+        chart_name: Annotated[
+            str | None, Field(description="Chart name; defaults to the first workload's name.")
+        ] = None,
+        variant_labels: Annotated[
+            list[str] | None,
+            Field(description="Labels for the variants, e.g. ['staging'].", max_length=3),
+        ] = None,
+        min_confidence: Annotated[
+            float,
+            Field(ge=0, le=1, description="Threshold when accepting suggestions automatically."),
+        ] = 0.5,
+    ) -> tools.GenerateHelmChartResult:
+        """Build a Helm chart from Kubernetes manifests: Chart.yaml, a nested values.yaml,
+        one template per resource, and a values file per variant. Verifies that the chart
+        renders back to the input (and each variant) byte for byte."""
+        with _tool_errors("generate_helm_chart"):
+            return tools.generate_helm_chart(
+                text, variables, variants, chart_name, variant_labels, min_confidence
+            )
+
+    @server.tool(annotations=READ_ONLY)
     def render_template(
         template: Annotated[str, Field(description="Jinja2 template source.")],
         values: Annotated[

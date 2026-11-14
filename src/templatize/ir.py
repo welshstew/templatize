@@ -16,7 +16,7 @@ import itertools
 import keyword
 import re
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -25,6 +25,13 @@ MAX_INPUT_CHARS = 1_000_000
 MAX_VARIANTS = 3
 
 NAME_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
+# One segment of a nested values path (Helm ``.Values.a.b``): a Go identifier.
+VALUES_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+MAX_VALUES_DEPTH = 8
+
+ValuesPath = Annotated[list[str], Field(min_length=1, max_length=MAX_VALUES_DEPTH)]
+"""Where a variable lives in a nested values file, e.g. ``["image", "tag"]``.
+Optional metadata: engines with flat values (Jinja2 + ``.env``) ignore it."""
 
 # Names that would collide with Jinja2 literals, operators or default globals, or
 # that are Python keywords (render.py passes values as keyword-style context).
@@ -106,11 +113,13 @@ class VarType(StrEnum):
     MAC = "mac"
 
 
-NameOrigin = Literal["manual", "key", "llm", "context", "type", "generic"]
+NameOrigin = Literal["manual", "schema", "key", "llm", "context", "type", "generic"]
 
 # Higher is better when choosing between names proposed by different detectors.
+# "schema": the field's meaning is known (e.g. a Kubernetes Deployment's replicas).
 NAME_ORIGIN_RANK: dict[str, int] = {
-    "manual": 6,
+    "manual": 7,
+    "schema": 6,
     "key": 5,
     "llm": 4,
     "context": 3,
@@ -156,6 +165,7 @@ class Candidate(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str | None = None
     variant_values: list[str] | None = None
+    values_path: ValuesPath | None = None
 
     @model_validator(mode="after")
     def _fill_id(self) -> Candidate:
@@ -191,6 +201,7 @@ class Variable(BaseModel):
     sources: list[Source] = Field(default_factory=lambda: [Source.MANUAL])
     confidence: float | None = None
     description: str | None = None
+    values_path: ValuesPath | None = None
 
     @property
     def env_key(self) -> str:
@@ -227,6 +238,15 @@ def validate_name(name: str) -> None:
         raise IRValidationError(f"variable name {name!r} is reserved")
 
 
+def validate_values_path(path: list[str]) -> None:
+    for key in path:
+        if not VALUES_KEY_RE.match(key):
+            raise IRValidationError(
+                f"invalid values key {key!r} in {'.'.join(path)!r}: use letters, digits and _, "
+                "not starting with a digit"
+            )
+
+
 def validate_ir(ir: TemplateIR) -> None:
     if len(ir.text) > MAX_INPUT_CHARS:
         raise IRValidationError(f"input exceeds {MAX_INPUT_CHARS} characters")
@@ -234,6 +254,8 @@ def validate_ir(ir: TemplateIR) -> None:
     all_spans: list[tuple[Span, str]] = []
     for var in ir.variables:
         validate_name(var.name)
+        if var.values_path is not None:
+            validate_values_path(var.values_path)
         if var.name in seen:
             raise IRValidationError(f"duplicate variable name {var.name!r}")
         seen.add(var.name)

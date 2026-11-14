@@ -1,0 +1,317 @@
+"""Build a Helm chart from Kubernetes manifests and accepted variables.
+
+Layout::
+
+    <chart>/
+      Chart.yaml
+      values.yaml               # every variable, nested by its values path
+      values-<label>.yaml       # per example document: only the keys that differ
+      .helmignore
+      templates/<kind>.yaml     # one per resource, in input order
+
+Round trip: rendering every template with ``values.yaml`` and concatenating them
+must reproduce the input byte for byte. For each example, rendering with
+``values.yaml`` merged with ``values-<label>.yaml`` must reproduce that example.
+Rendering uses what the values file *reads back as*, so a quoting bug in the values
+writer fails the check instead of slipping through.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Sequence
+
+from pydantic import BaseModel
+
+from templatize.build import VariableSpec, make_ir
+from templatize.detectors.k8s import camel
+from templatize.emitters.base import EmittedFile, TemplateRenderError
+from templatize.helm import gotemplate, values
+from templatize.ir import Span, TemplateIR, Variable
+from templatize.k8s import Resource, parse_resources
+from templatize.roundtrip import EXCERPT_RADIUS
+from templatize.suggest import check_limits
+
+CHART_NAME_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,51}[a-z0-9])?$")
+LABEL_RE = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,30}[a-z0-9])?$")
+_NON_NAME = re.compile(r"[^a-z0-9-]+")
+
+HELMIGNORE = """\
+# Patterns to ignore when building packages.
+.DS_Store
+.git/
+.gitignore
+.vscode/
+.idea/
+*.swp
+*.bak
+*.tmp
+*~
+"""
+
+
+class ChartError(ValueError):
+    pass
+
+
+class ChartTemplate(BaseModel):
+    path: str
+    kind: str
+    name: str
+    span: Span
+    """The part of the input this template reproduces."""
+
+
+class ChartRoundTrip(BaseModel):
+    label: str
+    """``values.yaml`` or the example's values file."""
+    document: str
+    """``input`` or ``example N``."""
+    ok: bool
+    expected_bytes: int
+    actual_bytes: int | None = None
+    first_difference: int | None = None
+    expected_excerpt: str | None = None
+    actual_excerpt: str | None = None
+    error: str | None = None
+
+
+class ChartResult(BaseModel):
+    chart_name: str
+    files: list[EmittedFile]
+    """Paths are relative to the chart directory."""
+    templates: list[ChartTemplate]
+    variables: list[Variable]
+    """With final (unique) ``values_path`` filled in."""
+    roundtrips: list[ChartRoundTrip]
+
+    @property
+    def ok(self) -> bool:
+        return all(r.ok for r in self.roundtrips)
+
+    def file(self, path: str) -> EmittedFile:
+        return next(f for f in self.files if f.path == path)
+
+
+def default_chart_name(resources: Sequence[Resource]) -> str:
+    workload = next(
+        (r for r in resources if r.kind in ("Deployment", "StatefulSet", "DaemonSet", "CronJob")),
+        resources[0] if resources else None,
+    )
+    raw = workload.name.lower() if workload else "chart"
+    name = _NON_NAME.sub("-", raw).strip("-")[:53].strip("-")
+    return name if CHART_NAME_RE.match(name) else "chart"
+
+
+def _template_names(resources: Sequence[Resource]) -> list[str]:
+    kinds = [r.kind.lower() for r in resources]
+    names: list[str] = []
+    for r, kind in zip(resources, kinds, strict=True):
+        base = kind if kinds.count(kind) == 1 else f"{kind}-{r.name.lower()}"
+        base = _NON_NAME.sub("-", base).strip("-") or "resource"
+        candidate, n = base, 2
+        while candidate in names:
+            candidate, n = f"{base}-{n}", n + 1
+        names.append(candidate)
+    return [f"templates/{n}.yaml" for n in names]
+
+
+def assign_paths(variables: Sequence[Variable]) -> list[list[str]]:
+    """Final values path per variable: its own, or derived from its name; made unique
+    and prefix-free (``image`` and ``image.tag`` cannot both be values)."""
+    taken: list[list[str]] = []
+
+    def clash(p: list[str]) -> list[str] | None:
+        return next((t for t in taken if t[: len(p)] == p or p[: len(t)] == t), None)
+
+    for var in variables:
+        path = list(var.values_path) if var.values_path else [camel(var.name)]
+        candidate, n = path, 2
+        while (other := clash(candidate)) is not None:
+            if n > len(variables) + 2:  # cannot happen: each suffix is new
+                raise ChartError(f"cannot find a free values path for {var.name!r}")
+            # Rename at the deepest segment the two paths share, so "image.tag" next to
+            # a value "image" becomes "image2.tag", not the still-clashing "image.tag2".
+            i = min(len(other), len(path)) - 1
+            candidate, n = [*path[:i], f"{path[i]}{n}", *path[i + 1 :]], n + 1
+        taken.append(candidate)
+    return taken
+
+
+def _compare(label: str, document: str, expected: str, rendered: str) -> ChartRoundTrip:
+    exp_b, act_b = (
+        expected.encode("utf-8", "surrogatepass"),
+        rendered.encode("utf-8", "surrogatepass"),
+    )
+    if exp_b == act_b:
+        return ChartRoundTrip(
+            label=label,
+            document=document,
+            ok=True,
+            expected_bytes=len(exp_b),
+            actual_bytes=len(act_b),
+        )
+    idx = next(
+        (i for i, (x, y) in enumerate(zip(expected, rendered, strict=False)) if x != y),
+        min(len(expected), len(rendered)),
+    )
+    lo = max(0, idx - EXCERPT_RADIUS)
+    return ChartRoundTrip(
+        label=label,
+        document=document,
+        ok=False,
+        expected_bytes=len(exp_b),
+        actual_bytes=len(act_b),
+        first_difference=idx,
+        expected_excerpt=expected[lo : idx + EXCERPT_RADIUS],
+        actual_excerpt=rendered[lo : idx + EXCERPT_RADIUS],
+        error="rendered chart differs from the "
+        + ("input" if document == "input" else document)
+        + (
+            ""
+            if document == "input"
+            else ": it differs outside the accepted variables, or a variable is missing"
+        ),
+    )
+
+
+def render_templates(templates: Sequence[EmittedFile], tree: values.Tree) -> list[EmittedFile]:
+    return [EmittedFile(path=t.path, content=gotemplate.render(t.content, tree)) for t in templates]
+
+
+def _check(
+    label: str, document: str, expected: str, templates: Sequence[EmittedFile], *texts: str
+) -> ChartRoundTrip:
+    try:
+        tree: values.Tree = {}
+        for i, t in enumerate(texts):
+            tree = values.merge(tree, values.load(t, label if i else "values.yaml"))
+        rendered = "".join(f.content for f in render_templates(templates, tree))
+    except (TemplateRenderError, values.ValuesError) as exc:
+        return ChartRoundTrip(
+            label=label,
+            document=document,
+            ok=False,
+            expected_bytes=len(expected.encode("utf-8", "surrogatepass")),
+            error=str(exc),
+        )
+    return _compare(label, document, expected, rendered)
+
+
+def build_chart(
+    text: str,
+    specs: Sequence[VariableSpec],
+    variants: Sequence[str] = (),
+    *,
+    chart_name: str | None = None,
+    variant_labels: Sequence[str] | None = None,
+) -> ChartResult:
+    check_limits(text, variants)
+    resources = parse_resources(text)
+    if not resources:
+        raise ChartError(
+            "a Helm chart needs Kubernetes manifests: YAML documents with apiVersion, kind "
+            "and metadata.name (each resource in its own --- document)"
+        )
+    name = chart_name or default_chart_name(resources)
+    if not CHART_NAME_RE.match(name):
+        raise ChartError(
+            f"invalid chart name {name!r}: lowercase letters, digits and '-', at most 53 characters"
+        )
+    labels = list(variant_labels or [f"example-{i + 2}" for i in range(len(variants))])
+    if len(labels) != len(variants):
+        raise ChartError("give one label per example document")
+    for label in labels:
+        if not LABEL_RE.match(label):
+            raise ChartError(f"invalid example label {label!r}: lowercase letters, digits and '-'")
+    if len(set(labels)) != len(labels):
+        raise ChartError("example labels must be unique")
+
+    ir: TemplateIR = make_ir(text, specs)
+    paths = assign_paths(ir.variables)
+    variables = [
+        v.model_copy(update={"values_path": p}) for v, p in zip(ir.variables, paths, strict=True)
+    ]
+
+    # Templates: one per resource chunk.
+    occurrences = sorted(
+        ((s, v.values_path or []) for v in variables for s in v.spans), key=lambda o: o[0].start
+    )
+    templates: list[EmittedFile] = []
+    infos: list[ChartTemplate] = []
+    for res, path in zip(resources, _template_names(resources), strict=True):
+        lo, hi = res.chunk.start, res.chunk.end
+        mine: list[tuple[Span, list[str]]] = []
+        for span, vpath in occurrences:
+            if span.end <= lo or span.start >= hi:
+                continue
+            if span.start < lo or span.end > hi:
+                raise ChartError(
+                    f"variable {'.'.join(vpath)!r} at {span.start}-{span.end} crosses the "
+                    f"boundary between two resources"
+                )
+            mine.append((Span(start=span.start - lo, end=span.end - lo), vpath))
+        try:
+            content = gotemplate.emit(text[lo:hi], mine)
+        except ValueError as exc:
+            raise ChartError(str(exc)) from None
+        templates.append(EmittedFile(path=path, content=content))
+        infos.append(ChartTemplate(path=path, kind=res.kind, name=res.name, span=res.chunk))
+
+    try:
+        main_tree = values.build_tree((v.values_path or [], v.value) for v in variables)
+    except values.ValuesError as exc:
+        raise ChartError(str(exc)) from None
+    values_yaml = values.dump(
+        main_tree,
+        header=f"Default values for {name}.\nGenerated by templatize from the input manifests.",
+    )
+
+    # Per-example overlays: only the variables whose value differs.
+    by_name = {s.name: s for s in specs}
+    overlays: list[tuple[str, str]] = []
+    for i, label in enumerate(labels):
+        diff: list[tuple[list[str], str]] = []
+        for v in variables:
+            vv = by_name[v.name].variant_values
+            if vv is not None and i < len(vv) and vv[i] != v.value:
+                diff.append((v.values_path or [], vv[i]))
+        overlays.append(
+            (
+                f"values-{label}.yaml",
+                values.dump(
+                    values.build_tree(diff),
+                    header=f"Values for {label} (example {i + 2}): only what differs from values.yaml.",
+                ),
+            )
+        )
+
+    roundtrips = [_check("values.yaml", "input", text, templates, values_yaml)]
+    for i, (fname, overlay) in enumerate(overlays):
+        roundtrips.append(
+            _check(fname, f"example {i + 2}", variants[i], templates, values_yaml, overlay)
+        )
+
+    app_version = next(
+        (v.value for v in variables if (v.values_path or [])[-2:] == ["image", "tag"]), "1.0.0"
+    )
+    chart_yaml = (
+        "apiVersion: v2\n"
+        f"name: {name}\n"
+        f"description: A Helm chart for {len(resources)} Kubernetes "
+        f"resource{'s' if len(resources) != 1 else ''}, generated by templatize.\n"
+        "type: application\n"
+        "version: 0.1.0\n"
+        f"appVersion: {json.dumps(app_version, ensure_ascii=False)}\n"
+    )
+    files = [
+        EmittedFile(path="Chart.yaml", content=chart_yaml),
+        EmittedFile(path="values.yaml", content=values_yaml),
+        *(EmittedFile(path=f, content=c) for f, c in overlays),
+        EmittedFile(path=".helmignore", content=HELMIGNORE),
+        *templates,
+    ]
+    return ChartResult(
+        chart_name=name, files=files, templates=infos, variables=variables, roundtrips=roundtrips
+    )

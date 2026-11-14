@@ -96,6 +96,9 @@ def test_check_ui(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     js.write_text("console.log(1)")
     assert offline_check.check_ui("http://test") is None
-    js.write_text('fetch("https://telemetry.example.com/x")')
+    # Sample documents mention RFC 2606 domains as text: allowed.
+    js.write_text('const sample = "url: https://app.example.com/x";')
+    assert offline_check.check_ui("http://test") is None
+    js.write_text('fetch("https://telemetry.acme.io/x")')
     err = offline_check.check_ui("http://test")
-    assert err is not None and "telemetry.example.com" in err
+    assert err is not None and "telemetry.acme.io" in err

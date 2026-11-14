@@ -9,7 +9,7 @@ NER_IMAGE ?= templatize-ner:dev
 OFFLINE = $(COMPOSE) -p templatize-offline -f compose.yaml -f compose.offline.yaml
 PLATFORMS ?= linux/amd64,linux/arm64
 
-PHONY_EXTRA = frontend frontend-dev frontend-test check-all up-llm model llm-image offline-test-llm ner-image ner-model up-ner
+PHONY_EXTRA = frontend frontend-dev frontend-test check-all up-llm up-llm-gpu up-llm-gpu-large model model-large llm-image offline-test-llm ner-image ner-model up-ner
 .PHONY: $(PHONY_EXTRA) install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
 
 install:
@@ -80,9 +80,24 @@ up:
 up-llm: model
 	COMPOSE_PROFILES=llm $(COMPOSE) up -d --build
 
+# App + local LLM detector on an NVIDIA GPU (needs the NVIDIA Container Toolkit).
+# --force-recreate: podman-compose keeps old containers when only the image or env changes.
+GPU_LLM = COMPOSE_PROFILES=llm $(COMPOSE) -f compose.yaml -f compose.gpu.yaml
+up-llm-gpu: model
+	$(GPU_LLM) up -d --build --force-recreate
+
+# Same, with the larger model (needs ~21 GB of VRAM).
+up-llm-gpu-large: model-large
+	TEMPLATIZE_LLM_MODEL=$(LARGE_MODEL) $(GPU_LLM) up -d --build --force-recreate
+
 # Default GGUF for the LLM detector, pinned revision + SHA-256 verified (~2.5 GB).
 model:
 	./scripts/download-model.sh models
+
+# Larger GGUF for a 24 GB GPU, pinned revision + SHA-256 verified (~18.6 GB).
+LARGE_MODEL = Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf
+model-large:
+	./scripts/download-model.sh models large
 
 ner-image:
 	$(CONTAINER) build -f docker/ner.Dockerfile -t $(NER_IMAGE) .

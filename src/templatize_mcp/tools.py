@@ -22,7 +22,9 @@ from templatize.detectors import Detector, default_detectors
 from templatize.detectors import ner as ner_detector
 from templatize.emitters import TemplateRenderError, get_emitter
 from templatize.emitters.jinja2 import Jinja2Emitter
+from templatize.helm import ChartError, ChartRoundTrip, build_chart
 from templatize.ir import MAX_INPUT_CHARS, Candidate, IRValidationError, Notice, VarType
+from templatize.k8s import DocumentProfile
 from templatize.roundtrip import RoundTripResult
 from templatize.suggest import SuggestResult, check_limits, suggest
 from templatize.validate import validate_template as core_validate
@@ -43,13 +45,22 @@ class ToolInputError(ValueError):
     """Raised for bad arguments; the SDK reports it to the client as a tool error."""
 
 
+NEXT_STEP = (
+    "Call generate_template with the text and the variables to keep, e.g. "
+    '[{"name": "db_host", "value": "db01.example.com"}]. Rename freely.'
+)
+NEXT_STEP_HELM = (
+    "These are Kubernetes manifests: offer the user a Helm chart (generate_helm_chart), "
+    "or a Jinja2 template (generate_template). Candidates carry a values_path for the chart."
+)
+
+
 class SuggestParametersResult(BaseModel):
     candidates: list[Candidate]
     notices: list[Notice]
-    next_step: str = (
-        "Call generate_template with the text and the variables to keep, e.g. "
-        '[{"name": "db_host", "value": "db01.example.com"}]. Rename freely.'
-    )
+    profile: DocumentProfile = DocumentProfile()
+    """format="kubernetes" with helm_suggested=true means a Helm chart can be generated."""
+    next_step: str = NEXT_STEP
 
 
 class GeneratedVariable(BaseModel):
@@ -106,6 +117,63 @@ def suggest_parameters(
     return SuggestParametersResult(
         candidates=[c for c in res.candidates if c.confidence >= min_confidence],
         notices=res.notices,
+        profile=res.profile,
+        next_step=NEXT_STEP_HELM if res.profile.helm_suggested else NEXT_STEP,
+    )
+
+
+class ChartFile(BaseModel):
+    path: str
+    content: str
+
+
+class GenerateHelmChartResult(BaseModel):
+    chart_name: str
+    files: list[ChartFile]
+    """Chart.yaml, values.yaml, values-<label>.yaml per variant, .helmignore, templates/*."""
+    variables: list[GeneratedVariable]
+    values_paths: dict[str, str]
+    """Variable name -> dotted values.yaml path."""
+    roundtrips: list[ChartRoundTrip]
+    """ok=true for each: the chart renders back to the input (and to each variant)."""
+    used_suggestions: bool
+
+
+def generate_helm_chart(
+    text: str,
+    variables: list[VariableInput] | None = None,
+    variants: list[str] | None = None,
+    chart_name: str | None = None,
+    variant_labels: list[str] | None = None,
+    min_confidence: float = 0.5,
+) -> GenerateHelmChartResult:
+    variants = variants or []
+    try:
+        check_limits(text, variants)
+        if variables is None:
+            cands = [
+                c for c in _suggest(text, variants).candidates if c.confidence >= min_confidence
+            ]
+            specs = specs_from_candidates(cands)
+        else:
+            specs = resolve_inputs(text, variables)
+        result = build_chart(
+            text, specs, variants, chart_name=chart_name, variant_labels=variant_labels
+        )
+    except (VariableResolutionError, IRValidationError, ChartError, ValueError) as exc:
+        raise ToolInputError(str(exc)) from None
+    return GenerateHelmChartResult(
+        chart_name=result.chart_name,
+        files=[ChartFile(path=f.path, content=f.content) for f in result.files],
+        variables=[
+            GeneratedVariable(
+                name=v.name, env_key=v.env_key, type=v.type, value=v.value, occurrences=len(v.spans)
+            )
+            for v in result.variables
+        ],
+        values_paths={v.name: ".".join(v.values_path or []) for v in result.variables},
+        roundtrips=result.roundtrips,
+        used_suggestions=variables is None,
     )
 
 

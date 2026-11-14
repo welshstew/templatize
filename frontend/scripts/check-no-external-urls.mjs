@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Fails if the built frontend references anything outside its own origin.
-// XML namespace identifiers (never fetched) are allowed.
+// XML namespace identifiers (never fetched) are allowed, as are the reserved
+// documentation domains of RFC 2606 (example.com/.net/.org), which only appear as
+// text inside the built-in sample documents.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -9,6 +11,7 @@ const ALLOWED = [
   /^https?:\/\/www\.w3\.org\/(1999|2000)\/(xhtml|svg|xlink)$/,
   /^https?:\/\/www\.w3\.org\/1998\/Math\/MathML$/,
   /^https?:\/\/www\.w3\.org\/XML\/1998\/namespace$/,
+  /^https?:\/\/(?:[^@/\s]+@)?(?:[a-z0-9-]+\.)*example\.(?:com|net|org)(?:[:/?#]|$)/,
 ];
 // absolute URLs, protocol-relative URLs in src/href/url(), and @import of remote CSS
 const PATTERNS = [

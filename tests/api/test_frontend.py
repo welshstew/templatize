@@ -18,6 +18,8 @@ ALLOWED = [
     re.compile(r"^https?://www\.w3\.org/(1999|2000)/(xhtml|svg|xlink)$"),
     re.compile(r"^https?://www\.w3\.org/1998/Math/MathML$"),
     re.compile(r"^https?://www\.w3\.org/XML/1998/namespace$"),
+    # RFC 2606 documentation domains, used only as text in the built-in samples.
+    re.compile(r"^https?://(?:[^@/\s]+@)?(?:[a-z0-9-]+\.)*example\.(?:com|net|org)(?:[:/?#]|$)"),
 ]
 PATTERNS = [
     re.compile(r"\bhttps?://[^\s\"'`)<>\\]+"),
@@ -54,10 +56,23 @@ def test_scanner_catches_external_references(tmp_path: Path) -> None:
     (tmp_path / "a.css").write_text(
         "@import url('https://x.io/a.css'); .x{background:url(//c.dn/i.png)}"
     )
-    (tmp_path / "ok.js").write_text('createElementNS("http://www.w3.org/2000/svg","svg")')
+    (tmp_path / "ok.js").write_text(
+        'createElementNS("http://www.w3.org/2000/svg","svg"); "https://app.example.com/x"'
+    )
+    (tmp_path / "lookalike.js").write_text(
+        '"https://example.com.evil.net/" "https://notexample.com/"'
+    )
     found = "\n".join(external_references(tmp_path))
-    for ref in ("fonts.googleapis.com", "//cdn.example.com", "https://x.io/a.css", "//c.dn/i.png"):
+    for ref in (
+        "fonts.googleapis.com",
+        "//cdn.example.com",
+        "https://x.io/a.css",
+        "//c.dn/i.png",
+        "example.com.evil.net",
+        "notexample.com",
+    ):
         assert ref in found, found
+    assert "app.example.com" not in found
     assert "w3.org" not in found  # XML namespaces are not fetches
 
 

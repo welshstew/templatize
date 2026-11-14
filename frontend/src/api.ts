@@ -17,6 +17,8 @@ export interface Candidate {
   confidence: number;
   reason: string | null;
   variant_values: string[] | null;
+  /** Helm values.yaml location, e.g. ["image", "tag"] (Kubernetes input only). */
+  values_path?: string[] | null;
 }
 
 export interface Notice {
@@ -25,9 +27,25 @@ export interface Notice {
   span: Span | null;
 }
 
+export interface ResourceInfo {
+  kind: string;
+  name: string;
+  namespace: string | null;
+  api_version: string;
+  span: Span;
+}
+
+export interface DocumentProfile {
+  format: "kubernetes" | null;
+  resources: ResourceInfo[];
+  helm_suggested: boolean;
+  reason: string | null;
+}
+
 export interface SuggestResult {
   candidates: Candidate[];
   notices: Notice[];
+  profile?: DocumentProfile;
 }
 
 export interface VariableSpec {
@@ -35,6 +53,8 @@ export interface VariableSpec {
   spans: Span[];
   type?: string;
   sources?: string[];
+  values_path?: string[] | null;
+  variant_values?: string[] | null;
 }
 
 export interface EmittedFile {
@@ -60,6 +80,45 @@ export interface BuildResponse {
   runner: EmittedFile[];
   variables: { name: string; type: string; value: string; spans: Span[] }[];
   roundtrip: RoundTrip;
+}
+
+export interface ChartRoundTrip {
+  label: string;
+  document: string;
+  ok: boolean;
+  expected_bytes: number;
+  actual_bytes: number | null;
+  first_difference: number | null;
+  expected_excerpt: string | null;
+  actual_excerpt: string | null;
+  error: string | null;
+}
+
+export interface ChartTemplate {
+  path: string;
+  kind: string;
+  name: string;
+  span: Span;
+}
+
+export interface ChartResponse {
+  chart_name: string;
+  files: EmittedFile[];
+  templates: ChartTemplate[];
+  variables: { name: string; value: string; values_path: string[] | null }[];
+  roundtrips: ChartRoundTrip[];
+  ok: boolean;
+}
+
+export interface ChartRenderResponse {
+  ok: boolean;
+  files: EmittedFile[];
+  error: string | null;
+}
+
+export interface ChartOptions {
+  chartName?: string | null;
+  variantLabels?: string[] | null;
 }
 
 export interface LlmReview {
@@ -142,6 +201,33 @@ export const api = {
     post<BuildResponse>("/build", { text, variables }, signal),
   render: (template: string, values: Record<string, string>, signal?: AbortSignal) =>
     post<RenderResponse>("/render", { template, values }, signal),
+  chart: (text: string, variants: string[], variables: VariableSpec[], opts: ChartOptions, signal?: AbortSignal) =>
+    post<ChartResponse>(
+      "/chart",
+      { text, variants, variables, chart_name: opts.chartName || null, variant_labels: opts.variantLabels ?? null },
+      signal,
+    ),
+  chartRender: (templates: EmittedFile[], valuesYaml: string, overlayYaml: string | null, signal?: AbortSignal) =>
+    post<ChartRenderResponse>(
+      "/chart/render",
+      { templates, values_yaml: valuesYaml, overlay_yaml: overlayYaml },
+      signal,
+    ),
+  chartDownload: async (text: string, variants: string[], variables: VariableSpec[], opts: ChartOptions): Promise<Blob> => {
+    const resp = await fetch("/chart/download", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text,
+        variants,
+        variables,
+        chart_name: opts.chartName || null,
+        variant_labels: opts.variantLabels ?? null,
+      }),
+    });
+    if (!resp.ok) throw await errorFrom(resp);
+    return await resp.blob();
+  },
   download: async (text: string, variables: VariableSpec[]): Promise<Blob> => {
     const resp = await fetch("/download", {
       method: "POST",

@@ -1,0 +1,82 @@
+# Storefront: staging
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: storefront-config
+  namespace: shop-staging
+data:
+  LOG_LEVEL: debug
+  FEATURE_FLAGS: "checkout-v2,search-beta"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storefront
+  namespace: shop-staging
+  labels:
+    app.kubernetes.io/name: storefront
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: storefront
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: storefront
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/acme/storefront:3.10.0-rc.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: storefront-config
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storefront
+  namespace: shop-staging
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: storefront
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: storefront
+  namespace: shop-staging
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - shop.staging.example.com
+      secretName: storefront-tls
+  rules:
+    - host: shop.staging.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: storefront
+                port:
+                  number: 80
