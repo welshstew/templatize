@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Iterable
 
@@ -74,6 +75,29 @@ def _score(c: Candidate) -> float:
     return c.confidence + LENGTH_BONUS_MAX * min(length, LENGTH_BONUS_CHARS) / LENGTH_BONUS_CHARS
 
 
+class _Occupied:
+    """Disjoint spans kept sorted by start: an overlap test only has to look at the
+    span starting just before ``s`` and the next one (O(log n) instead of O(n))."""
+
+    def __init__(self) -> None:
+        self._starts: list[int] = []
+        self._spans: list[tuple[int, int]] = []
+
+    def overlaps(self, s: Span) -> bool:
+        i = bisect_right(self._starts, s.start) - 1
+        for j in (i, i + 1):
+            if 0 <= j < len(self._spans):
+                a, b = self._spans[j]
+                if a < s.end and s.start < b:
+                    return True
+        return False
+
+    def add(self, s: Span) -> None:
+        i = bisect_right(self._starts, s.start)
+        self._starts.insert(i, s.start)
+        self._spans.insert(i, (s.start, s.end))
+
+
 def merge_candidates(
     candidates: Iterable[Candidate], taken_names: Iterable[str] = ()
 ) -> list[Candidate]:
@@ -83,14 +107,15 @@ def merge_candidates(
     combined = [_combine(g) for g in groups.values()]
 
     accepted: list[Candidate] = []
-    occupied: list[Span] = []
+    occupied = _Occupied()
     for c in sorted(combined, key=_score, reverse=True):
-        free = [s for s in c.spans if not any(s.overlaps(o) for o in occupied)]
+        free = [s for s in c.spans if not occupied.overlaps(s)]
         if not free:
             continue
         if len(free) != len(c.spans):
             c = c.model_copy(update={"spans": free})
-        occupied.extend(free)
+        for s in free:
+            occupied.add(s)
         accepted.append(c)
 
     # Higher-scoring candidates keep the plain name; others get suffixes.

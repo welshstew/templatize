@@ -58,13 +58,17 @@ def snake_case(raw: str) -> str:
 def dedupe_names(names: Iterable[str], taken: Iterable[str] = ()) -> list[str]:
     """Make names unique in order, suffixing ``_2``, ``_3``... on collisions."""
     used = set(taken)
+    # Next suffix to try per base name: names are never released, so every smaller
+    # suffix is already taken (same result as retrying from _2, without the n^2).
+    next_n: dict[str, int] = {}
     out: list[str] = []
     for name in names:
         candidate = name
-        n = 2
-        while candidate in used:
-            candidate = f"{name}_{n}"
-            n += 1
+        if candidate in used:
+            n = next_n.get(name, 2)
+            while (candidate := f"{name}_{n}") in used:
+                n += 1
+            next_n[name] = n + 1
         used.add(candidate)
         out.append(candidate)
     return out

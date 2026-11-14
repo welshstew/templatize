@@ -3,6 +3,8 @@ from __future__ import annotations
 import itertools
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from templatize.build import VariableSpec, build, make_ir
@@ -15,7 +17,7 @@ from templatize.ir import (
     TemplateIR,
     Variable,
 )
-from templatize.merge import merge_candidates
+from templatize.merge import _Occupied, merge_candidates
 from templatize.naming import dedupe_names, infer_type, snake_case
 from templatize.suggest import InputLimitError, suggest
 
@@ -190,3 +192,30 @@ def test_dedupe_names() -> None:
 )
 def test_infer_type(value: str, vtype: str) -> None:
     assert infer_type(value).value == vtype
+
+
+# --- performance-motivated structures keep the old behaviour ---------------------
+
+
+@settings(max_examples=300, deadline=None)
+@given(st.lists(st.tuples(st.integers(0, 60), st.integers(1, 8)), max_size=40))
+def test_occupied_index_matches_linear_scan(raw: list[tuple[int, int]]) -> None:
+    occupied, linear = _Occupied(), []
+    for start, length in raw:
+        s = Span(start=start, end=start + length)
+        expected = any(s.overlaps(o) for o in linear)
+        assert occupied.overlaps(s) == expected
+        if not expected:
+            occupied.add(s)
+            linear.append(s)
+
+
+def test_dedupe_names_suffixes() -> None:
+    assert dedupe_names(["a", "a", "a_2", "a", "b"], taken=["a_3"]) == [
+        "a",
+        "a_2",
+        "a_2_2",
+        "a_4",
+        "b",
+    ]
+    assert dedupe_names(["x"] * 5) == ["x", "x_2", "x_3", "x_4", "x_5"]
