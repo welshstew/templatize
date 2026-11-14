@@ -707,3 +707,55 @@ export function loopRegionsU16(map: OffsetMap, loops: LoopItem[]): { start: numb
     })
     .sort((a, b) => a.start - b.start);
 }
+
+// ---------------------------------------------------------------- prefixes
+
+/** The longest ``xxx_`` prefix all names share (and that leaves something of each). */
+export function commonPrefix(names: string[]): string {
+  if (names.length < 2) {
+    const only = names[0] ?? "";
+    const cut = only.lastIndexOf("_", only.length - 2);
+    return names.length === 1 && cut > 0 ? only.slice(0, cut + 1) : "";
+  }
+  const parts = names.map((n) => n.split("_"));
+  const first = parts[0] ?? [];
+  let k = 0;
+  while (k < first.length - 1 && parts.every((p) => p[k] === first[k] && p.length > k + 1)) k++;
+  return k ? `${first.slice(0, k).join("_")}_` : "";
+}
+
+export interface PrefixResult {
+  items: Item[];
+  error: string | null;
+  /** old name -> new name */
+  renamed: Record<string, string>;
+}
+
+/** Give the selected variables a common prefix: the prefix they already share is
+ * replaced (``database_host`` -> ``db_host``), otherwise it is added (``host`` ->
+ * ``db_host``); an empty prefix removes the shared one. All or nothing. */
+export function applyPrefix(items: Item[], ids: Set<string>, rawPrefix: string, loops: LoopItem[] = []): PrefixResult {
+  const chosen = items.filter((i) => ids.has(i.id));
+  if (!chosen.length) return { items, error: "select some variables first", renamed: {} };
+  let prefix = rawPrefix.trim();
+  if (prefix && !prefix.endsWith("_")) prefix += "_";
+  if (prefix && !/^[a-z_][a-z0-9_]*$/.test(prefix)) {
+    return { items, error: "the prefix uses lowercase letters, digits and _", renamed: {} };
+  }
+  const common = commonPrefix(chosen.map((i) => i.name));
+  const renamed: Record<string, string> = {};
+  for (const i of chosen) renamed[i.name] = prefix + i.name.slice(common.length);
+  const others = items.filter((i) => !ids.has(i.id));
+  const seen = new Set<string>();
+  for (const [from, to] of Object.entries(renamed)) {
+    const err = validateName(to, others, null, loops);
+    if (err) return { items, error: `${from} → ${to}: ${err}`, renamed: {} };
+    if (seen.has(to)) return { items, error: `two variables would be named "${to}"`, renamed: {} };
+    seen.add(to);
+  }
+  return {
+    items: items.map((i) => (ids.has(i.id) ? { ...i, name: renamed[i.name] ?? i.name } : i)),
+    error: null,
+    renamed,
+  };
+}

@@ -322,3 +322,57 @@ def test_sql_update_set_and_where() -> None:
 
 def test_sql_no_statements_no_candidates() -> None:
     assert sql("SELECT 1;\n-- INSERT INTO is in a comment without a column list\n") == []
+
+
+# --- composite values and scoped key names ------------------------------------------
+
+DSN = (
+    "DATABASE_URL: postgres://shop:s3cret@db:5432/store\n"
+    "POSTGRES_USER: shop\nPOSTGRES_PASSWORD: s3cret\nPOSTGRES_DB: store\n"
+)
+
+
+def test_composite_value_is_suggested_as_its_parts() -> None:
+    res = suggest(DSN)
+    values = {c.value: (c.name, len(c.spans)) for c in res.candidates}
+    assert "postgres://shop:s3cret@db:5432/store" not in values
+    assert values["shop"] == ("postgres_user", 2)
+    assert values["s3cret"] == ("postgres_password", 2)
+    assert values["store"] == ("postgres_db", 2)
+    assert any("database_url is built from" in n.message for n in res.notices)
+    from templatize.build import build, specs_from_candidates
+
+    built = build(DSN, specs_from_candidates(res.candidates))
+    assert built.roundtrip.ok
+    assert "postgres://{{ postgres_user }}:{{ postgres_password }}@db:5432/{{ postgres_db }}" in (
+        built.template.content
+    )
+
+
+def test_composition_needs_two_fields_between_separators() -> None:
+    one = "URL: postgres://shop@db/x\nUSER: shop\n"
+    assert any(c.value == "postgres://shop@db/x" for c in suggest(one).candidates)
+    dashed = "bucket = acme-marketing-assets-prod\nteam = marketing\nenv = prod\n"
+    assert any(c.value == "acme-marketing-assets-prod" for c in suggest(dashed).candidates)
+
+
+def test_composition_must_explain_examples() -> None:
+    # The URL's host changes in the example but no part explains it: keep it whole.
+    other = DSN.replace("@db:", "@db2:").replace("shop", "web")
+    res = suggest(DSN, [other])
+    assert any(c.value.startswith("postgres://") for c in res.candidates)
+    # When the parts explain the change, compose.
+    other = DSN.replace("shop", "web").replace("s3cret", "pw2")
+    res = suggest(DSN, [other])
+    assert not any(c.value.startswith("postgres://") for c in res.candidates)
+    user = next(c for c in res.candidates if c.value == "shop")
+    assert len(user.spans) == 2 and user.variant_values == ["web"]
+
+
+def test_generic_keys_are_qualified_by_their_block_or_section() -> None:
+    py = 'DATABASE = {\n    "host": "db.example.com",\n    "port": 5432,\n}\nOTHER = {"x": 1}\n'
+    assert kv(py) == {"database_host": "db.example.com", "database_port": "5432", "x": "1"}
+    ini = "[server]\nhost = 0.0.0.0\n[mail]\nsmtp_host = smtp.example.org\n"
+    assert kv(ini) == {"server_host": "0.0.0.0", "smtp_host": "smtp.example.org"}
+    braces_in_strings = '{"a": "{ not a block", "listen": {"port": 80}}\n'
+    assert kv(braces_in_strings)["listen_port"] == "80"

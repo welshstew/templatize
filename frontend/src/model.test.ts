@@ -5,7 +5,9 @@ import type { Candidate } from "./api.ts";
 import type { Item } from "./model.ts";
 import {
   addManual,
+  applyPrefix,
   canAccept,
+  commonPrefix,
   findOccurrencesU16,
   itemsFromCandidates,
   segments,
@@ -232,4 +234,28 @@ test("setStatus: same result as the reference on random inputs", () => {
     const status = (["accepted", "rejected", "suggested"] as const)[rnd(3)] ?? "accepted";
     assert.deepEqual(setStatus(items, ids, status), referenceSetStatus(items, ids, status), `round ${round}`);
   }
+});
+
+test("prefix: replace the shared prefix, add one, or remove it", () => {
+  assert.equal(commonPrefix(["database_host", "database_port", "database_name"]), "database_");
+  assert.equal(commonPrefix(["db_host", "dbx_port"]), "");
+  assert.equal(commonPrefix(["database_user"]), "database_");
+  assert.equal(commonPrefix(["host"]), "");
+  const mk = (id: string, name: string) => ({
+    id, name, name_origin: "key", type: "string", value: id, spans: [{ start: 0, end: 1 }],
+    sources: ["key_value"], detectors: [], confidence: 0.7, reason: null, variant_values: null,
+  });
+  let items = itemsFromCandidates([mk("a", "database_host"), mk("b", "database_port"), mk("c", "db_host")]);
+  items = items.map((i, k) => ({ ...i, spans: [{ start: k * 2, end: k * 2 + 1 }] }));
+  const both = new Set(["a", "b"]);
+  // db_host already exists: all or nothing
+  assert.match(applyPrefix(items, both, "db").error ?? "", /db_host.*already used/);
+  const r = applyPrefix(items, both, "pg");
+  assert.equal(r.error, null);
+  assert.deepEqual(r.items.map((i) => i.name), ["pg_host", "pg_port", "db_host"]);
+  assert.deepEqual(applyPrefix(r.items, both, "").items.map((i) => i.name), ["host", "port", "db_host"]);
+  assert.match(applyPrefix(items, both, "Bad").error ?? "", /lowercase/);
+  // no shared prefix: added
+  const plain = itemsFromCandidates([mk("x", "host"), mk("y", "port")]).map((i, k) => ({ ...i, spans: [{ start: k, end: k + 1 }] }));
+  assert.deepEqual(applyPrefix(plain, new Set(["x", "y"]), "db_").items.map((i) => i.name), ["db_host", "db_port"]);
 });

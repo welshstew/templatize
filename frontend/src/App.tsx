@@ -21,6 +21,7 @@ import { Sidebar } from "./components/Sidebar.tsx";
 import {
   acceptLoop,
   accepted,
+  applyPrefix,
   addManual,
   applyReview,
   type Item,
@@ -278,6 +279,11 @@ export function App() {
     setItems(r.items);
     setLoops(r.loops);
   };
+  const onPrefix = (ids: string[], prefix: string): string | null => {
+    const r = applyPrefix(items, new Set(ids), prefix, loops);
+    if (!r.error) setItems(r.items);
+    return r.error;
+  };
   const onLoopUpdate = useCallback((id: string, patch: Partial<LoopItem>) => {
     setLoops((cur) => updateLoop(cur, id, patch));
   }, []);
@@ -501,6 +507,7 @@ export function App() {
             onStatus={onStatus}
             onUpdate={onUpdate}
             loops={loops}
+            onPrefix={onPrefix}
             onLoopStatus={onLoopStatus}
             onLoopUpdate={onLoopUpdate}
             helm={helm}

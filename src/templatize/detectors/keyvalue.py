@@ -70,6 +70,37 @@ _SKIP_VALUE_PREFIX = ("|", ">", "&", "*", "!", "{", "[", "#")
 _NULLISH = frozenset({"null", "~", "none", "nil"})
 
 
+_SCOPE_TOKEN = re.compile(r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'|[{}]')
+_SCOPE_KEY = re.compile(r"([A-Za-z_][\w.-]*)[\"']?[ \t]*[:=][ \t]*$")
+_INI_SECTION = re.compile(r"^[ \t]*\[([A-Za-z_][\w.-]*)\][ \t]*$")
+
+
+class _Scopes:
+    """The name of the innermost ``{ ... }`` block around a position, when the block
+    is a keyed value (``DATABASE = {``, ``"listen": {``), so generic keys inside it
+    can be qualified (``database_host``). Strings are skipped when matching braces.
+    Positions must be asked for in increasing order (one pass over the text)."""
+
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self._tokens = _SCOPE_TOKEN.finditer(text)
+        self._next = next(self._tokens, None)
+        self._stack: list[str | None] = []
+
+    def at(self, pos: int) -> str | None:
+        while self._next is not None and self._next.start() < pos:
+            tok = self._next.group(0)
+            if tok == "{":
+                start = self._next.start()
+                line_start = self._text.rfind("\n", 0, start) + 1
+                m = _SCOPE_KEY.search(self._text, line_start, start)
+                self._stack.append(m.group(1) if m else None)
+            elif tok == "}" and self._stack:
+                self._stack.pop()
+            self._next = next(self._tokens, None)
+        return next((k for k in reversed(self._stack) if k), None) if self._stack else None
+
+
 def _lines(text: str) -> Iterator[tuple[int, str]]:
     offset = 0
     for raw in text.splitlines(keepends=True):
@@ -111,9 +142,14 @@ class KeyValueDetector:
         ]
         spaced_ok = self._spaced_format(content)
         stack: list[tuple[int, str]] = []  # YAML (indent, key) parents
+        scopes = _Scopes(ctx.text)
+        section: str | None = None  # INI [section]
         last_name: tuple[int, str, str] | None = None  # (indent, name value, candidate id)
         for line_start, line in _lines(ctx.text):
             if not line.strip():
+                continue
+            if sm_ := _INI_SECTION.match(line):
+                section = sm_.group(1)
                 continue
             if line.lstrip().startswith(("#", "//", ";")) and not _NGINX.match(line):
                 continue
@@ -127,7 +163,7 @@ class KeyValueDetector:
                         out,
                         ctx.text,
                         m.group(1),
-                        None,
+                        scopes.at(line_start + m.start()),
                         line_start + s,
                         line_start + e,
                         "kv.json",
@@ -145,7 +181,7 @@ class KeyValueDetector:
                     out,
                     ctx.text,
                     em.group(1),
-                    None,
+                    scopes.at(line_start) or section,
                     line_start + s,
                     line_start + s + len(value),
                     "kv.equals",

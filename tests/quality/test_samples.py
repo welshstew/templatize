@@ -32,5 +32,10 @@ def test_sample_quality(sample: dict[str, Any]) -> None:
     noise = [str(v) for v in exp.get("reject") or [] if str(v) in values]
     assert not missing, f"not suggested: {missing}\nsuggested: {sorted(values)}"
     assert not noise, f"should not be suggested: {noise}"
+    spans = {c.value: len(c.spans) for c in res.candidates}
+    for value, n in (exp.get("occurrences") or {}).items():
+        assert spans.get(str(value)) == n, (
+            f"{value!r}: {spans.get(str(value))} occurrences, want {n}"
+        )
     found = {lp.name: len(lp.items) for lp in res.loops}
     assert found == (exp.get("loops") or {}), f"loops: {found}"

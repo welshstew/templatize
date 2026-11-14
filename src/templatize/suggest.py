@@ -11,7 +11,7 @@ from templatize.detectors.k8s import split_spans
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice
 from templatize.k8s import DocumentProfile, detect_profile, structural_spans
 from templatize.loops import detect_loops, explained_notices
-from templatize.merge import merge_candidates
+from templatize.merge import compose_candidates, merge_candidates
 
 
 class InputLimitError(ValueError):
@@ -67,7 +67,8 @@ def suggest(
                 ]
             )
         ]
-    candidates = merge_candidates(raw)
+    candidates, composed = compose_candidates(text, merge_candidates(raw))
+    notices.extend(composed)
     loops = detect_loops(text, variants, taken_names=[c.name for c in candidates])
     return SuggestResult(
         candidates=candidates,
