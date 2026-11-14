@@ -388,3 +388,7 @@ def test_welcome_greeting_and_position_at_company() -> None:
 def test_one_line_address_in_prose() -> None:
     text = "Your laptop (asset tag LT-20931, a 14-inch model) ships to 8 Canal Street, Manchester M1 3HE\n"
     assert values(text)["8 Canal Street, Manchester M1 3HE"] == "address"
+
+
+def test_plain_word_lines_are_not_a_keyword_config() -> None:
+    assert kv("line one\nline two\nline three\n") == {}

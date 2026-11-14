@@ -649,6 +649,11 @@ class KeyValueDetector:
         if any(_PROSE_END.search(ln.rstrip()) or len(ln.split()) > 14 for ln in content):
             return False
         configish = any(c in k for k in keys for c in "-_.")
+        # At least one value must look like config (4096, allkeys-lru, /var/lib/x), not
+        # all plain words ("line two", "line three").
+        values = [m.group(2) for ln in content if (m := _SPACED_LOWER.match(ln))]
+        if not any(re.search(r"[\d./:_-]", v) for v in values):
+            return False
         return configish or len(set(keys)) < len(keys)
 
     @staticmethod
