@@ -245,12 +245,24 @@ PATTERNS: list[Pattern] = [
         VarType.STRING,
         # "10.0.1.11:8080", "api.prod.example.com:8443": an endpoint, kept whole.
         re.compile(
-            r"(?<![\w.:/@-])((?:\d{1,3}\.){3}\d{1,3}|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
-            r"[A-Za-z][A-Za-z0-9-]{1,62}):(\d{2,5})(?![\w.:/-])"
+            r"(?:(?<=://)|(?<![\w.:/@-]))((?:\d{1,3}\.){3}\d{1,3}|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+            r"[A-Za-z][A-Za-z0-9-]{1,62}):(\d{2,5})(?![\w.:-])"
         ),
         0.9,
         _valid_endpoint,
         name="endpoint",
+    ),
+    Pattern(
+        "regex.token",
+        VarType.STRING,
+        # API tokens with a known prefix (npm, GitHub, GitLab, Slack, Stripe, AWS) and JWTs.
+        re.compile(
+            r"(?<![\w-])(?:npm_[A-Za-z0-9]{30,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{40,}"
+            r"|glpat-[\w-]{20,}|xox[abpors]-[\w-]{10,}|(?:sk|pk|rk)_(?:live|test)_\w{16,}"
+            r"|AKIA[0-9A-Z]{16}|eyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{8,})(?![\w-])"
+        ),
+        0.85,
+        name="token",
     ),
     Pattern(
         "regex.datetime",
@@ -347,7 +359,7 @@ PATTERNS: list[Pattern] = [
         "regex.hostname",
         VarType.HOSTNAME,
         re.compile(
-            r"(?<![\w.@/-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+            r"(?:(?<=://)|(?<![\w.@/-]))(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
             r"[A-Za-z][A-Za-z0-9-]{1,62}(?![\w-]|\.\w|\()"
         ),
         0.65,
@@ -406,7 +418,7 @@ class RegexDetector:
                     )
                 )
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
-        out = _drop_inner(out)
+        out = _drop_inner(_shared_hosts(text, out))
         return DetectorResult(candidates=_line_labels(text, _name_ranges(text, out)))
 
 
@@ -428,6 +440,47 @@ _WHOLE = frozenset(
         "regex.phone",
     }
 )
+
+
+def _shared_hosts(text: str, found: list[Candidate]) -> list[Candidate]:
+    """A host in several endpoints (``kafka-3:9092`` and ``kafka-3:9093``) is one
+    variable: those endpoints become the host, and their ports stay ports."""
+    by_host: dict[str, list[Candidate]] = {}
+    for c in found:
+        if c.detectors[0] == "regex.host_port":
+            by_host.setdefault(c.value.rpartition(":")[0], []).append(c)
+    shared = {h for h, cs in by_host.items() if len({c.value for c in cs}) > 1}
+    if not shared:
+        return found
+    out = [
+        c
+        for c in found
+        if not (c.detectors[0] == "regex.host_port" and c.value.rpartition(":")[0] in shared)
+    ]
+    for host in shared:
+        for c in by_host[host]:
+            s = c.spans[0]
+            host_span = Span(start=s.start, end=s.start + len(host))
+            port_span = Span(start=host_span.end + 1, end=s.end)
+            kind = VarType.IPV4 if host.replace(".", "").isdigit() else VarType.HOSTNAME
+            for span, vtype in ((host_span, kind), (port_span, VarType.PORT)):
+                if not any(o.spans[0] == span for o in out):
+                    out.append(
+                        Candidate(
+                            name=type_name(vtype),
+                            name_origin="type",
+                            type=vtype,
+                            value=text[span.start : span.end],
+                            spans=[span],
+                            sources=[Source.REGEX],
+                            detectors=["regex.host_port"],
+                            confidence=0.85 if vtype is not VarType.PORT else 0.6,
+                            reason="the host of several endpoints"
+                            if vtype is not VarType.PORT
+                            else "a port",
+                        )
+                    )
+    return out
 
 
 def _drop_inner(found: list[Candidate]) -> list[Candidate]:

@@ -29,6 +29,8 @@ _SPACED_MIN_SHARE = 0.6
 # are left to the patterns, which find their parts.
 _SPACED_LOWER = re.compile(r"^[ \t]*([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*)[ \t]+([^\s#;{}]+)[ \t]*$")
 _PROSE_END = re.compile(r"[.!?,]$")
+_TOP_API = re.compile(r"^apiVersion:[ \t]*\S", re.MULTILINE)
+_TOP_KIND = re.compile(r"^kind:[ \t]*\S", re.MULTILINE)
 # A value made of key=value pairs: "Server=db;Database=Payroll;User Id=svc;" (ADO.NET,
 # ODBC) or "host=db port=5432 dbname=app" (libpq). Its parts are the values.
 _PAIRS_SEMI = re.compile(r"^(?:[A-Za-z][\w ]*=[^;]*;)+(?:[A-Za-z][\w ]*=[^;]*)?$")
@@ -152,6 +154,8 @@ def _confidence(value: str, base: float) -> float:
     vtype = infer_type(value)
     if vtype is VarType.BOOL:
         return min(base, 0.45)
+    if ("," in value and "://" in value) or (value.count(",") >= 1 and re.search(r":\d+,", value)):
+        return min(base, 0.45)  # a list of endpoints: its hosts and ports are the values
     if len(value.split()) > 4:
         return min(base, 0.45)
     return base
@@ -169,6 +173,7 @@ class KeyValueDetector:
         ]
         spaced_ok = self._spaced_format(content)
         lower_ok = self._lower_spaced_format(content)
+        manifest = bool(_TOP_API.search(ctx.text)) and bool(_TOP_KIND.search(ctx.text))
         stack: list[tuple[int, str]] = []  # YAML (indent, key) parents
         scopes = _Scopes(ctx.text)
         section: str | None = None  # INI [section]
@@ -239,6 +244,8 @@ class KeyValueDetector:
                 if key == "value" and last_name and last_name[0] == indent:
                     out[:] = [c for c in out if c.id != last_name[2]]
                     key, parent = last_name[1], None
+                if not indent and key in ("apiVersion", "kind") and manifest:
+                    continue  # kubeconfig, CRDs: the document's type, not a value
                 is_name = key == "name"
                 before = len(out)
                 self._add(
