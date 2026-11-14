@@ -632,7 +632,95 @@ def _header_cells(
     return cells[h]
 
 
-FINDERS = (find_sql, find_yaml, find_inline_lists, find_keyword_lines, find_tables)
+_CSV_HEADER_CELL = re.compile(r"^[A-Za-z_][\w .-]{0,40}$")
+
+
+def _csv_cells(line: str, sep: str) -> list[tuple[int, int]] | None:
+    """Cell spans of a CSV line (quotes are not part of the value), or None when a
+    quoted cell is malformed."""
+    cells: list[tuple[int, int]] = []
+    i = 0
+    while True:
+        if line.startswith('"', i):
+            j = i + 1
+            while True:
+                j = line.find('"', j)
+                if j < 0:
+                    return None
+                if line.startswith('""', j):
+                    j += 2
+                    continue
+                break
+            cells.append((i + 1, j))
+            i = j + 1
+            if i < len(line) and line[i] != sep:
+                return None
+        else:
+            j = line.find(sep, i)
+            j = len(line) if j < 0 else j
+            cells.append((i, j))
+            i = j
+        if i >= len(line):
+            return cells
+        i += 1  # the separator
+
+
+def find_csv(text: str) -> list[Found]:
+    """A header line of column names and >= 2 rows with as many cells (comma,
+    semicolon or tab separated): each row is an item, each column a field named by
+    its header."""
+    out: list[Found] = []
+    lines: list[tuple[int, str]] = []
+    pos = 0
+    for raw in text.splitlines(keepends=True):
+        lines.append((pos, raw.rstrip("\r\n")))
+        pos += len(raw)
+    k = 0
+    while k < len(lines):
+        header = lines[k][1]
+        sep = next((c for c in (",", ";", "\t") if header.count(c) >= 1), None)
+        cells = _csv_cells(header, sep) if sep else None
+        names = [header[a:b] for a, b in cells] if cells else []
+        if (
+            not cells
+            or len(cells) < 2
+            or not all(_CSV_HEADER_CELL.match(n) for n in names)
+            or len(set(names)) != len(names)
+        ):
+            k += 1
+            continue
+        rows: list[tuple[int, list[tuple[int, int]]]] = []
+        j = k + 1
+        while j < len(lines):
+            rb, body = lines[j]
+            rc = _csv_cells(body, sep) if body and sep else None
+            if rc is None or len(rc) != len(cells) or any(a == b for a, b in rc):
+                break
+            rows.append((rb, rc))
+            j += 1
+        if len(rows) >= MIN_ITEMS:
+            out.append(
+                Found(
+                    name="rows",
+                    items=[
+                        Span(start=rb, end=rb + len(lines[r][1]))
+                        for r, (rb, _) in zip(range(k + 1, j), rows, strict=True)
+                    ],
+                    detector="loop.csv",
+                    confidence=0.8,
+                    reason="rows of a CSV file",
+                    fields=[
+                        [Span(start=rb + rc[c][0], end=rb + rc[c][1]) for rb, rc in rows]
+                        for c in range(len(cells))
+                    ],
+                    field_names=[snake_case(n) for n in names],
+                )
+            )
+        k = max(j, k + 1)
+    return out
+
+
+FINDERS = (find_sql, find_yaml, find_inline_lists, find_keyword_lines, find_tables, find_csv)
 
 
 # --- candidates ------------------------------------------------------------------

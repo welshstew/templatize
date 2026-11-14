@@ -215,3 +215,15 @@ def test_date_and_time_together() -> None:
 def test_secret_type_is_structure() -> None:
     text = "apiVersion: v1\nkind: Secret\nmetadata:\n  name: db\ntype: Opaque\nstringData:\n  PASSWORD: x7#kq\n"
     assert "Opaque" not in values(text)
+
+
+def test_csv_rows_are_a_loop() -> None:
+    from templatize.loops import find_csv
+
+    text = 'id,name,note\n1,Ana,"likes, commas"\n2,Ben,"says ""hi"""\n'
+    (found,) = find_csv(text)
+    assert found.field_names == ["id", "name", "note"]
+    assert [text[s.start : s.end] for s in found.fields[2]] == ["likes, commas", 'says ""hi""']
+    assert find_csv("a;b\n1;2\n3;4\n")[0].field_names == ["a", "b"]
+    assert find_csv("1,2\n3,4\n5,6\n") == []  # no header
+    assert find_csv("a,b\n1,\n2,3\n") == []  # an empty cell
