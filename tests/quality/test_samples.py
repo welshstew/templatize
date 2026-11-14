@@ -37,5 +37,8 @@ def test_sample_quality(sample: dict[str, Any]) -> None:
         assert spans.get(str(value)) == n, (
             f"{value!r}: {spans.get(str(value))} occurrences, want {n}"
         )
+    names = {c.value: c.name for c in res.candidates}
+    for value, name in (exp.get("names") or {}).items():
+        assert names.get(str(value)) == name, f"{value!r} is named {names.get(str(value))!r}"
     found = {lp.name: len(lp.items) for lp in res.loops}
     assert found == (exp.get("loops") or {}), f"loops: {found}"
