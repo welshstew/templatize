@@ -36,13 +36,13 @@ export function OutputPanel({ build, buildError, preview, previewChanged, origin
   const [tab, setTab] = useState<Tab>("preview");
   const files: Record<Exclude<Tab, "preview">, { label: string; content: string } | null> = {
     template: build ? { label: build.template.path, content: build.template.content } : null,
-    env: build ? { label: ".env", content: build.env.content } : null,
+    env: build ? { label: build.env.path, content: build.env.content } : null,
     script: build?.runner[0] ? { label: build.runner[0].path, content: build.runner[0].content } : null,
   };
   const tabs: [Tab, string][] = [
     ["preview", "Preview"],
     ["template", files.template?.label ?? "template"],
-    ["env", ".env"],
+    ["env", files.env?.label ?? ".env"],
     ["script", "render.py"],
   ];
 
@@ -59,9 +59,9 @@ export function OutputPanel({ build, buildError, preview, previewChanged, origin
         <>
           <p class="hint">
             {previewChanged
-              ? "Rendered with your edited values (edit them in the Variables list)."
+              ? "Rendered with your edited values (edit them under Lists and Variables)."
               : preview.output === original
-                ? "Rendered with the extracted values: identical to the input. Edit values in the Variables list to try it."
+                ? "Rendered with the extracted values: identical to the input. Edit values under Lists and Variables to try it."
                 : "Rendered output."}
           </p>
           <div class="file">

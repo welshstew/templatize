@@ -572,7 +572,15 @@ Loops are suggested (`loops` in `/suggest`, `templatize suggest`, MCP
 becomes the fields. Examples with more or fewer items confirm a loop (confidence
 0.97, and their lists are kept). `templatize build --accept-all` and MCP
 `generate_template` without `variables` accept loops too (`--no-loops` to keep
-separate variables). The UI and Helm `range` are next; see `docs/design/loops.md`.
+separate variables).
+
+In the web UI a suggested loop is a bracketed region of the document with a badge
+(`users × 2`) and a card under **Lists**: accept it to make it a loop, rename the list,
+the loop variable and the fields, and add, remove or edit rows to see the template
+take any number of items in the preview. Accepting a loop sets aside the suggestions
+on its fields (they come back if you remove the loop); variables that sit at the same
+place in every item, such as a tenant id in every row, still work inside it. Helm
+`range` is next; see `docs/design/loops.md`.
 
 > JavaScript clients index strings in UTF-16 code units, not code points. Convert at the
 > API boundary.

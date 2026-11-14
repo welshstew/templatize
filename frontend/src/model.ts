@@ -4,7 +4,16 @@
  * for the DOM.
  */
 
-import type { Candidate, LlmReview, Span, VariableSpec } from "./api.ts";
+import type {
+  Candidate,
+  LlmReview,
+  LoopCandidate,
+  LoopRows,
+  LoopSpec,
+  RenderValues,
+  Span,
+  VariableSpec,
+} from "./api.ts";
 import type { OffsetMap } from "./offsets.ts";
 
 export type Status = "suggested" | "accepted" | "rejected";
@@ -158,13 +167,25 @@ export function parseValuesPath(raw: string): { path: string[] | null; error: st
   return { path: parts, error: null };
 }
 
-/** Returns an error message, or null if ``name`` is valid for item ``selfId``. */
-export function validateName(name: string, items: Item[], selfId: string | null): string | null {
+/** Returns an error message, or null if ``name`` is valid for item (or loop) ``selfId``.
+ * Loop names and loop item names share the namespace with variables. */
+export function validateName(
+  name: string,
+  items: Item[],
+  selfId: string | null,
+  loops: LoopItem[] = [],
+  selfPart: "name" | "item" | null = null,
+): string | null {
   if (!name) return "name is required";
   if (!NAME_RE.test(name)) return "use lowercase letters, digits and _ (not starting with a digit)";
   if (RESERVED.has(name)) return `"${name}" is a reserved word`;
   const clash = items.find((i) => i.id !== selfId && i.status !== "rejected" && i.name === name);
   if (clash) return `"${name}" is already used`;
+  for (const l of loops) {
+    if (l.status === "rejected") continue;
+    if ((l.id !== selfId || selfPart !== "name") && l.name === name) return `"${name}" is already used`;
+    if ((l.id !== selfId || selfPart !== "item") && l.item === name) return `"${name}" is already used`;
+  }
   return null;
 }
 
@@ -245,7 +266,12 @@ export interface ManualResult {
 /** Turn a user selection into an accepted variable. Overlapping suggestions are
  * rejected; overlapping accepted variables are an error for the selected span and are
  * skipped for other occurrences. */
-export function addManual(items: Item[], map: OffsetMap, req: ManualRequest): ManualResult {
+export function addManual(
+  items: Item[],
+  map: OffsetMap,
+  req: ManualRequest,
+  loops: LoopItem[] = [],
+): ManualResult {
   const sel = map.rangeToCp(req.start, req.end);
   if (sel.end <= sel.start) return { items, error: "select some text first", added: null };
   const u16 = map.rangeToU16(sel.start, sel.end);
@@ -255,7 +281,7 @@ export function addManual(items: Item[], map: OffsetMap, req: ManualRequest): Ma
   if (blocking) {
     return { items, error: `selection overlaps variable "${blocking.name}"`, added: null };
   }
-  const nameError = validateName(req.name, items, null);
+  const nameError = validateName(req.name, items, null, loops);
   if (nameError) return { items, error: nameError, added: null };
 
   let spans: Span[] = [sel];
@@ -267,6 +293,18 @@ export function addManual(items: Item[], map: OffsetMap, req: ManualRequest): Ma
       spans.push(sel);
       spans.sort((a, b) => a.start - b.start);
     }
+  }
+
+  const loopClash = loops.find((l) => l.status === "accepted" && !fitsLoop(spans, l));
+  if (loopClash) {
+    const onField = loopClash.fields.some((f) => f.spans.some((s) => spans.some((n) => overlaps(s, n))));
+    return {
+      items,
+      error: onField
+        ? `that is a field of the list "${loopClash.name}"`
+        : `inside the list "${loopClash.name}" a variable must be in every item: tick "all occurrences"`,
+      added: null,
+    };
   }
 
   const added: Item = {
@@ -295,19 +333,21 @@ export function addManual(items: Item[], map: OffsetMap, req: ManualRequest): Ma
   return { items: [...next, added], error: null, added };
 }
 
-/** Accepting a suggestion is refused if it would overlap an accepted variable. */
-export function canAccept(items: Item[], id: string): boolean {
+/** Accepting a suggestion is refused if it would overlap an accepted variable, or
+ * does not fit an accepted loop (see ``fitsLoop``). */
+export function canAccept(items: Item[], id: string, loops: LoopItem[] = []): boolean {
   const item = items.find((i) => i.id === id);
   if (!item) return false;
+  if (loops.some((l) => l.status === "accepted" && !fitsLoop(item.spans, l))) return false;
   return !accepted(items).some(
     (a) => a.id !== id && a.spans.some((s) => item.spans.some((t) => overlaps(s, t))),
   );
 }
 
-export function setStatus(items: Item[], ids: Set<string>, status: Status): Item[] {
+export function setStatus(items: Item[], ids: Set<string>, status: Status, loops: LoopItem[] = []): Item[] {
   let next = items;
   for (const id of ids) {
-    if (status === "accepted" && !canAccept(next, id)) continue;
+    if (status === "accepted" && !canAccept(next, id, loops)) continue;
     next = next.map((i) => {
       if (i.id !== id) return i;
       if (status === "accepted") {
@@ -329,11 +369,13 @@ export interface Segment {
   start: number;
   end: number;
   item: Item | null;
+  /** A field of an accepted loop. */
+  field?: { loop: LoopItem; name: string } | undefined;
 }
 
 /** Split the text into plain and highlighted segments (UTF-16 offsets) for rendering. */
-export function segments(map: OffsetMap, items: Item[]): Segment[] {
-  const marks: { start: number; end: number; item: Item }[] = [];
+export function segments(map: OffsetMap, items: Item[], loops: LoopItem[] = []): Segment[] {
+  const marks: Segment[] = [];
   for (const item of items) {
     if (item.status === "rejected") continue;
     for (const s of item.spans) {
@@ -341,8 +383,18 @@ export function segments(map: OffsetMap, items: Item[]): Segment[] {
       marks.push({ start: u.start, end: u.end, item });
     }
   }
-  // Accepted first so they win if a suggestion somehow overlaps.
-  marks.sort((a, b) => a.start - b.start || (a.item.status === "accepted" ? -1 : 1));
+  for (const loop of loops) {
+    if (loop.status !== "accepted") continue;
+    for (const f of loop.fields) {
+      for (const s of f.spans) {
+        const u = map.rangeToU16(s.start, s.end);
+        marks.push({ start: u.start, end: u.end, item: null, field: { loop, name: f.name } });
+      }
+    }
+  }
+  // Loop fields and accepted variables first so they win over overlapping suggestions.
+  const rank = (m: Segment) => (m.field ? 0 : m.item?.status === "accepted" ? 1 : 2);
+  marks.sort((a, b) => a.start - b.start || rank(a) - rank(b));
   const out: Segment[] = [];
   let pos = 0;
   for (const m of marks) {
@@ -355,11 +407,218 @@ export function segments(map: OffsetMap, items: Item[]): Segment[] {
   return out;
 }
 
-/** Preview values keyed by variable name, for /render. */
-export function previewValues(items: Item[]): Record<string, string> {
-  return Object.fromEntries(accepted(items).map((i) => [i.name, i.previewValue]));
+/** Preview values keyed by variable name, for /render: accepted loops add their lists. */
+export function previewValues(items: Item[], loops: LoopItem[] = []): RenderValues {
+  const out: RenderValues = Object.fromEntries(accepted(items).map((i) => [i.name, i.previewValue]));
+  for (const l of loops) if (l.status === "accepted") out[l.name] = l.previewRows;
+  return out;
 }
 
-export function previewChanged(items: Item[]): boolean {
-  return accepted(items).some((i) => i.previewValue !== i.value);
+export function previewChanged(items: Item[], loops: LoopItem[] = []): boolean {
+  return (
+    accepted(items).some((i) => i.previewValue !== i.value) ||
+    loops.some((l) => l.status === "accepted" && JSON.stringify(l.previewRows) !== JSON.stringify(l.rows))
+  );
+}
+
+// ---------------------------------------------------------------- loops
+
+export interface LoopField {
+  name: string;
+  type: string;
+  /** One per item, code points. */
+  spans: Span[];
+}
+
+/** A repeated block: suggested by the server, accepted or rejected by the user. */
+export interface LoopItem {
+  id: string;
+  name: string;
+  item: string;
+  items: Span[];
+  fields: LoopField[];
+  scalar: boolean;
+  sources: string[];
+  confidence: number | null;
+  reason: string | null;
+  variantValues: (LoopRows | null)[] | null;
+  status: Status;
+  /** The document's rows. */
+  rows: LoopRows;
+  /** Rows for the live preview: edited, added or removed by the user. */
+  previewRows: LoopRows;
+  /** Variables and suggestions this loop replaced when it was accepted, with their
+   * status then (restored if the loop is removed). */
+  absorbed: { id: string; status: Status }[];
+}
+
+export function loopRegion(loop: { items: Span[] }): Span {
+  return { start: loop.items[0]?.start ?? 0, end: loop.items[loop.items.length - 1]?.end ?? 0 };
+}
+
+function cpSlice(map: OffsetMap, s: Span): string {
+  const u = map.rangeToU16(s.start, s.end);
+  return map.text.slice(u.start, u.end);
+}
+
+export function rowsOf(map: OffsetMap, loop: { scalar: boolean; items: Span[]; fields: LoopField[] }): LoopRows {
+  if (loop.scalar) return (loop.fields[0]?.spans ?? []).map((s) => cpSlice(map, s));
+  return loop.items.map((_, i) =>
+    Object.fromEntries(loop.fields.map((f) => [f.name, cpSlice(map, f.spans[i] ?? { start: 0, end: 0 })])),
+  );
+}
+
+export function loopsFromCandidates(cands: LoopCandidate[], map: OffsetMap): LoopItem[] {
+  return cands.map((c) => {
+    const fields = c.fields.map((f) => ({ name: f.name, type: f.type, spans: f.spans }));
+    const rows = rowsOf(map, { scalar: c.scalar, items: c.items, fields });
+    return {
+      id: c.id,
+      name: c.name,
+      item: c.item,
+      items: c.items,
+      fields,
+      scalar: c.scalar,
+      sources: c.sources,
+      confidence: c.confidence,
+      reason: c.reason,
+      variantValues: c.variant_values,
+      status: "suggested",
+      rows,
+      previewRows: rows,
+      absorbed: [],
+    };
+  });
+}
+
+/** Can a variable with ``spans`` coexist with ``loop``? Outside it, always. Inside, only
+ * as an outer variable: exactly one span per item, at the same place in each, and not
+ * on a field (mirrors templatize.loops.compatible_candidates). */
+export function fitsLoop(spans: Span[], loop: LoopItem): boolean {
+  const region = loopRegion(loop);
+  const inside = spans.filter((s) => overlaps(s, region));
+  if (!inside.length) return true;
+  if (inside.length !== loop.items.length) return false;
+  const offsets = new Set<string>();
+  const hit = new Set<number>();
+  for (const s of inside) {
+    const idx = loop.items.findIndex((it) => it.start <= s.start && s.end <= it.end);
+    const it = loop.items[idx];
+    if (!it) return false;
+    if (loop.fields.some((f) => f.spans.some((fs) => overlaps(fs, s)))) return false;
+    offsets.add(`${s.start - it.start}:${s.end - it.start}`);
+    hit.add(idx);
+  }
+  return offsets.size === 1 && hit.size === loop.items.length;
+}
+
+/** Why the loop cannot be accepted, or null. */
+export function loopBlocker(loop: LoopItem, items: Item[], loops: LoopItem[]): string | null {
+  const region = loopRegion(loop);
+  const other = loops.find((l) => l.id !== loop.id && l.status === "accepted" && overlaps(loopRegion(l), region));
+  if (other) return `overlaps the list "${other.name}"`;
+  // Variables you created yourself are never replaced silently.
+  const bad = accepted(items).find((i) => i.manual && !fitsLoop(i.spans, loop));
+  return bad ? `your variable "${bad.name}" is in the way` : null;
+}
+
+export interface LoopChange {
+  items: Item[];
+  loops: LoopItem[];
+}
+
+/** Accept a loop: variables and suggestions on its fields (or otherwise in its way)
+ * are set aside, and come back if the loop is removed. Names that clash get a suffix. */
+export function acceptLoop(items: Item[], loops: LoopItem[], id: string): LoopChange {
+  const loop = loops.find((l) => l.id === id);
+  if (!loop || loopBlocker(loop, items, loops)) return { items, loops };
+  const absorbed = items
+    .filter((i) => i.status !== "rejected" && !fitsLoop(i.spans, loop))
+    .map((i) => ({ id: i.id, status: i.status }));
+  const ids = new Set(absorbed.map((a) => a.id));
+  const nextItems = items.map((i) =>
+    ids.has(i.id) ? { ...i, status: "rejected" as const, previewValue: i.value } : i,
+  );
+  const others = loops.filter((l) => l.id !== id);
+  const taken = new Set([
+    ...nextItems.filter((i) => i.status !== "rejected").map((i) => i.name),
+    ...others.filter((l) => l.status !== "rejected").flatMap((l) => [l.name, l.item]),
+  ]);
+  const fresh = (base: string) => {
+    let n = base;
+    for (let k = 2; taken.has(n); k++) n = `${base}_${k}`;
+    taken.add(n);
+    return n;
+  };
+  const name = fresh(loop.name);
+  const item = fresh(loop.item);
+  return {
+    items: nextItems,
+    loops: loops.map((l) => (l.id === id ? { ...l, status: "accepted", name, item, absorbed } : l)),
+  };
+}
+
+/** Un-accept (back to suggested) or reject a loop; suggestions it replaced come back. */
+export function releaseLoop(items: Item[], loops: LoopItem[], id: string, status: "suggested" | "rejected"): LoopChange {
+  const loop = loops.find((l) => l.id === id);
+  if (!loop) return { items, loops };
+  const back = new Map((loop.status === "accepted" ? loop.absorbed : []).map((a) => [a.id, a.status]));
+  return {
+    items: items.map((i) => {
+      const was = back.get(i.id);
+      return was && i.status === "rejected" ? { ...i, status: was } : i;
+    }),
+    loops: loops.map((l) => (l.id === id ? { ...l, status, absorbed: [], previewRows: l.rows } : l)),
+  };
+}
+
+export function updateLoop(loops: LoopItem[], id: string, patch: Partial<LoopItem>): LoopItem[] {
+  return loops.map((l) => (l.id === id ? { ...l, ...patch } : l));
+}
+
+/** Rename a field; its key changes in the preview rows too. */
+export function renameField(loop: LoopItem, from: string, to: string): Partial<LoopItem> {
+  const rename = (rows: LoopRows): LoopRows =>
+    loop.scalar
+      ? rows
+      : (rows as Record<string, string>[]).map((r) =>
+          Object.fromEntries(Object.entries(r).map(([k, v]) => [k === from ? to : k, v])),
+        );
+  return {
+    fields: loop.fields.map((f) => (f.name === from ? { ...f, name: to } : f)),
+    rows: rename(loop.rows),
+    previewRows: rename(loop.previewRows),
+  };
+}
+
+export function validateFieldName(name: string, loop: LoopItem, self: string): string | null {
+  if (!name) return "name is required";
+  if (!VALUES_KEY_RE.test(name)) return "letters, digits and _ (not starting with a digit)";
+  if (RESERVED.has(name)) return `"${name}" is a reserved word`;
+  if (loop.fields.some((f) => f.name !== self && f.name === name)) return `"${name}" is already a field`;
+  return null;
+}
+
+export function loopSpecsFor(loops: LoopItem[]): LoopSpec[] {
+  return loops
+    .filter((l) => l.status === "accepted")
+    .map((l) => ({
+      name: l.name,
+      item: l.item,
+      items: l.items,
+      fields: l.fields.map((f) => ({ name: f.name, spans: f.spans, type: f.type })),
+      scalar: l.scalar,
+      sources: l.sources,
+    }));
+}
+
+/** UTF-16 regions of the loops that are not rejected, for the document view. */
+export function loopRegionsU16(map: OffsetMap, loops: LoopItem[]): { start: number; end: number; loop: LoopItem }[] {
+  return loops
+    .filter((l) => l.status !== "rejected")
+    .map((l) => {
+      const r = loopRegion(l);
+      return { ...map.rangeToU16(r.start, r.end), loop: l };
+    })
+    .sort((a, b) => a.start - b.start);
 }

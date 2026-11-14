@@ -42,11 +42,49 @@ export interface DocumentProfile {
   reason: string | null;
 }
 
+/** One loop's list: a mapping per item, or a string per item (scalar loop). */
+export type LoopRows = Record<string, string>[] | string[];
+
+export interface LoopFieldCandidate {
+  name: string;
+  type: string;
+  /** One per item, in item order. */
+  spans: Span[];
+}
+
+/** A suggested repeated block (list items, SQL rows...): becomes a {% for %} loop. */
+export interface LoopCandidate {
+  id: string;
+  name: string;
+  item: string;
+  items: Span[];
+  fields: LoopFieldCandidate[];
+  scalar: boolean;
+  sources: string[];
+  detectors: string[];
+  confidence: number;
+  reason: string | null;
+  variant_values: (LoopRows | null)[] | null;
+}
+
 export interface SuggestResult {
   candidates: Candidate[];
   notices: Notice[];
   profile?: DocumentProfile;
+  loops?: LoopCandidate[];
 }
+
+export interface LoopSpec {
+  name: string;
+  item: string;
+  items: Span[];
+  fields: { name: string; spans: Span[]; type?: string }[];
+  scalar: boolean;
+  sources?: string[];
+}
+
+/** Render values: variables are strings, loops are lists. */
+export type RenderValues = Record<string, string | LoopRows>;
 
 export interface VariableSpec {
   name: string;
@@ -79,6 +117,7 @@ export interface BuildResponse {
   env: EmittedFile;
   runner: EmittedFile[];
   variables: { name: string; type: string; value: string; spans: Span[] }[];
+  loops?: { name: string; item: string }[];
   roundtrip: RoundTrip;
 }
 
@@ -241,9 +280,9 @@ export const api = {
     post<SuggestResult>("/suggest", { text, variants }, signal),
   suggestLlm: (text: string, variants: string[], signal?: AbortSignal) =>
     post<LlmReviewResponse>("/suggest/llm", { text, variants }, signal),
-  build: (text: string, variables: VariableSpec[], signal?: AbortSignal) =>
-    post<BuildResponse>("/build", { text, variables }, signal),
-  render: (template: string, values: Record<string, string>, signal?: AbortSignal) =>
+  build: (text: string, variables: VariableSpec[], loops: LoopSpec[], signal?: AbortSignal) =>
+    post<BuildResponse>("/build", { text, variables, loops }, signal),
+  render: (template: string, values: RenderValues, signal?: AbortSignal) =>
     post<RenderResponse>("/render", { template, values }, signal),
   chart: (text: string, variants: string[], variables: VariableSpec[], opts: ChartOptions, signal?: AbortSignal) =>
     post<ChartResponse>(
@@ -295,11 +334,11 @@ export const api = {
     if (!resp.ok) throw await errorFrom(resp);
     return await resp.blob();
   },
-  download: async (text: string, variables: VariableSpec[]): Promise<Blob> => {
+  download: async (text: string, variables: VariableSpec[], loops: LoopSpec[] = []): Promise<Blob> => {
     const resp = await fetch("/download", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, variables }),
+      body: JSON.stringify({ text, variables, loops }),
     });
     if (!resp.ok) throw await errorFrom(resp);
     return await resp.blob();

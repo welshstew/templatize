@@ -19,6 +19,7 @@
   --src-manual: #15803d;
   --src-llm: #db2777;
   --src-ner: #ea580c;
+  --src-loop: #0369a1;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --radius: 8px;
@@ -47,6 +48,7 @@
     --src-manual: #4ade80;
     --src-llm: #f472b6;
     --src-ner: #fb923c;
+    --src-loop: #38bdf8;
     --filled: #4ade80;
     --filled-bg: rgba(74, 222, 128, 0.09);
   }
@@ -411,3 +413,47 @@ button.tok-action.ref:hover { text-decoration: underline; }
 .cov-path { font-family: var(--mono); }
 .cov-val { font-family: var(--mono); background: var(--code-bg); border-radius: 4px; padding: 0 4px; overflow-wrap: anywhere; }
 .cov-notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; }
+
+/* ---------- Loops (repeated blocks) ---------- */
+/* The badge is a pseudo-element, so it is not part of the text (selection offsets). */
+.loop-region {
+  --c: var(--src-loop);
+  border: 1px dashed color-mix(in srgb, var(--c) 70%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--c) 5%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+}
+.loop-region.accepted { border-style: solid; background: color-mix(in srgb, var(--c) 8%, transparent); }
+.loop-region.selected { border-color: var(--c); box-shadow: 0 0 0 1px var(--c); }
+.loop-region::before {
+  content: attr(data-label);
+  font: 600 10.5px/1 var(--sans);
+  color: var(--accent-text);
+  background: var(--c);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-right: 4px;
+  vertical-align: 1px;
+  user-select: none;
+}
+mark.loop-field { --c: var(--src-loop); }
+
+.list li.loop { border-color: color-mix(in srgb, var(--src-loop) 45%, var(--border)); }
+.list li.loop.accepted { border-left: 3px solid var(--src-loop); }
+.list li.loop .row { display: flex; align-items: center; gap: 6px; }
+.list li.loop.suggested .name { flex: 1; }
+.loop-for { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; color: var(--muted); }
+.loop-for code { font-family: var(--mono); }
+.loop-for input.item-name { font-family: var(--mono); width: 9rem; padding: 1px 4px; font-size: 12px; }
+.loop-table-wrap { margin-top: 6px; max-height: 260px; overflow: auto; }
+.loop-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.loop-table th, .loop-table td { border-bottom: 1px solid var(--border); padding: 2px 4px; text-align: left; vertical-align: middle; }
+.loop-table th { font-weight: 600; color: var(--muted); position: sticky; top: 0; background: var(--panel); }
+.loop-table th code { font-family: var(--mono); font-size: 11.5px; }
+.loop-table input { width: 100%; min-width: 4rem; font-family: var(--mono); font-size: 12px; padding: 1px 4px; }
+.loop-table input.field-name { font-weight: 600; }
+.loop-table .row-actions { width: 1%; }
+.loop-table .row-actions .icon { padding: 0 6px; line-height: 18px; }
+.loop-for input, .loop-table th input { color: var(--text); }

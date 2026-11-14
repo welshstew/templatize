@@ -19,16 +19,22 @@ import { RoundTripBadge } from "./components/RoundTripBadge.tsx";
 import { SelectionPopover } from "./components/SelectionPopover.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import {
+  acceptLoop,
   accepted,
   addManual,
   applyReview,
   type Item,
   itemsFromCandidates,
+  type LoopItem,
+  loopsFromCandidates,
+  loopSpecsFor,
   previewChanged,
   previewValues,
+  releaseLoop,
   setStatus,
   specsFor,
   updateItem,
+  updateLoop,
 } from "./model.ts";
 import { OffsetMap } from "./offsets.ts";
 
@@ -68,6 +74,7 @@ export function App() {
   const [text, setText] = useState("");
   const [variants, setVariants] = useState<string[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const [loops, setLoops] = useState<LoopItem[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,8 +101,9 @@ export function App() {
   const limits = info?.limits ?? DEFAULT_LIMITS;
   const map = useMemo(() => new OffsetMap(text), [text]);
   const specs = useMemo(() => specsFor(items), [items]);
-  const specsKey = JSON.stringify(specs);
-  const valuesKey = JSON.stringify(previewValues(items));
+  const loopSpecs = useMemo(() => loopSpecsFor(loops), [loops]);
+  const specsKey = JSON.stringify([specs, loopSpecs]);
+  const valuesKey = JSON.stringify(previewValues(items, loops));
 
   useEffect(() => {
     api.info().then(setInfo, () => setInfo(null));
@@ -108,6 +116,7 @@ export function App() {
       const docVariants = variants.filter((v) => v.length > 0);
       const res = await api.suggest(text, docVariants);
       setItems(itemsFromCandidates(res.candidates));
+      setLoops(loopsFromCandidates(res.loops ?? [], new OffsetMap(text)));
       setNotices(res.notices);
       setProfile(res.profile ?? null);
       setOutput("jinja");
@@ -173,6 +182,7 @@ export function App() {
     setLlm({ state: "off" });
     setMode("edit");
     setItems([]);
+    setLoops([]);
     setNotices([]);
     setBuild(null);
     setPreview(null);
@@ -187,7 +197,7 @@ export function App() {
     (signal) => {
       if (mode !== "review" || output === "helm") return;
       setBuildPending(true);
-      api.build(text, specs, signal).then(
+      api.build(text, specs, loopSpecs, signal).then(
         (b) => {
           setBuild(b);
           setBuildError(null);
@@ -230,7 +240,7 @@ export function App() {
   useDebouncedEffect(
     (signal) => {
       if (mode !== "review" || !build) return;
-      api.render(build.template.content, previewValues(items), signal).then(setPreview, (e) => {
+      api.render(build.template.content, previewValues(items, loops), signal).then(setPreview, (e) => {
         if (!isAbort(e)) setPreview({ ok: false, output: null, error: String(e) });
       });
     },
@@ -238,8 +248,19 @@ export function App() {
     200,
   );
 
-  const onStatus = useCallback((ids: string[], status: Item["status"]) => {
-    setItems((cur) => setStatus(cur, new Set(ids), status));
+  const onStatus = useCallback(
+    (ids: string[], status: Item["status"]) => {
+      setItems((cur) => setStatus(cur, new Set(ids), status, loops));
+    },
+    [loops],
+  );
+  const onLoopStatus = (id: string, status: LoopItem["status"]) => {
+    const r = status === "accepted" ? acceptLoop(items, loops, id) : releaseLoop(items, loops, id, status);
+    setItems(r.items);
+    setLoops(r.loops);
+  };
+  const onLoopUpdate = useCallback((id: string, patch: Partial<LoopItem>) => {
+    setLoops((cur) => updateLoop(cur, id, patch));
   }, []);
   const onUpdate = useCallback((id: string, patch: Partial<Item>) => {
     setItems((cur) => updateItem(cur, id, patch));
@@ -247,7 +268,7 @@ export function App() {
 
   const onAdd = (name: string, type: string, allOccurrences: boolean): string | null => {
     if (!selection) return "no selection";
-    const res = addManual(items, map, { start: selection.start, end: selection.end, name, type, allOccurrences });
+    const res = addManual(items, map, { start: selection.start, end: selection.end, name, type, allOccurrences }, loops);
     if (res.error) return res.error;
     setItems(res.items);
     setSelectedId(res.added?.id ?? null);
@@ -262,7 +283,7 @@ export function App() {
       const helm = output === "helm";
       const blob = helm
         ? await api.chartDownload(text, reviewedVariants.current, specs, { chartName: chartName || null, style: chartStyle })
-        : await api.download(text, specs);
+        : await api.download(text, specs, loopSpecs);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -277,6 +298,7 @@ export function App() {
   };
 
   const acceptedCount = accepted(items).length;
+  const listCount = loops.filter((l) => l.status === "accepted").length;
   const isK8s = profile?.format === "kubernetes";
   const helm = output === "helm";
   const folded = helm && !docOpen;
@@ -337,7 +359,8 @@ export function App() {
             ) : null}
             <span class="spacer" />
             <span class="muted counts">
-              {acceptedCount} variable{acceptedCount === 1 ? "" : "s"} · {suggestedCount} pending
+              {acceptedCount} variable{acceptedCount === 1 ? "" : "s"}
+              {listCount ? ` · ${listCount} list${listCount === 1 ? "" : "s"}` : ""} · {suggestedCount} pending
             </span>
             <button onClick={backToEdit}>Edit text</button>
             <button class="primary" onClick={download} disabled={(helm ? !chart || !!chartError : !build) || buildPending}>
@@ -435,6 +458,7 @@ export function App() {
                 <DocumentView
                   map={map}
                   items={items}
+                  loops={loops}
                   selectedId={selectedId}
                   onSelectItem={setSelectedId}
                   onTextSelection={setSelection}
@@ -451,6 +475,9 @@ export function App() {
             onSelect={setSelectedId}
             onStatus={onStatus}
             onUpdate={onUpdate}
+            loops={loops}
+            onLoopStatus={onLoopStatus}
+            onLoopUpdate={onLoopUpdate}
             helm={helm}
           />
           {helm ? (
@@ -470,7 +497,7 @@ export function App() {
               build={build}
               buildError={buildError}
               preview={preview}
-              previewChanged={previewChanged(items)}
+              previewChanged={previewChanged(items, loops)}
               original={reviewedText.current}
             />
           )}
