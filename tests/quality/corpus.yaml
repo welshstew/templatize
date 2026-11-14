@@ -299,3 +299,39 @@ k8s-service.yaml:
   want: [search-api, search, LoadBalancer, 34.89.12.201, "80", "8080"]
   reject: [Service, TCP, v1]
   occurrences: {search-api: 3}
+
+# --- fourth batch: prose, JSON, logs ---------------------------------------------------
+
+password_reset.txt:
+  want: [Nadia, Clearpath, nadia.ibrahim@example.org, "30", https://id.clearpath.example.com/reset/7Kp2xQ9mWz, security@clearpath.example.com]
+  reject: [Hello]
+
+ticket.txt:
+  want: [OPS-4471, Ines Duarte, Kofi Mensah, P2, staging-eu, billing-worker, 512Mi, 610Mi, 1Gi, 900MiB]
+  reject: [Ticket, Priority]
+  occurrences: {staging-eu: 2, billing-worker: 2}
+
+api_response.json:
+  want: [cus_Q8z2LmP4, billing@northwind.example.com, Northwind Components Ltd, 14 Harbour Road, Bristol, BS1 6AA, GB, gbp, "125000", "1762300800"]
+  reject: [address, line1]
+
+app.log:
+  want: [orders-api, "0.0.0.0:8080", production, 3.18.2, pg-orders-primary.internal, stripe]
+  reject: [INFO, WARN, ERROR]
+
+onboarding.md:
+  want: [Felix, LT-20931, "8 Canal Street, Manchester M1 3HE", Monday 17 November, Aisha Bello, Platform Reliability, Tuesday 18 November 2026, "#team-platform", "4"]
+  reject: [Welcome, Manager, Team]
+
+dns_change.txt:
+  want: [CHG-30512, api.northwind.example.com, A, 203.0.113.17, 203.0.113.42, "300", "2026-11-20 22:00", Marta Novak, marta.novak@example.com]
+  reject: [Type]
+
+offer_letter_us.txt:
+  want: [Jordan, Data Platform Engineer, "Coastline Analytics, Inc.", "January 5, 2027", "165,000", "10,000", "December 1, 2026", Priya Natarajan, VP of Engineering]
+  reject: [Dear, Sincerely]
+
+haproxy_backend.cfg:
+  want: [api_servers, leastconn]
+  reject: [backend, check]
+  loops: {servers: 3}

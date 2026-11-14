@@ -1,0 +1,10 @@
+Change request CHG-30512
+
+Please update the DNS record for api.northwind.example.com:
+
+  Type: A
+  Old value: 203.0.113.17
+  New value: 203.0.113.42
+  TTL: 300
+
+Scheduled for 2026-11-20 22:00 UTC by Marta Novak (marta.novak@example.com).

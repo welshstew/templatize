@@ -646,7 +646,7 @@ class KeyValueDetector:
         keys = [m.group(1) for ln in content if (m := lead.match(ln))]
         if len(keys) / len(content) < _SPACED_MIN_SHARE:
             return False
-        if any(_PROSE_END.search(ln.rstrip()) or len(ln.split()) > 8 for ln in content):
+        if any(_PROSE_END.search(ln.rstrip()) or len(ln.split()) > 14 for ln in content):
             return False
         configish = any(c in k for k in keys for c in "-_.")
         return configish or len(set(keys)) < len(keys)

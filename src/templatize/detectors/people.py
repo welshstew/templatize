@@ -241,15 +241,18 @@ def _companies(text: str) -> list[Candidate]:
         if line_start == 0:
             continue
         start, end = _line_at(text, line_start - 1)
+        if not text[start:end].strip() or text[line_start : s.start].strip():
+            continue  # a blank line above, or the address starts mid-line
         span = _stripped(text, start, end)
-        if span.end > span.start and _COMPANY.match(text[span.start : span.end]):
+        if _COMPANY.match(text[span.start : span.end]):
             name = f"{role}_company" if role else "company"
             out.append(_candidate(text, span, name, "the company above an address"))
     return out
 
 
 _GREETING = re.compile(
-    r"^[ \t]*(?:Dear|Hi|Hello)[ \t]+([^,\r\n]+?)[ \t]*[,:!]?[ \t]*\r?$", re.MULTILINE
+    r"^[ \t#]*(?:Dear|Hi|Hello|Hey|Welcome,?)[ \t]+([^,!\r\n]+?)[ \t]*[,:!]?[ \t]*\r?$",
+    re.MULTILINE,
 )
 _HONORIFIC = re.compile(r"^(?:(?:Mr|Mrs|Ms|Miss|Mx|Dr|Prof|Sir|Dame)\.?[ ]+)")
 _JOB_WORDS = re.compile(
@@ -386,6 +389,22 @@ _BRAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     # A text message signed at the start: "Larkspur Bank: your verification code is ..."
     (re.compile(rf"\A({_PHRASE}): (?=[a-z])"), "sender"),
+    # "the position of Data Platform Engineer at Coastline Analytics, Inc."
+    (
+        re.compile(
+            r"\b(?:position|role|post) of ((?:[A-Z][\w/&-]*[ ]){0,5}[A-Z][\w/&-]*)(?= at | with |[,.])"
+        ),
+        "job_title",
+    ),
+    (
+        re.compile(
+            r"\b(?:position|role|post) of (?:[A-Z][\w/&-]*[ ]){0,5}[A-Z][\w/&-]* at "
+            r"([A-Z][\w&'-]*(?: [A-Z][\w&'-]*){0,3}(?:,? (?:Inc|LLC|Ltd|Limited|GmbH|plc|Corp)\.?)?)"
+            # The name ends where the sentence goes on, not at a line break inside it.
+            r"(?=[,;!]|\.(?:\s|$)| [a-z])"
+        ),
+        "company",
+    ),
     # "the Senior Site Reliability Engineer role"
     (
         re.compile(

@@ -349,3 +349,42 @@ def test_kubernetes_enums_are_structure() -> None:
         "    - port: 80\n      protocol: TCP\n"
     )
     assert "TCP" not in values(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "name", "value"),
+    [
+        ("Memory limit is 512Mi; usage peaks at 610Mi.", "limit", "512Mi"),
+        ("Join us in #team-platform on Slack", "channel", "#team-platform"),
+    ],
+)
+def test_round_four_patterns(text: str, name: str, value: str) -> None:
+    assert regex_named(text).get(name) == value
+
+
+@pytest.mark.parametrize("text", ["see issue #912", "color #ffcc00", "# Heading"])
+def test_not_channels(text: str) -> None:
+    assert "channel" not in regex_named(text)
+
+
+def test_inline_assignments_in_prose_and_logs() -> None:
+    found = cmds("Set GOMEMLIMIT=900MiB.\n08:15 INFO started (env=production, version=3.18.2)\n")
+    assert found == {"gomemlimit": "900MiB", "env": "production", "version": "3.18.2"}
+
+
+def test_welcome_greeting_and_position_at_company() -> None:
+    assert (
+        values("# Welcome, Felix!\n\nYour laptop ships soon.\n")["Felix"] == "recipient_first_name"
+    )
+    found = values(
+        "We offer you the position of Data Platform Engineer at Coastline Analytics, Inc., from May.\n"
+    )
+    assert found["Data Platform Engineer"] == "job_title"
+    assert found["Coastline Analytics, Inc."] == "company"
+    # A company name broken over two lines is not cut at the line break.
+    assert "Orbit" not in values("the position of Senior Data Engineer at Orbit\nAnalytics GmbH.\n")
+
+
+def test_one_line_address_in_prose() -> None:
+    text = "Your laptop (asset tag LT-20931, a 14-inch model) ships to 8 Canal Street, Manchester M1 3HE\n"
+    assert values(text)["8 Canal Street, Manchester M1 3HE"] == "address"

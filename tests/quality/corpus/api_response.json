@@ -1,0 +1,14 @@
+{
+  "id": "cus_Q8z2LmP4",
+  "email": "billing@northwind.example.com",
+  "name": "Northwind Components Ltd",
+  "address": {
+    "line1": "14 Harbour Road",
+    "city": "Bristol",
+    "postal_code": "BS1 6AA",
+    "country": "GB"
+  },
+  "currency": "gbp",
+  "balance": 125000,
+  "created": 1762300800
+}

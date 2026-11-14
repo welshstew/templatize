@@ -30,7 +30,7 @@ def found(text: str) -> list[str]:
         ),
         ("Suite 400\nToronto, ON M5V 3L9\nCanada\n", "Suite 400\nToronto, ON M5V 3L9"),
         ("Musterfirma GmbH\nHauptstraße 5\n10115 Berlin\n", "Hauptstraße 5\n10115 Berlin"),
-        ("Visit us at 22 Mill Lane, Manchester M4 2PL\n", None),
+        ("Visit us at 22 Mill Lane, Manchester M4 2PL\n", "22 Mill Lane, Manchester M4 2PL"),
         ("22 Mill Lane, Manchester M4 2PL\n", "22 Mill Lane, Manchester M4 2PL"),
         ("Address:\r\n2 Mill Lane\r\nManchester M4 2PL\r\n", "2 Mill Lane\r\nManchester M4 2PL"),
     ],

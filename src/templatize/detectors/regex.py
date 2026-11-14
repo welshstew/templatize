@@ -304,6 +304,24 @@ PATTERNS: list[Pattern] = [
         group=1,
     ),
     Pattern(
+        "regex.size",
+        VarType.STRING,
+        # Data sizes: "512Mi", "900MiB", "12G", "8GB" (Kubernetes, configs, prose).
+        re.compile(r"(?<![\w.-])\d+(?:\.\d+)?(?:[KMGTP]i?B?|[KMGT]|kB)(?![\w-])"),
+        0.6,
+        name="size",
+    ),
+    Pattern(
+        "regex.channel",
+        VarType.STRING,
+        # Chat channels: "#team-platform" (not "#912", "#ffcc00", "# heading").
+        re.compile(
+            r"(?<![\w#&/])#(?![0-9a-fA-F]{3}\b|[0-9a-fA-F]{6}\b)[a-z][a-z0-9_-]{1,79}(?![\w-])"
+        ),
+        0.6,
+        name="channel",
+    ),
+    Pattern(
         "regex.iban",
         VarType.STRING,
         re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){3,7}(?:[ ]?[A-Z0-9]{1,3})?\b"),
@@ -652,7 +670,12 @@ def _line_labels(text: str, found: list[Candidate]) -> list[Candidate]:
     return out
 
 
-_CONTEXT_NAMED = {"regex.reference": "reference", "regex.opaque_id": "id", "regex.amount": "amount"}
+_CONTEXT_NAMED = {
+    "regex.reference": "reference",
+    "regex.opaque_id": "id",
+    "regex.amount": "amount",
+    "regex.size": "size",
+}
 _CONTEXT_SKIP = frozenset(
     [
         "a",
@@ -696,6 +719,9 @@ _CONTEXT_SKIP = frozenset(
         "fw",
         "fwd",
     ]
+)
+_SIZE_WORDS = frozenset(
+    ["limit", "request", "requests", "memory", "size", "quota", "capacity", "storage", "disk"]
 )
 _MONEY_WORDS = frozenset(
     [
@@ -746,7 +772,9 @@ def _context_names(text: str, found: list[Candidate]) -> list[Candidate]:
             out.append(c)
             continue
         base = snake_case(word)
-        if kind == "amount":
+        if kind == "size":
+            name = base if base in _SIZE_WORDS else f"{base}_size"
+        elif kind == "amount":
             name = base if base in _MONEY_WORDS or base.endswith("_amount") else f"{base}_amount"
         else:
             name = base if base.endswith(kind) else f"{base}_{kind}"

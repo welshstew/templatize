@@ -216,6 +216,36 @@ def _ports(text: str) -> list[Candidate]:
     ]
 
 
+# GOMEMLIMIT=900MiB in prose, env=production / request_id=req_9fA2kL in log lines.
+_INLINE_ASSIGN = re.compile(
+    r"(?<![\w$.-])([A-Za-z_][A-Za-z0-9_]{1,40}(?:\.[a-z_]+)?)=([A-Za-z0-9./:@~+-]*[A-Za-z0-9/])(?=[\s,;)\]'\"`.]|$)"
+)
+
+
+def _inline_assignments(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    for line in re.finditer(r"[^\n]+", text):
+        body = line.group(0)
+        stripped = body.lstrip()
+        if re.match(r"(?:export\s+)?[A-Za-z_][\w.-]*\s*=", stripped):
+            continue  # a KEY=value line: the key/value detector reads it
+        for m in _INLINE_ASSIGN.finditer(body):
+            if body[: m.start()].rstrip().endswith(("--", "-")):
+                continue  # a flag (--set a=b)
+            out.append(
+                _candidate(
+                    text,
+                    line.start() + m.start(2),
+                    line.start() + m.end(2),
+                    _name(m.group(1)),
+                    "cmd.assign",
+                    0.6,
+                    f"{m.group(1)}=",
+                )
+            )
+    return out
+
+
 def _ssh(text: str) -> list[Candidate]:
     out: list[Candidate] = []
     for m in _SSH.finditer(text):
@@ -270,7 +300,14 @@ class CommandsDetector:
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
         text = ctx.text
-        found = [*_clients(text), *_ssh(text), *_flags(text), *_ports(text), *_code_spans(text)]
+        found = [
+            *_clients(text),
+            *_ssh(text),
+            *_flags(text),
+            *_ports(text),
+            *_code_spans(text),
+            *_inline_assignments(text),
+        ]
         # The first detection of a span wins (a client's -h over a generic flag).
         seen: set[tuple[int, int]] = set()
         out: list[Candidate] = []

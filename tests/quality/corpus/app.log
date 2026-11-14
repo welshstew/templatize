@@ -1,0 +1,3 @@
+2026-11-14T08:15:02.113Z INFO  [orders-api] Listening on 0.0.0.0:8080 (env=production, version=3.18.2)
+2026-11-14T08:15:04.870Z WARN  [orders-api] Slow query (1240 ms) on pg-orders-primary.internal: SELECT * FROM orders WHERE customer_id = 88213
+2026-11-14T08:16:11.002Z ERROR [orders-api] Payment provider timeout after 30000 ms (provider=stripe, request_id=req_9fA2kL)
