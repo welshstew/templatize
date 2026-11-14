@@ -629,6 +629,15 @@ take any number of items in the preview. Accepting a loop sets aside the suggest
 on its fields (they come back if you remove the loop); variables that sit at the same
 place in every item, such as a tenant id in every row, still work inside it.
 
+**Table loops.** Rows of a table with aligned columns (an invoice's line items, a
+hosts list) are a loop whose fields are padded slots: a column whose cells share a
+start is left-aligned, one whose cells share an end (or numbers of one width) is
+right-aligned, and field names come from a header line above (skipping a `----`
+rule). Jinja renders `{{ "%-34s"|format(row.description) }}  {{ "%3s"|format(row.qty) }}`,
+Helm `{{ printf "%-34v" $row.description }}`, so a new row lines up under the
+header. A value longer than its column pushes the rest of the row right (columns
+never truncate); two spaces always separate the columns.
+
 **Map loops.** Open-ended key/value blocks (`environment:`, `labels:`,
 `annotations:`, `tags:`, `data:`, or keys that look like environment variables) are
 offered as map loops: `{% for key, value in web_environment.items() %}` over a

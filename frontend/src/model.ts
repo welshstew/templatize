@@ -492,6 +492,8 @@ export interface LoopField {
   type: string;
   /** One per item, code points. */
   spans: Span[];
+  /** A padded table column: the value is the slot without its padding. */
+  align?: "left" | "right" | null;
 }
 
 /** A repeated block: suggested by the server, accepted or rejected by the user. */
@@ -536,16 +538,22 @@ function cpSlice(map: OffsetMap, s: Span): string {
   return map.text.slice(u.start, u.end);
 }
 
+function cellOf(map: OffsetMap, f: LoopField, i: number): string {
+  const raw = cpSlice(map, f.spans[i] ?? { start: 0, end: 0 });
+  if (f.align === "left") return raw.replace(/ +$/, "");
+  if (f.align === "right") return raw.replace(/^ +/, "");
+  return raw;
+}
+
 export function rowsOf(map: OffsetMap, loop: { scalar: boolean; items: Span[]; fields: LoopField[] }): LoopRows {
-  if (loop.scalar) return (loop.fields[0]?.spans ?? []).map((s) => cpSlice(map, s));
-  return loop.items.map((_, i) =>
-    Object.fromEntries(loop.fields.map((f) => [f.name, cpSlice(map, f.spans[i] ?? { start: 0, end: 0 })])),
-  );
+  const first = loop.fields[0];
+  if (loop.scalar) return first ? loop.items.map((_, i) => cellOf(map, first, i)) : [];
+  return loop.items.map((_, i) => Object.fromEntries(loop.fields.map((f) => [f.name, cellOf(map, f, i)])));
 }
 
 export function loopsFromCandidates(cands: LoopCandidate[], map: OffsetMap): LoopItem[] {
   return cands.map((c) => {
-    const fields = c.fields.map((f) => ({ name: f.name, type: f.type, spans: f.spans }));
+    const fields = c.fields.map((f) => ({ name: f.name, type: f.type, spans: f.spans, align: f.align ?? null }));
     const rows = rowsOf(map, { scalar: c.scalar, items: c.items, fields });
     return {
       id: c.id,
@@ -705,7 +713,7 @@ export function loopSpecsFor(loops: LoopItem[]): LoopSpec[] {
       name: l.name,
       item: l.item,
       items: l.items,
-      fields: l.fields.map((f) => ({ name: f.name, spans: f.spans, type: f.type })),
+      fields: l.fields.map((f) => ({ name: f.name, spans: f.spans, type: f.type, ...(f.align ? { align: f.align } : {}) })),
       scalar: l.scalar,
       ...(l.map ? { map: true } : {}),
       sources: l.sources,

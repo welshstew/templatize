@@ -406,9 +406,12 @@ def _range_emit(
 ) -> gotemplate.RangeEmit:
     """The loop's first item as a ``range`` body, relative to its resource chunk."""
     first = lp.items[0]
-    holes: list[tuple[Span, str]] = [
-        (f.spans[0], f"${lp.item}" if lp.scalar else f"${lp.item}.{f.name}") for f in lp.fields
-    ]
+    holes: list[tuple[Span, str]] = []
+    for f in lp.fields:
+        ref = f"${lp.item}" if lp.scalar else f"${lp.item}.{f.name}"
+        if f.align is not None:  # padded table column; %v, as values may be numbers
+            ref = f'printf "%{"-" if f.align == "left" else ""}{f.width}v" {ref}'
+        holes.append((f.spans[0], ref))
     holes += [
         (s, "$.Values." + ".".join(path_of[v.name]))
         for v in variables

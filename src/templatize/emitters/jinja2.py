@@ -166,10 +166,13 @@ class Jinja2Emitter:
             self._literal(b, sep, newline)
             b.expr("{% endif %}")
         first = lp.items[0]
-        holes: list[tuple[Span, str]] = [
-            (f.spans[0], f.name if lp.map else lp.item if lp.scalar else f"{lp.item}.{f.name}")
-            for f in lp.fields
-        ]
+        holes: list[tuple[Span, str]] = []
+        for f in lp.fields:
+            ref = f.name if lp.map else lp.item if lp.scalar else f"{lp.item}.{f.name}"
+            if f.align is not None:  # a padded table column
+                flag = "-" if f.align == "left" else ""
+                ref = f'"%{flag}{f.width}s"|format({ref})'
+            holes.append((f.spans[0], ref))
         holes += [(sp, v.name) for v in ir.variables for sp in v.spans if first.contains(sp)]
         holes.sort(key=lambda h: h[0].start)
         pos = first.start

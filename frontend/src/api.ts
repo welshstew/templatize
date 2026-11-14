@@ -54,6 +54,8 @@ export interface LoopFieldCandidate {
   type: string;
   /** One per item, in item order. */
   spans: Span[];
+  /** A padded table column: spans are whole slots, values are the cells. */
+  align?: "left" | "right" | null;
 }
 
 /** A suggested repeated block (list items, SQL rows...): becomes a {% for %} loop. */
@@ -86,7 +88,7 @@ export interface LoopSpec {
   name: string;
   item: string;
   items: Span[];
-  fields: { name: string; spans: Span[]; type?: string }[];
+  fields: { name: string; spans: Span[]; type?: string; align?: "left" | "right" | null }[];
   scalar: boolean;
   map?: boolean;
   sources?: string[];

@@ -180,6 +180,8 @@ class LoopFieldCandidate(BaseModel):
     type: VarType = VarType.STRING
     spans: list[Span] = Field(min_length=1)
     """One per item, in item order."""
+    align: Literal["left", "right"] | None = None
+    """A padded table column (see :class:`LoopField`)."""
 
 
 LoopValues = list[dict[str, str]] | list[str] | dict[str, str]
@@ -258,6 +260,22 @@ class LoopField(BaseModel):
     type: VarType = VarType.STRING
     spans: list[Span] = Field(min_length=1)
     """Absolute, one per item, in item order."""
+    align: Literal["left", "right"] | None = None
+    """A padded table column: each span is the whole slot (same width in every row)
+    and the value is the cell without its padding spaces; rendered with
+    ``"%-Ns"|format(...)`` (left) or ``"%Ns"`` (right), N = the slot width."""
+
+    def value_at(self, text: str, i: int) -> str:
+        raw = text[self.spans[i].start : self.spans[i].end]
+        if self.align == "left":
+            return raw.rstrip(" ")
+        if self.align == "right":
+            return raw.lstrip(" ")
+        return raw
+
+    @property
+    def width(self) -> int:
+        return self.spans[0].end - self.spans[0].start
 
 
 class Loop(BaseModel):
@@ -294,27 +312,18 @@ class Loop(BaseModel):
         """One dict per item (or one string, if scalar); a map's entries as
         ``{key_field: ..., value_field: ...}`` rows."""
         if self.scalar:
-            return [text[s.start : s.end] for s in self.fields[0].spans]
-        return [
-            {f.name: text[f.spans[i].start : f.spans[i].end] for f in self.fields}
-            for i in range(len(self.items))
-        ]
+            return [self.fields[0].value_at(text, i) for i in range(len(self.items))]
+        return [{f.name: f.value_at(text, i) for f in self.fields} for i in range(len(self.items))]
 
     def values_of(self, text: str) -> list[dict[str, str]] | list[str] | dict[str, str]:
         """What this loop renders from: a list of dicts (or strings, if scalar), or a
         mapping for a map loop."""
         if self.map:
             k, v = self.fields
-            return {
-                text[k.spans[i].start : k.spans[i].end]: text[v.spans[i].start : v.spans[i].end]
-                for i in range(len(self.items))
-            }
+            return {k.value_at(text, i): v.value_at(text, i) for i in range(len(self.items))}
         if self.scalar:
-            return [text[s.start : s.end] for s in self.fields[0].spans]
-        return [
-            {f.name: text[f.spans[i].start : f.spans[i].end] for f in self.fields}
-            for i in range(len(self.items))
-        ]
+            return [self.fields[0].value_at(text, i) for i in range(len(self.items))]
+        return [{f.name: f.value_at(text, i) for f in self.fields} for i in range(len(self.items))]
 
 
 class IRValidationError(ValueError):
@@ -449,6 +458,10 @@ def _validate_loops(ir: TemplateIR, names: set[str], var_spans: list[Span]) -> N
                         f"field {f.name!r} of loop {lp.name!r}: span {sp.start}-{sp.end} is "
                         f"outside its item {it.start}-{it.end}"
                     )
+            if f.align is not None and len({sp.end - sp.start for sp in f.spans}) != 1:
+                raise IRValidationError(
+                    f"padded field {f.name!r} of loop {lp.name!r} needs the same width in every item"
+                )
             if lp.scalar and any(sp != it for sp, it in zip(f.spans, lp.items, strict=True)):
                 raise IRValidationError(
                     f"scalar loop {lp.name!r}: the field must cover each whole item"

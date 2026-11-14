@@ -63,6 +63,9 @@ class Found:
     fields: list[list[Span]] | None = None
     """Known fields (one span per item), instead of inferring them by diffing."""
     map: bool = False
+    aligns: list[str | None] | None = None
+    """Per known field: "left"/"right" for padded table columns."""
+    field_names: list[str] | None = None
 
 
 # --- field inference -------------------------------------------------------------
@@ -373,7 +376,138 @@ def find_keyword_lines(text: str) -> list[Found]:
     return out
 
 
-FINDERS = (find_sql, find_yaml, find_inline_lists, find_keyword_lines)
+_CELL = re.compile(r"\S+(?: \S+)*")  # cells are separated by two or more spaces
+_RULE = re.compile(r"^[\s\-=+|:_~*]+$")
+TABLE_GAP = 2
+
+
+def find_tables(text: str) -> list[Found]:
+    """Runs of >= 2 lines with the same columns (cells separated by 2+ spaces), each
+    column left-aligned (same start) or right-aligned (same end): table rows. Fields
+    are padded slots, so rows of different widths share one skeleton."""
+    out: list[Found] = []
+    lines: list[tuple[int, str]] = []
+    pos = 0
+    for raw in text.splitlines(keepends=True):
+        lines.append((pos, raw.rstrip("\r\n")))
+        pos += len(raw)
+    cells = [[(m.start(), m.end()) for m in _CELL.finditer(body)] for _, body in lines]
+    k = 0
+    while k < len(lines):
+        n = len(cells[k])
+        j = k
+        while j < len(lines) and len(cells[j]) == n and n >= 2 and not _RULE.match(lines[j][1]):
+            j += 1
+        if j - k >= MIN_ITEMS:
+            found = _table(text, lines, cells, k, j)
+            if found is not None:
+                out.append(found)
+        k = max(j, k + 1)
+    return out
+
+
+_NUMBER = re.compile(r"^[-+]?[\d,]*\.?\d+%?$")
+
+
+def _table(
+    text: str, lines: list[tuple[int, str]], cells: list[list[tuple[int, int]]], k: int, j: int
+) -> Found | None:
+    rows = range(k, j)
+    n = len(cells[k])
+    header = _header_cells(lines, cells, k, j, n)
+    aligns: list[str] = []
+    for c in range(n):
+        starts = {cells[r][c][0] for r in rows}
+        ends = {cells[r][c][1] for r in rows}
+        numeric = all(_NUMBER.match(lines[r][1][slice(*cells[r][c])]) for r in rows)
+        if len(starts) == 1 and not (len(ends) == 1 and numeric):
+            aligns.append("left")
+        elif len(ends) == 1:
+            aligns.append("right")  # including numbers of one width: they grow leftwards
+        else:
+            return None
+    widths = {c: {cells[r][c][1] - cells[r][c][0] for r in rows} for c in range(n)}
+    if all(len(w) == 1 for w in widths.values()) and header is None:
+        return None  # nothing is padded: other finders handle uniform rows
+
+    def left_edge(c: int) -> int:
+        edge = min(cells[r][c][0] for r in rows)
+        return min(edge, header[c][0]) if header else edge
+
+    # Slots: fixed column positions. A left column's slot reaches TABLE_GAP short of
+    # the next column's left edge (its header or leftmost cell); a right column's slot
+    # starts TABLE_GAP after the previous slot, so numbers can grow leftwards.
+    slots: list[tuple[int, int]] = []
+    for c in range(n):
+        widest = max(cells[r][c][1] for r in rows)
+        if aligns[c] == "left":
+            start = cells[k][c][0]
+            end = widest if c == n - 1 else left_edge(c + 1) - TABLE_GAP
+            if end < widest:
+                return None
+        else:
+            start = slots[-1][1] + TABLE_GAP if slots else left_edge(c)
+            end = cells[k][c][1]
+        if end <= start:
+            return None
+        slots.append((start, end))
+    field_aligns: list[str | None] = [
+        None if (c == n - 1 and aligns[c] == "left") else aligns[c] for c in range(n)
+    ]
+    fields: list[list[Span]] = [[] for _ in range(n)]
+    items: list[Span] = []
+    for r in rows:
+        base, body = lines[r]
+        for c, (a, b) in enumerate(slots):
+            ca, cb = cells[r][c]
+            if field_aligns[c] is None:
+                a, b = ca, cb  # the last left column is not padded
+            if not (a <= ca and cb <= b) or body[a:b].strip(" ") != body[ca:cb]:
+                return None
+            fields[c].append(Span(start=base + a, end=base + b))
+        items.append(Span(start=base + slots[0][0], end=base + len(body)))
+    names = None
+    if header:
+        h_line = lines[_header_index(lines, k)][1]
+        names = [snake_case(h_line[a:b]) for a, b in header]
+    return Found(
+        name="rows",
+        items=items,
+        detector="loop.table",
+        confidence=0.7,
+        reason="rows of a table with aligned columns",
+        fields=fields,
+        aligns=field_aligns,
+        field_names=names,
+    )
+
+
+def _header_index(lines: list[tuple[int, str]], k: int) -> int:
+    h = k - 1
+    while h >= 0 and lines[h][1].strip() and _RULE.match(lines[h][1]):
+        h -= 1
+    return h
+
+
+def _header_cells(
+    lines: list[tuple[int, str]], cells: list[list[tuple[int, int]]], k: int, j: int, n: int
+) -> list[tuple[int, int]] | None:
+    """The header line above rows ``k..j`` (skipping a ---- rule), if it has one cell
+    per column, each overlapping its column's cells and ending before the next."""
+    h = _header_index(lines, k)
+    if h < 0 or len(cells[h]) != n:
+        return None
+    for c, (a, b) in enumerate(cells[h]):
+        lo = min(cells[r][c][0] for r in range(k, j))
+        hi = max(cells[r][c][1] for r in range(k, j))
+        if not (a < hi and lo < b):
+            return None
+        if c + 1 < n and b > min(cells[r][c + 1][0] for r in range(k, j)):
+            return None
+    return cells[h]
+
+
+FINDERS = (find_sql, find_yaml, find_inline_lists, find_keyword_lines, find_tables)
 
 
 # --- candidates ------------------------------------------------------------------
@@ -398,9 +532,11 @@ def _candidate(text: str, found: Found) -> LoopCandidate | None:
     types: list[VarType] = []
     for spans in fields:
         first = spans[0]
-        value = text[first.start : first.end]
+        value = text[first.start : first.end].strip(" " if found.aligns else "")
         named = next((n for region, n in found.names if region.contains(first)), None)
-        if found.map:
+        if found.field_names is not None:
+            name = found.field_names[len(names)]
+        elif found.map:
             name = ("key", "value")[len(names)]
         elif scalar:
             name = "value"
@@ -411,13 +547,14 @@ def _candidate(text: str, found: Found) -> LoopCandidate | None:
         names.append(name)
         types.append(infer_type(value))
     names = dedupe_names(names)
+    aligns = found.aligns or [None] * len(fields)
     return LoopCandidate(
         name=found.name,
         item=found.name,  # placeholder; final names in detect_loops
         items=found.items,
         fields=[
-            LoopFieldCandidate(name=n, type=t, spans=s)
-            for n, t, s in zip(names, types, fields, strict=True)
+            LoopFieldCandidate(name=n, type=t, spans=s, align=al)
+            for n, t, s, al in zip(names, types, fields, aligns, strict=True)
         ],
         scalar=scalar and not found.map,
         map=found.map,
@@ -445,19 +582,18 @@ def find_loops(text: str) -> list[LoopCandidate]:
     return kept
 
 
+def _cell(text: str, f: LoopFieldCandidate, i: int) -> str:
+    raw = text[f.spans[i].start : f.spans[i].end]
+    return raw.rstrip(" ") if f.align == "left" else raw.lstrip(" ") if f.align == "right" else raw
+
+
 def loop_values(text: str, loop: LoopCandidate) -> LoopValues:
     if loop.map:
         k, v = loop.fields
-        return {
-            text[k.spans[i].start : k.spans[i].end]: text[v.spans[i].start : v.spans[i].end]
-            for i in range(len(loop.items))
-        }
+        return {_cell(text, k, i): _cell(text, v, i) for i in range(len(loop.items))}
     if loop.scalar:
-        return [text[s.start : s.end] for s in loop.fields[0].spans]
-    return [
-        {f.name: text[f.spans[i].start : f.spans[i].end] for f in loop.fields}
-        for i in range(len(loop.items))
-    ]
+        return [_cell(text, loop.fields[0], i) for i in range(len(loop.items))]
+    return [{f.name: _cell(text, f, i) for f in loop.fields} for i in range(len(loop.items))]
 
 
 def _plural(name: str) -> str:
