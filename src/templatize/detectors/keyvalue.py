@@ -124,6 +124,7 @@ _GENERIC_KEYS = frozenset(
         "size",
         "count",
         "replicas",
+        "number",
     ]
 )
 _SKIP_VALUE_PREFIX = ("|", ">", "&", "*", "!", "{", "[", "#")
@@ -137,7 +138,7 @@ _HCL_BLOCK = re.compile(
     r"[ \t]*(?:variable|output|module|resource|data|provider)[ \t]+\"([^\"]+)\"(?:[ \t]+\"([^\"]+)\")?[ \t]*$"
 )
 _HCL_TYPE = re.compile(r"^(?:string|number|bool|any|(?:list|map|set|object|tuple)\(.*\))$")
-_INI_SECTION = re.compile(r"^[ \t]*\[([A-Za-z_][\w.-]*)\][ \t]*$")
+_INI_SECTION = re.compile(r"^[ \t]*\[([A-Za-z_][\w.-]*(?: [\w.-]+)?)\][ \t]*$")
 
 
 class _Scopes:

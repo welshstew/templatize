@@ -552,6 +552,14 @@ def _table(
         else:
             return None
     widths = {c: {cells[r][c][1] - cells[r][c][0] for r in rows} for c in range(n)}
+    if header is None and n == 2:
+        return None  # "Key    value" lines padded into columns: key/value, not table rows
+    if any(
+        len({lines[r][1][slice(*cells[r][c])] for r in rows}) == 1
+        and lines[k][1][slice(*cells[k][c])] in ("=", ":", "=>", "->")
+        for c in range(n)
+    ):
+        return None  # aligned assignments (ami           = "..."), not table rows
     if all(len(w) == 1 for w in widths.values()) and header is None:
         return None  # nothing is padded: other finders handle uniform rows
 

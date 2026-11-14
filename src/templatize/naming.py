@@ -54,7 +54,7 @@ def snake_case(raw: str) -> str:
         s = "v_" + s
     s = s[:MAX_NAME_LEN].rstrip("_")
     if s in RESERVED_NAMES:
-        s = s + "_value"
+        s = s + ("_name" if s == "namespace" else "_value")
     return s
 
 

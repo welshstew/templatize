@@ -216,9 +216,11 @@ outage_notice.txt:
   names: {"01:00": start_time, "03:00": end_time, Elena Petrova: sender_name}
 
 interview.txt:
-  want: [Jamal, Senior Site Reliability Engineer, Fernleaf, Tuesday 18 November, "10:30", https://meet.google.example.com/abc-defg-hij, Hannah Lewis, Omar Haddad, Rachel Green, Talent Partner, Fernleaf Ltd]
-  reject: [Google, Meet]
-  names: {Jamal: recipient_first_name, Rachel Green: sender_name}
+  want: [Jamal, Senior Site Reliability Engineer, Fernleaf, Tuesday 18 November, "10:30", https://meet.google.example.com/abc-defg-hij, Hannah Lewis, Omar Haddad, Rachel Green, Talent Partner]
+  reject: [Google, Meet, Fernleaf Ltd, Engineer]
+  # "Fernleaf Ltd" and "at Fernleaf": the name is the variable, "Ltd" stays text.
+  names: {Jamal: recipient_first_name, Rachel Green: sender_name, Fernleaf: sender_company}
+  occurrences: {Fernleaf: 2}
 
 CHANGELOG.md:
   want: [2.8.0, 2026-11-02, 2.7.4, 2026-10-15]

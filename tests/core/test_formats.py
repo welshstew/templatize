@@ -271,3 +271,26 @@ def test_people_introduced_with_titles_and_roles() -> None:
     found = values(text)
     assert found["Senior Site Reliability Engineer"] == "job_title"
     assert found["Hannah Lewis"] == "person_name"
+
+
+def test_noise_from_this_sweep() -> None:
+    # Padded key/value lines and aligned assignments are not tables.
+    from templatize.loops import find_tables
+
+    assert find_tables("[SERVICE]\n    Flush        5\n    Log_Level    info\n") == []
+    assert (
+        find_tables('ami           = "ami-1"\ninstance_type = "t3"\nkey_name      = "ops"\n') == []
+    )
+    # A repeated word whose other occurrence is inside an address is not repeated.
+    text = (
+        "455 Industrial Parkway\nAllentown, PA 18109\n\nThe lease at 455 Industrial Parkway ends.\n"
+    )
+    assert "Industrial Parkway" not in values(text)
+    # Time zone offsets are not repeated numbers.
+    assert "0000" not in values("[14/Nov/2026:09:12:01 +0000] a\n[14/Nov/2026:09:12:03 +0000] b\n")
+
+
+def test_company_name_without_its_suffix() -> None:
+    text = "Thanks for applying to Fernleaf.\n\nBest regards,\n\nRachel Green\nTalent Partner, Fernleaf Ltd\n"
+    found = {c.value: (c.name, len(c.spans)) for c in suggest(text).candidates}
+    assert found["Fernleaf"] == ("sender_company", 2)

@@ -199,6 +199,8 @@ class RepetitionDetector:
             tok = m.group(0)
             if not _non_trivial(tok) or in_phrase[m.start()]:
                 continue
+            if tok.isdigit() and len(tok) == 4 and m.start() and text[m.start() - 1] in "+-":
+                continue  # a time zone offset (+0000)
             if _PROTOCOL.match(tok):
                 continue  # HTTP/1.1, TLSv1.3: a protocol version, not a value
             if is_file_name(tok) and "/" not in tok:

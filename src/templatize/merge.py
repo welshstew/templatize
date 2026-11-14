@@ -113,6 +113,8 @@ def merge_candidates(
         free = [s for s in c.spans if not occupied.overlaps(s)]
         if not free:
             continue
+        if c.detectors == ["repetition"] and len(free) < 2 <= len(c.spans):
+            continue  # no longer repeated: its other occurrence is part of a longer value
         if len(free) != len(c.spans):
             c = c.model_copy(update={"spans": free})
         for s in free:

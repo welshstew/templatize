@@ -133,6 +133,30 @@ _NOT_NAMES = frozenset(
 )
 
 
+_LEGAL_SUFFIX = re.compile(
+    r"^(.+?) (?:Ltd|Limited|plc|PLC|Inc|LLC|LLP|GmbH|AG|SA|BV|Corp|Corporation|Pty Ltd)\.?$"
+)
+
+
+def _short_company(text: str, c: Candidate) -> Candidate:
+    """ "Fernleaf Ltd" when "Fernleaf" is also written alone ("the role at Fernleaf"):
+    the name is the variable (``{{ sender_company }} Ltd``), covering both."""
+    m = _LEGAL_SUFFIX.match(c.value) if c.name.endswith("company") else None
+    if m is None:
+        return c
+    short = m.group(1)
+    alone = re.search(
+        rf"(?<![\w@./-]){re.escape(short)}(?![\w@-]| (?:Ltd|Limited|plc|PLC|Inc|LLC|LLP|GmbH|AG|SA|BV|Corp))",
+        text,
+    )
+    if alone is None:
+        return c
+    s = c.spans[0]
+    return c.model_copy(
+        update={"value": short, "spans": [Span(start=s.start, end=s.start + len(short))]}
+    )
+
+
 def _greeting_only(text: str, taken: list[Span]) -> list[Candidate]:
     """ "Hi Priya," with no recipient block above it: the greeting's name."""
     m = _GREETING.search(text)
@@ -407,7 +431,9 @@ class PeopleDetector:
         signed = {c.value for c in signature}
         contacts = [c for c in contacts if c.value not in signed]
         greeting = _greeting_only(text, taken)
-        named = [_elsewhere(text, c) for c in [*contacts, *signature, *companies]]
+        named = [
+            _elsewhere(text, _short_company(text, c)) for c in [*contacts, *signature, *companies]
+        ]
         recipient = [
             _elsewhere(text, c) if c.name in ("recipient_company", "recipient_name") else c
             for c in recipient
