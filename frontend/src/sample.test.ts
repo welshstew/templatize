@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { SAMPLES } from "./sample.ts";
@@ -31,9 +32,15 @@ test("samples: label says '(2 examples)' exactly when a variant is included", ()
   }
 });
 
-test("samples: tests/quality/samples.json is up to date (run `make samples`)", async () => {
-  const { readFileSync } = await import("node:fs");
-  // @ts-expect-error: plain JS module without types
-  const { SAMPLES_JSON, samplesJson } = await import("../scripts/export-samples.mjs");
-  assert.equal(readFileSync(SAMPLES_JSON, "utf8"), samplesJson());
-});
+// The export lives in the repository's tests/, which the container build does not copy.
+const SAMPLES_JSON_URL = new URL("../../tests/quality/samples.json", import.meta.url);
+
+test(
+  "samples: tests/quality/samples.json is up to date (run `make samples`)",
+  { skip: !existsSync(SAMPLES_JSON_URL) && "tests/ is not available here" },
+  async () => {
+    // @ts-expect-error: plain JS module without types
+    const { SAMPLES_JSON, samplesJson } = await import("../scripts/export-samples.mjs");
+    assert.equal(readFileSync(SAMPLES_JSON, "utf8"), samplesJson());
+  },
+);
