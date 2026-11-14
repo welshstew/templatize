@@ -474,14 +474,45 @@ mark.loop-field { --c: var(--src-loop); }
 @media (max-width: 700px) { .ansible-files { grid-template-columns: 1fr; } }
 
 /* ---------- Prefix for selected variables ---------- */
-.list li.var .row input.pick { flex: none; margin: 0 2px 0 0; }
+.list li .row input.pick { flex: none; margin: 0 2px 0 0; }
+.list li.sug.checked { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .list li.var.checked { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .prefix-bar {
+  position: sticky; top: -12px; z-index: 2;
   display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin-bottom: 8px;
   padding: 6px 8px; border: 1px solid var(--accent); border-radius: 6px; font-size: 12px;
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
 }
 .prefix-bar label { display: flex; gap: 6px; align-items: center; color: var(--muted); }
 .prefix-bar input { font-family: var(--mono); width: 8rem; color: var(--text); padding: 2px 6px; }
 .prefix-bar button.primary { padding: 2px 10px; }
 .prefix-hint { flex-basis: 100%; }
+
+/* Document lines: one block per line, so a large document is many small layouts and
+   off-screen lines are skipped (content-visibility). The text is unchanged, so
+   selection offsets are too. */
+pre.doc .dl { display: block; content-visibility: auto; contain-intrinsic-size: auto 1.5em; }
+/* A loop over several lines: a bracket down its lines and the badge on the first. */
+pre.doc .dl.loop-line {
+  --c: var(--src-loop);
+  border-left: 2px dashed var(--c);
+  background: color-mix(in srgb, var(--c) 5%, transparent);
+  padding-left: 4px;
+  margin-left: -6px;
+  cursor: pointer;
+}
+pre.doc .dl.loop-line.accepted { border-left-style: solid; background: color-mix(in srgb, var(--c) 9%, transparent); }
+pre.doc .dl.loop-line.selected { background: color-mix(in srgb, var(--c) 16%, transparent); }
+pre.doc .dl.loop-first { border-top-left-radius: 4px; }
+pre.doc .dl.loop-last { border-bottom-left-radius: 4px; }
+pre.doc .dl.loop-first::before {
+  content: attr(data-label);
+  font: 600 10.5px/1 var(--sans);
+  color: var(--accent-text);
+  background: var(--c);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-right: 6px;
+  vertical-align: 1px;
+  user-select: none;
+}

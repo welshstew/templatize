@@ -142,10 +142,42 @@ _PART_ORIGINS = frozenset({"manual", "schema", "key", "llm", "context"})
 _FIELD_SEPARATORS = frozenset(":/@?&=;,#'\" \t")
 
 
-def _at_boundary(whole: Span, text: str, start: int, end: int) -> bool:
-    before_ok = start == whole.start or text[start - 1] in _FIELD_SEPARATORS
-    after_ok = end == whole.end or text[end] in _FIELD_SEPARATORS
-    return before_ok and after_ok
+_MAX_FIELDS_PER_PART = 3
+
+
+def _parts_in(
+    text: str,
+    span: Span,
+    whole: Candidate,
+    by_value: dict[str, Candidate],
+    composed: dict[str, list[Candidate]],
+) -> list[tuple[Span, Candidate]]:
+    """Parts of ``whole`` at ``span``: the value is cut into fields at separators, and
+    runs of up to three fields are looked up by value (a part may contain a separator,
+    like ``host:port``). Longest parts win; dictionary lookups, not a scan of every
+    candidate, so this stays linear in the number of candidates."""
+    bounds = [span.start]
+    bounds += [
+        i + d for i in range(span.start, span.end) if text[i] in _FIELD_SEPARATORS for d in (0, 1)
+    ]
+    bounds.append(span.end)
+    starts = bounds[0::2]
+    ends = bounds[1::2]
+    found: list[tuple[Span, Candidate]] = []
+    for a in range(len(starts)):
+        for b in range(a, min(a + _MAX_FIELDS_PER_PART, len(ends))):
+            lo, hi = starts[a], ends[b]
+            if hi - lo < MIN_PART or hi - lo >= span.end - span.start:
+                continue
+            p = by_value.get(text[lo:hi])
+            if p is not None and p.id != whole.id and p.id not in composed:
+                found.append((Span(start=lo, end=hi), p))
+    found.sort(key=lambda h: -(h[0].end - h[0].start))
+    taken: list[tuple[Span, Candidate]] = []
+    for s, p in found:
+        if not any(s.overlaps(t) for t, _ in taken):
+            taken.append((s, p))
+    return taken
 
 
 def compose_candidates(
@@ -173,27 +205,11 @@ def compose_candidates(
     for whole in sorted(candidates, key=lambda c: -len(c.value)):
         if whole.id in composed or any(whole.id in [p.id for p in ps] for ps in composed.values()):
             continue
-        parts = [
-            p
-            for v, p in by_value.items()
-            if p.id != whole.id
-            and p.id not in composed
-            and len(v) < len(whole.value)
-            and v in whole.value
-        ]
+        if not any(ch in _FIELD_SEPARATORS for ch in whole.value):
+            continue  # a single field cannot be built from two parts
         hits: list[tuple[Span, Candidate]] = []
         for span in whole.spans:
-            taken: list[Span] = []
-            for p in sorted(parts, key=lambda c: -len(c.value)):
-                pos = span.start
-                while (i := text.find(p.value, pos, span.end)) != -1:
-                    s = Span(start=i, end=i + len(p.value))
-                    if _at_boundary(span, text, s.start, s.end) and not any(
-                        s.overlaps(t) for t in taken
-                    ):
-                        taken.append(s)
-                        hits.append((s, p))
-                    pos = i + 1
+            hits += _parts_in(text, span, whole, by_value, composed)
         used = {p.id for _, p in hits}
         if len(used) < MIN_PARTS:
             continue

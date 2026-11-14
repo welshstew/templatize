@@ -93,10 +93,97 @@ function groupByLoops(
   return groups;
 }
 
+function loopTitle(l: LoopItem): string {
+  const n = l.items.length;
+  return `${l.status === "accepted" ? "List" : "Suggested list"} "${l.name}": ${n} ${l.item} item${n === 1 ? "" : "s"}`;
+}
+
+interface Row {
+  start: number;
+  /** A loop spanning several lines that this line belongs to. */
+  loop: LoopItem | null;
+  first: boolean;
+  last: boolean;
+  /** Segments, with loops that sit within this one line wrapped inline. */
+  groups: { loop: LoopItem | null; segs: Segment[] }[];
+}
+
+/** One row per line (rendered as a block, so the browser lays out thousands of small
+ * lines instead of one huge inline run, and can skip off-screen ones). A loop over
+ * several lines marks its lines (bracket per line, badge on the first); a loop inside
+ * one line keeps its inline bracket. */
+function layoutLines(
+  text: string,
+  segs: Segment[],
+  regions: { start: number; end: number; loop: LoopItem }[],
+): Row[] {
+  const lines = byLine(text, segs);
+  const starts = lines.map((l) => l[0]?.start ?? 0);
+  const lineOf = (pos: number) => {
+    let lo = 0;
+    let hi = starts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((starts[mid] ?? 0) <= pos) lo = mid + 1;
+      else hi = mid;
+    }
+    return Math.max(0, lo - 1);
+  };
+  const multi = new Map<number, { loop: LoopItem; first: boolean; last: boolean }>();
+  const inline: typeof regions = [];
+  for (const r of regions) {
+    const a = lineOf(r.start);
+    const b = lineOf(Math.max(r.start, r.end - 1));
+    if (a === b) {
+      inline.push(r);
+      continue;
+    }
+    for (let k = a; k <= b; k++) multi.set(k, { loop: r.loop, first: k === a, last: k === b });
+  }
+  return lines.map((line, k) => {
+    const m = multi.get(k);
+    const mine = inline.filter((r) => r.start < (line[line.length - 1]?.end ?? 0) && r.end > (line[0]?.start ?? 0));
+    return {
+      start: starts[k] ?? 0,
+      loop: m?.loop ?? null,
+      first: m?.first ?? false,
+      last: m?.last ?? false,
+      groups: mine.length ? groupByLoops(line, mine) : [{ loop: null, segs: line }],
+    };
+  });
+}
+
+/** Segments grouped per line (a plain segment is split after each newline; a
+ * highlight spanning lines stays on the line where it starts). Rendering one keyed
+ * element per line keeps Preact's child matching cheap: a flat list of thousands of
+ * highlights made each update search the whole list (quadratic). */
+function byLine(text: string, segs: Segment[]): Segment[][] {
+  const lines: Segment[][] = [];
+  let cur: Segment[] = [];
+  for (const s of segs) {
+    if (s.item || s.field) {
+      cur.push(s);
+      continue;
+    }
+    let start = s.start;
+    let nl = text.indexOf("\n", start);
+    while (nl !== -1 && nl < s.end) {
+      cur.push({ ...s, start, end: nl + 1 });
+      lines.push(cur);
+      cur = [];
+      start = nl + 1;
+      nl = text.indexOf("\n", start);
+    }
+    if (start < s.end) cur.push({ ...s, start });
+  }
+  if (cur.length) lines.push(cur);
+  return lines;
+}
+
 export function DocumentView({ map, items, loops = [], selectedId, onSelectItem, onTextSelection }: Props) {
   const ref = useRef<HTMLPreElement>(null);
   const segs = useMemo(() => segments(map, items, loops), [map, items, loops]);
-  const groups = useMemo(() => groupByLoops(segs, loopRegionsU16(map, loops)), [segs, map, loops]);
+  const rows = useMemo(() => layoutLines(map.text, segs, loopRegionsU16(map, loops)), [segs, map, loops]);
 
   useEffect(() => {
     if (!selectedId || !ref.current) return;
@@ -144,20 +231,40 @@ export function DocumentView({ map, items, loops = [], selectedId, onSelectItem,
       onClick={handleClick}
       aria-label="Document. Select text to create a variable; click a highlight to inspect it."
     >
-      {groups.map((g) => {
-        const body = g.segs.map((s) => renderSegment(map, s, selectedId));
-        if (!g.loop) return body;
-        const l = g.loop;
-        const n = l.items.length;
+      {rows.map((row) => {
+        const loop = row.loop;
+        const n = loop?.items.length ?? 0;
+        const cls = [
+          "dl",
+          loop ? `loop-line ${loop.status}` : "",
+          loop && loop.id === selectedId ? "selected" : "",
+          row.first ? "loop-first" : "",
+          row.last ? "loop-last" : "",
+        ].join(" ");
         return (
           <span
-            key={`loop-${l.id}`}
-            class={`loop-region ${l.status} ${l.id === selectedId ? "selected" : ""}`}
-            data-loop={l.id}
-            data-label={`${l.name} × ${n}`}
-            title={`${l.status === "accepted" ? "List" : "Suggested list"} "${l.name}": ${n} ${l.item} item${n === 1 ? "" : "s"}`}
+            key={`L${row.start}`}
+            class={cls}
+            data-loop={loop?.id}
+            data-label={row.first && loop ? `${loop.name} × ${n}` : undefined}
+            title={row.first && loop ? loopTitle(loop) : undefined}
           >
-            {body}
+            {row.groups.map((g) => {
+              const body = g.segs.map((s) => renderSegment(map, s, selectedId));
+              if (!g.loop) return body;
+              const l = g.loop;
+              return (
+                <span
+                  key={`loop-${l.id}`}
+                  class={`loop-region ${l.status} ${l.id === selectedId ? "selected" : ""}`}
+                  data-loop={l.id}
+                  data-label={`${l.name} × ${l.items.length}`}
+                  title={loopTitle(l)}
+                >
+                  {body}
+                </span>
+              );
+            })}
           </span>
         );
       })}

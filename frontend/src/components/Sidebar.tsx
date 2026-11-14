@@ -252,16 +252,28 @@ function VariableRow({ item, items, loops, selected, checked, onCheck, onSelect,
   );
 }
 
-function SuggestionRow({ item, items, loops, selected, onSelect, onStatus, helm }: {
+function SuggestionRow({ item, items, loops, selected, checked, onCheck, onSelect, onStatus, helm }: {
   item: Item;
   items: Item[];
   loops: LoopItem[];
   selected: boolean;
+  checked: boolean;
+  onCheck: (on: boolean) => void;
 } & Pick<Props, "onSelect" | "onStatus" | "helm">) {
   const acceptable = canAccept(items, item.id, loops);
   return (
-    <li class={`sug ${selected ? "selected" : ""}`} onClick={() => onSelect(item.id)}>
+    <li class={`sug ${selected ? "selected" : ""} ${checked ? "checked" : ""}`} onClick={() => onSelect(item.id)}>
       <div class="row">
+        <input
+          type="checkbox"
+          class="pick"
+          checked={checked}
+          aria-label={`Select ${item.name}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCheck((e.target as HTMLInputElement).checked);
+          }}
+        />
         <span class="name">{item.name}</span>
         <span class="type">{item.type}</span>
         {item.confidence !== null ? (
@@ -365,11 +377,31 @@ export function Sidebar({
     .filter((i) => i.status === "suggested")
     .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
   const rej = items.filter((i) => i.status === "rejected");
-  const livePicked = acc.filter((i) => picked.has(i.id)).map((i) => i.id);
+  const pickedItems = items.filter((i) => i.status !== "rejected" && picked.has(i.id));
+  const livePicked = pickedItems.map((i) => i.id);
+  const toggle = (id: string, on: boolean) =>
+    setPicked((cur) => {
+      const next = new Set(cur);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   return (
     <aside class="sidebar" aria-label="Variables and suggestions">
       <LlmPill llm={llm} />
+      {livePicked.length > 0 ? (
+        <PrefixBar
+          key={livePicked.join(",")}
+          names={pickedItems.map((i) => i.name)}
+          onApply={(prefix) => {
+            const err = onPrefix(livePicked, prefix);
+            if (!err) setPicked(new Set());
+            return err;
+          }}
+          onClear={() => setPicked(new Set())}
+        />
+      ) : null}
       {liveLoops.length > 0 ? (
         <section>
           <h2>
@@ -402,19 +434,8 @@ export function Sidebar({
         <h2>
           Variables <span class="count">{acc.length}</span>
         </h2>
-        {livePicked.length > 0 ? (
-          <PrefixBar
-            key={livePicked.join(",")}
-            names={acc.filter((i) => picked.has(i.id)).map((i) => i.name)}
-            onApply={(prefix) => {
-              const err = onPrefix(livePicked, prefix);
-              if (!err) setPicked(new Set());
-              return err;
-            }}
-            onClear={() => setPicked(new Set())}
-          />
-        ) : acc.length > 1 ? (
-          <p class="hint">Tick variables to give them a common prefix (db_host, db_port…).</p>
+        {livePicked.length === 0 && acc.length + sug.length > 1 ? (
+          <p class="hint">Tick variables or suggestions to give them a common prefix (db_host, db_port…).</p>
         ) : null}
         {acc.length === 0 ? (
           <p class="hint">Accept suggestions below, or select any text in the document to make it a variable.</p>
@@ -427,14 +448,7 @@ export function Sidebar({
                 items={items}
                 loops={loops}
                 checked={picked.has(i.id)}
-                onCheck={(on) =>
-                  setPicked((cur) => {
-                    const next = new Set(cur);
-                    if (on) next.add(i.id);
-                    else next.delete(i.id);
-                    return next;
-                  })
-                }
+                onCheck={(on) => toggle(i.id, on)}
                 selected={i.id === selectedId}
                 onSelect={onSelect}
                 onStatus={onStatus}
@@ -461,10 +475,12 @@ export function Sidebar({
         <ul class="list">
           {(allSugs ? sug : sug.slice(0, SHOWN)).map((i) => (
             <SuggestionRow
-              key={i.id}
+              key={`${i.id}:${i.name}`}
               item={i}
               items={items}
               loops={loops}
+              checked={picked.has(i.id)}
+              onCheck={(on) => toggle(i.id, on)}
               selected={i.id === selectedId}
               onSelect={onSelect}
               onStatus={onStatus}
