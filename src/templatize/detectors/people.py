@@ -356,4 +356,8 @@ class PeopleDetector:
         contacts = [c for c in contacts if c.value not in signed]
         greeting = _greeting_only(text, taken)
         named = [_elsewhere(text, c) for c in [*contacts, *signature, *companies]]
+        recipient = [
+            _elsewhere(text, c) if c.name in ("recipient_company", "recipient_name") else c
+            for c in recipient
+        ]
         return DetectorResult(candidates=[*named, *recipient, *greeting, *_letter_date(text)])

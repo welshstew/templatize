@@ -44,8 +44,10 @@ terraform:
   reject: ["{"]
 
 gha:
-  want: [Deploy docs, ubuntu-24.04, production, "22", deploy@docs.example.com]
-  reject: []
+  # rsync deploy@docs.example.com:...: the ssh user and host, not an email address.
+  want: [Deploy docs, ubuntu-24.04, production, "22", docs.example.com]
+  reject: [deploy@docs.example.com]
+  names: {docs.example.com: ssh_host}
 
 ssh:
   want: [bastion, db-primary, 203.0.113.10, jmorgan, "2222", ~/.ssh/id_ed25519_work, 10.0.4.21]

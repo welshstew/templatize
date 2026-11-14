@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from pydantic import BaseModel
@@ -37,6 +38,25 @@ def check_limits(text: str, variants: Sequence[str] = ()) -> None:
             raise InputLimitError(f"{label} exceeds {MAX_INPUT_CHARS} characters")
 
 
+# Template syntax already in the document (GitHub Actions ${{ github.sha }}, Jinja,
+# Helm): what is inside it is an expression, not a value to extract.
+_TEMPLATE_EXPR = re.compile(r"\$?\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
+
+
+def _outside_template_syntax(text: str, raw: list[Candidate]) -> list[Candidate]:
+    exprs = [
+        (m.start(), m.end()) for m in _TEMPLATE_EXPR.finditer(text) if m.end() - m.start() < 500
+    ]
+    if not exprs:
+        return raw
+    out = []
+    for c in raw:
+        kept = [s for s in c.spans if not any(a <= s.start and s.end <= b for a, b in exprs)]
+        if kept:
+            out.append(c if len(kept) == len(c.spans) else c.model_copy(update={"spans": kept}))
+    return out
+
+
 def suggest(
     text: str,
     variants: Sequence[str] = (),
@@ -70,6 +90,7 @@ def suggest(
                 ]
             )
         ]
+    raw = _outside_template_syntax(text, raw)
     candidates, composed = compose_candidates(text, merge_candidates(raw))
     notices.extend(composed)
     loops = detect_loops(text, variants, taken_names=[c.name for c in candidates])

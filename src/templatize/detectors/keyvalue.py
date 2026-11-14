@@ -45,6 +45,7 @@ _INLINE_PAIR = re.compile(r"([A-Za-z_]\w*)=(\S+)")
 # "Daniel Kim (daniel.kim@example.com)", "checkout-api (eu-west-1)": the value before
 # the parentheses is the key's value; the detail inside is left to the patterns.
 _WITH_DETAIL = re.compile(r"^(.*?\S)[ \t]+\(([^()]+)\)$")
+_COMMAND_KEYS = frozenset({"run", "script", "command", "cmd", "entrypoint", "exec", "shell"})
 _TOP_API = re.compile(r"^apiVersion:[ \t]*\S", re.MULTILINE)
 _TOP_KIND = re.compile(r"^kind:[ \t]*\S", re.MULTILINE)
 # A value made of key=value pairs: "Server=db;Database=Payroll;User Id=svc;" (ADO.NET,
@@ -523,6 +524,8 @@ class KeyValueDetector:
         value = text[start:end]
         if not value.strip() or value.lower() in _NULLISH or len(value) > 200:
             return
+        if key.lower() in _COMMAND_KEYS and " " in value.strip():
+            return  # a shell command: its flags and arguments are found by the commands detector
         if value != value.strip():
             # keep exact span but trim surrounding whitespace for a cleaner variable
             lead = len(value) - len(value.lstrip())

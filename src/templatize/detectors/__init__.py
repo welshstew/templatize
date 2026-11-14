@@ -16,6 +16,7 @@ from templatize.detectors.base import (
     Detector,
     DetectorResult,
 )
+from templatize.detectors.commands import CommandsDetector
 from templatize.detectors.diff import DiffDetector
 from templatize.detectors.k8s import KubernetesDetector
 from templatize.detectors.keyvalue import KeyValueDetector
@@ -28,6 +29,7 @@ HEURISTIC_DETECTORS: dict[str, Callable[[], Detector]] = {
     "regex": RegexDetector,
     "address": AddressDetector,
     "people": PeopleDetector,
+    "commands": CommandsDetector,
     "key_value": KeyValueDetector,
     "repetition": RepetitionDetector,
     "diff": DiffDetector,
