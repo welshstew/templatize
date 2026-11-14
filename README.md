@@ -820,9 +820,9 @@ Register new detectors in `detectors/__init__.py`.
 
 `site/` is a static introduction page for GitHub Pages: no JavaScript, and no
 third-party scripts, fonts or trackers. `.github/workflows/pages.yml` publishes it, and
-`.github/FUNDING.yml` adds GitHub's Sponsor button for Buy Me a Coffee. **Before
-publishing**, replace the placeholder repository URL and Buy Me a Coffee username (search
-both files for `welshstew`). The Buy Me a Coffee link is a plain link, not their widget
+`.github/FUNDING.yml` adds GitHub's Sponsor button for Buy Me a Coffee. The Buy Me a
+Coffee page is <https://buymeacoffee.com/welshstew>. **Before publishing**, check the
+repository URL in `site/index.html` (`welshstew/templatize`) matches the real repository. The Buy Me a Coffee link is a plain link, not their widget
 script, so visitors aren't tracked.
 
 ## Tests
