@@ -16,6 +16,7 @@ from templatize.ir import (
     Source,
     Span,
     TemplateIR,
+    ValuesPath,
     Variable,
     VarType,
 )
@@ -35,6 +36,11 @@ class VariableSpec(BaseModel):
     value: str | None = None
     confidence: float | None = None
     description: str | None = None
+    values_path: ValuesPath | None = None
+    """Nested values location (Helm charts); ignored by flat engines."""
+    variant_values: list[str] | None = None
+    """Value of this variable in each example document, in order (Helm charts write
+    them to per-example values files). Missing means "same as in the main text"."""
 
 
 class BuildResult(BaseModel):
@@ -74,6 +80,7 @@ def make_ir(text: str, specs: Sequence[VariableSpec]) -> TemplateIR:
                 sources=spec.sources,
                 confidence=spec.confidence,
                 description=spec.description,
+                values_path=spec.values_path,
             )
         )
     return TemplateIR(text=text, variables=variables)
@@ -89,6 +96,8 @@ def specs_from_candidates(candidates: Iterable[Candidate]) -> list[VariableSpec]
             value=c.value,
             confidence=c.confidence,
             description=c.reason,
+            values_path=c.values_path,
+            variant_values=c.variant_values,
         )
         for c in candidates
     ]
@@ -153,6 +162,8 @@ class VariableInput(BaseModel):
     spans: list[Span] | None = None
     type: VarType | None = None
     description: str | None = None
+    values_path: ValuesPath | None = None
+    """Helm charts only: where the value goes in values.yaml, e.g. ["image", "tag"]."""
 
 
 class VariableResolutionError(ValueError):
@@ -200,6 +211,7 @@ def resolve_inputs(text: str, inputs: Sequence[VariableInput]) -> list[VariableS
                 type=inp.type,
                 value=inp.value,
                 description=inp.description,
+                values_path=inp.values_path,
             )
         )
     return specs

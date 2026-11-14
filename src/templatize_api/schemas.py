@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 from templatize.build import VariableSpec
 from templatize.detectors.llm import LlmReview
 from templatize.emitters import EmittedFile
+from templatize.helm import ChartStyle
+from templatize.helm.chart import ChartRoundTrip, ChartTemplate, FilledValue
+from templatize.helm.coverage import CoverageReport
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Variable
 from templatize.roundtrip import RoundTripResult
 
@@ -71,6 +74,8 @@ class InfoResponse(BaseModel):
     engines: list[str]
     detectors: list[str]
     optional_detectors: dict[str, bool]
+    helm: bool
+    """``helm`` is installed: the helm create chart style can be checked and previewed."""
     mcp_http: str | None
     """Path of the MCP streamable HTTP endpoint, if enabled."""
     limits: Limits
@@ -78,3 +83,51 @@ class InfoResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+class ChartRequest(BaseModel):
+    text: Document
+    variants: list[Document] = Field(default_factory=list, max_length=MAX_VARIANTS)
+    variables: list[VariableSpec] = Field(default_factory=list, max_length=MAX_VARIABLES)
+    chart_name: Annotated[str, Field(max_length=53)] | None = None
+    """Defaults to the first workload's name."""
+    variant_labels: list[Annotated[str, Field(max_length=32)]] | None = Field(
+        default=None, max_length=MAX_VARIANTS
+    )
+    """Names for the per-example values files (``values-<label>.yaml``)."""
+    style: ChartStyle = "exact"
+    """``exact``: your manifests as templates. ``scaffold``: the ``helm create`` chart
+    filled in from them (needs ``helm`` on the server for the coverage check)."""
+
+
+class ChartResponse(BaseModel):
+    chart_name: str
+    style: ChartStyle
+    files: list[EmittedFile]
+    templates: list[ChartTemplate]
+    variables: list[Variable]
+    roundtrips: list[ChartRoundTrip]
+    coverage: list[CoverageReport]
+    notes: list[str]
+    filled: list[FilledValue] = []
+    ok: bool
+
+
+MAX_CHART_FILES = 500
+
+
+class ChartRenderRequest(BaseModel):
+    templates: list[EmittedFile] = Field(max_length=MAX_CHART_FILES)
+    values_yaml: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)]
+    overlay_yaml: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)] | None = None
+    """An example's values file, merged over ``values_yaml`` like ``helm -f``."""
+    style: ChartStyle = "exact"
+    chart_name: Annotated[str, Field(max_length=53)] = "chart"
+    files: list[EmittedFile] = Field(default_factory=list, max_length=MAX_CHART_FILES)
+    """Scaffold style: the whole chart (helpers included), rendered with real Helm."""
+
+
+class ChartRenderResponse(BaseModel):
+    ok: bool
+    files: list[EmittedFile] = []
+    error: str | None = None

@@ -224,8 +224,18 @@ Or manually: download
 into `./models/` and check that its SHA-256 is
 `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`.
 
-**GPU** (NVIDIA Container Toolkit): `COMPOSE_PROFILES=llm docker compose -f compose.yaml -f compose.gpu.yaml up -d --build`
-switches to the CUDA build of llama.cpp and offloads all layers.
+**GPU** (NVIDIA; needs the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)):
+
+```sh
+make up-llm-gpu          # app + llm on the GPU (CUDA build of llama.cpp, all layers offloaded)
+make up-llm-gpu-large    # the same with Qwen3-30B-A3B-Instruct-2507 (make model-large, ~18.6 GB; ~21 GB VRAM)
+```
+
+The override file `compose.gpu.yaml` switches to the CUDA image and requests the GPU. With
+Podman, podman-compose (1.1 or later) turns that request into a CDI device
+(`nvidia.com/gpu=all`), so run `sudo nvidia-ctk cdi generate` once, or let the toolkit's
+`nvidia-cdi-refresh` service do it. The targets pass `--force-recreate` because
+podman-compose keeps existing containers when only the image or the environment changed.
 
 **Your own model:** put any instruct GGUF in `./models` and set
 `TEMPLATIZE_LLM_MODEL=<file>`. Or point `TEMPLATIZE_LLM_URL` at any llama.cpp server.
@@ -256,8 +266,16 @@ Docker or Podman VM has that free. Running a second copy, for example
 the kernel OOM-kills one of them.
 
 **Measured** on the 4-core Podman VM of an Apple Silicon Mac (CPU only): about 30 s to
-load the model, then 40–110 s per review of the fixture documents. A GPU makes this a few
-seconds.
+load the model, then 40–110 s per review of the fixture documents. On an RTX 5090 Laptop
+GPU (24 GB) the default model loads in about 2.5 s and uses about 5 GB of VRAM, and a
+review takes 3–6 s. The large model (`make up-llm-gpu-large`, a mixture of experts with
+about 3B parameters active per token) loads in about 3 s, uses about 19.5 GB of VRAM, and
+reviews in 1.5–7 s, so it is no slower. It is noticeably better at naming: on `nginx.conf`
+the 4B model proposed no renames while the 30B one proposed 13 sensible ones
+(`billing_backend_ip_1`, `listen_port`, `ssl_certificate_key_path`), and on the
+Kubernetes stack 7 against none. On the business letter both found the same missed
+values (`PO-55821`, `GBP 18,450.00`, `Ravi Patel`). It still makes occasional mistakes,
+e.g. naming an Ingress backend port `service_target_port`.
 
 **Limitations.** The variable/fixed-text verdict from a 4B model is unreliable. An
 earlier prompt flagged correctly on one run and flagged every k8s field on the next. The
@@ -267,15 +285,108 @@ flagged, and a verdict only halves the confidence, never auto-rejects. In practi
 now rarely flags anything. Naming and missed-parameter detection are the useful parts.
 The MCP server doesn't use the LLM, because its client already is one.
 
+### Helm charts from Kubernetes manifests
+
+Paste Kubernetes manifests (one resource per `---` document) and templatize recognises
+them: `/suggest` returns a `profile` listing the resources, and the UI offers **Build Helm
+chart**. The chart is built from the same accepted variables:
+
+```text
+storefront/
+  Chart.yaml                appVersion from the image tag
+  values.yaml               every variable, nested: image.tag, replicaCount, service.port, …
+  values-staging.yaml       per example document: only the values that differ
+  .helmignore
+  templates/configmap.yaml  one template per resource, in input order
+  templates/deployment.yaml
+  …
+```
+
+**Kubernetes-aware suggestions.** For manifests a dedicated detector reads the YAML node
+tree (exact offsets, no regex guessing) and knows what common fields mean, so suggestions
+carry Helm-style `values_path`s: `replicaCount`, `image.repository` and `image.tag` (an
+image is split in two; digests become `image.digest`), `image.pullPolicy`,
+`resources.limits.memory`, `containerPort`, `env.<NAME>`, `service.type`/`port`/`targetPort`,
+`ingress.host`/`className`/`tls.secretName`, `config.<key>` (ConfigMap data),
+`secrets.<key>`, `autoscaling.minReplicas`, `persistence.size`, `namespace`. Paths are
+prefixed with the resource (or container) name only when there is more than one of that
+kind. `apiVersion`, `kind` and mapping keys are never suggested. With example documents
+(say production and staging), each path is read from every example, so a changed tag shows
+up on `image.tag` rather than on the whole image string.
+
+**Exact, and checked twice.** Templates are plain Go `text/template` with
+`{{ .Values.x }}` references; literal `{{` in a manifest is escaped. `values.yaml` writes
+only canonical integers below 10^6 and `true`/`false` bare, and quotes everything else,
+because Helm reads values as JSON numbers and would print `1000000` as `1e+06` or turn `on`
+into a boolean. The round trip renders every template with what `values.yaml` *reads back
+as* and must reproduce the input byte for byte, and for each example `values.yaml` merged
+with `values-<label>.yaml` must reproduce that example. If an example fails, a difference
+is not covered by a variable (accept the "examples" suggestions). With `helm` on PATH,
+`tests/helm/test_helm_binary.py` also runs real `helm template` and `helm lint` on every
+Kubernetes fixture.
+
+**Chart view.** The output panel becomes an IDE-style view: a file explorer with the
+chart's directory structure, tabs, line numbers and syntax highlighting. Click a
+`{{ .Values.… }}` reference to jump to its line in `values.yaml`. Values files can be
+edited for the live preview (rendered manifests, with `values.yaml` alone or plus an
+example's values file); those edits are not part of the download. ⤢ maximises the view.
+Each variable's values path can be edited in the Variables list.
+
+```sh
+templatize chart k8s.yaml --variant k8s-staging.yaml --label staging --accept-all -o charts/
+helm template storefront charts/storefront -f charts/storefront/values-staging.yaml
+```
+
+API: `POST /chart` (same inputs as `/build`, plus `variants`, `chart_name`,
+`variant_labels`), `POST /chart/render` (templates + values for the preview) and
+`POST /chart/download` (zip of the chart directory). MCP: `generate_helm_chart`, and
+`suggest_parameters` returns the profile so the client can offer a chart.
+
+**Two chart styles.** The chart view has an **Exact | helm create** switch (CLI
+`--style exact|scaffold`, API and MCP `style`):
+
+- **Exact** (above): your manifests are the templates, and the round trip is byte for byte.
+- **helm create**: the standard chart that `helm create` generates (Helm 4.3.2, bundled in
+  `src/templatize/helm/scaffold/` with its Apache-2.0 notice), with the scaffold's
+  `values.yaml` placeholders replaced by what your manifests say: `replicaCount`,
+  `image.repository`/`tag`/`pullPolicy`, `service.type`/`port`, `ingress.enabled`,
+  `className`, `hosts`, `tls` and annotations, `resources`, probes, `autoscaling` (from an
+  HPA), `serviceAccount`, `podAnnotations`/`podLabels`, security contexts,
+  `nodeSelector`/`tolerations`/`affinity`, volumes, and `fullnameOverride`/`nameOverride`
+  so the names match. The deployment template is extended with optional `env`, `envFrom`,
+  `command`, `args`, `containerName` and `containerPort`, and the service template with
+  `service.targetPort`. Resources the scaffold does not model (ConfigMaps, Secrets, extra
+  Services, ...) are carried over as exact templates with your variables. Examples give a
+  `values-<label>.yaml` with only the differences, as before. The style needs exactly one
+  Deployment; for anything else use the exact style.
+
+  The scaffold adds labels and fields of its own, so a byte-for-byte round trip is not
+  possible. Instead the chart is rendered with real `helm template` and compared with your
+  manifests field by field: the **coverage report** (an entry in the explorer, and a badge
+  in the top bar) lists what renders identically, what is **lost** (in your manifests but
+  not in the chart, e.g. `metadata.namespace`, which the scaffold leaves to
+  `helm install -n`, or custom labels), **changed**, and **added** by the scaffold
+  (standard labels, a Service, port names). For the sample app stack, 93% of the fields
+  render identically. The preview is rendered with Helm too. The app image includes a
+  pinned, checksum-verified `helm` (`scripts/fetch-helm.py`); without one (set
+  `TEMPLATIZE_HELM=0`, or run outside the image without Helm installed) the chart is still
+  built, but marked "coverage not checked".
+
+**Not in the exact style:** Helm idioms that change the output's structure
+(`include "chart.fullname"`, `.Release.Namespace`, `toYaml` blocks). They depend on the
+release name or re-serialise YAML, so the exact round trip would not hold. The helm create
+style uses them, and is checked by coverage instead.
+
 ### MCP server
 
 The same core library is exposed as an MCP server (official Python SDK, `mcp` 2.x)
-with four read-only tools:
+with five read-only tools:
 
 | Tool | What it does |
 |---|---|
 | `suggest_parameters(text, variants?, min_confidence?)` | Scored candidate variables (spans are code points) |
 | `generate_template(text, variables?, variants?, min_confidence?)` | Template, `.env`, `render.py` and the round-trip verdict. Give variables **by value**, e.g. `[{"name": "db_host", "value": "db01.example.com", "occurrences": "all"}]`, so the model never has to count characters (spans also work). Omit `variables` to accept suggestions automatically |
+| `generate_helm_chart(text, variables?, variants?, chart_name?, variant_labels?, min_confidence?, style?)` | Helm chart from Kubernetes manifests: Chart.yaml, nested values.yaml, templates, and a values file per variant. `style="exact"` checks a byte-for-byte round trip per document; `style="scaffold"` fills in the `helm create` chart and returns a coverage report. Variables take an optional `values_path` |
 | `render_template(template, values?, newline?)` | Sandboxed render. Errors come back in `error`, not as an exception |
 | `validate_template(template, values?, expected_text?)` | Syntax, referenced, missing and unused variables, renders?, and reproduces `expected_text` byte for byte? |
 

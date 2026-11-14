@@ -6,7 +6,8 @@
    internet is reachable this is not an offline test, so it fails.
 2. Every fixture (with variants where present) goes through
    /suggest -> /build -> round-trip, /render must reproduce the input, and
-   /download must return a complete zip.
+   /download must return a complete zip. Kubernetes fixtures also go through
+   /chart -> /chart/render -> /chart/download (Helm chart, round trip per variant).
 """
 
 from __future__ import annotations
@@ -77,7 +78,8 @@ def check_fixture(base: str, path: Path) -> str | None:
     status, body, _ = _post(base, "/suggest", {"text": text, "variants": variants})
     if status != 200:
         return f"/suggest -> {status}: {body[:200]!r}"
-    cands = json.loads(body)["candidates"]
+    suggested = json.loads(body)
+    cands = suggested["candidates"]
     if not cands:
         return "/suggest returned no candidates"
     specs = [{"name": c["name"], "spans": c["spans"], "type": c["type"]} for c in cands]
@@ -104,7 +106,69 @@ def check_fixture(base: str, path: Path) -> str | None:
         names = sorted(zf.namelist())
     if names != [".env", "README.md", "render.py", "template.j2"]:
         return f"unexpected zip contents {names}"
-    return None if not variants else f"ok:{len(variants)}"
+    notes = [f"{len(variants)} variant(s)"] if variants else []
+    if suggested.get("profile", {}).get("helm_suggested"):
+        err = check_chart(base, text, variants, cands)
+        if err:
+            return f"Helm chart: {err}"
+        notes.append("Helm chart")
+    return f"ok:{', '.join(notes)}" if notes else None
+
+
+def check_chart(base: str, text: str, variants: list[str], cands: list[Any]) -> str | None:
+    """/chart round-trips (input and every variant), /chart/render reproduces the
+    input, /chart/download returns a chart directory."""
+    specs = [
+        {
+            "name": c["name"],
+            "spans": c["spans"],
+            "values_path": c.get("values_path"),
+            "variant_values": c.get("variant_values"),
+        }
+        for c in cands
+    ]
+    payload = {"text": text, "variants": variants, "variables": specs}
+    status, body, _ = _post(base, "/chart", payload)
+    if status != 200:
+        return f"/chart -> {status}: {body[:200]!r}"
+    chart = json.loads(body)
+    if not chart["ok"]:
+        return f"round-trip failed: {[r for r in chart['roundtrips'] if not r['ok']]}"
+    files = {f["path"]: f["content"] for f in chart["files"]}
+    templates = [{"path": p, "content": c} for p, c in files.items() if p.startswith("templates/")]
+    status, body, _ = _post(
+        base, "/chart/render", {"templates": templates, "values_yaml": files["values.yaml"]}
+    )
+    rendered = json.loads(body)
+    if status != 200 or not rendered["ok"]:
+        return f"/chart/render failed: {rendered.get('error')}"
+    if "".join(f["content"] for f in rendered["files"]) != text:
+        return "/chart/render did not reproduce the input"
+    status, body, headers = _post(base, "/chart/download", payload)
+    if status != 200 or headers.get("x-roundtrip", headers.get("X-Roundtrip")) != "pass":
+        return f"/chart/download -> {status}"
+    name = chart["chart_name"]
+    with zipfile.ZipFile(io.BytesIO(body)) as zf:
+        names = set(zf.namelist())
+    want = {f"{name}/Chart.yaml", f"{name}/values.yaml", *(f"{name}/{p}" for p in files)}
+    if not want <= names:
+        return f"chart zip is missing {sorted(want - names)}"
+    return check_scaffold(base, payload)
+
+
+def check_scaffold(base: str, payload: dict[str, Any]) -> str | None:
+    """helm create style: when the app has helm, coverage must be computed (offline)."""
+    info = _get_json(base, "/info")
+    status, body, _ = _post(base, "/chart", {**payload, "style": "scaffold"})
+    if status == 422 and b"exactly one Deployment" in body:
+        return None  # not a single-application input
+    if status != 200:
+        return f"/chart (scaffold) -> {status}: {body[:200]!r}"
+    chart = json.loads(body)
+    for rep in chart["coverage"]:
+        if info.get("helm") and (not rep["available"] or rep["error"]):
+            return f"scaffold coverage failed: {rep['error']}"
+    return None
 
 
 # Same rules as frontend/scripts/check-no-external-urls.mjs.
@@ -116,6 +180,8 @@ _URL_PATTERNS = [
 ]
 _URL_ALLOWED = re.compile(
     r"^https?://www\.w3\.org/((1999|2000)/(xhtml|svg|xlink)|1998/Math/MathML|XML/1998/namespace)$"
+    # RFC 2606 documentation domains: text inside the built-in sample documents.
+    r"|^https?://(?:[^@/\s]+@)?(?:[a-z0-9-]+\.)*example\.(?:com|net|org)(?:[:/?#]|$)"
 )
 _ASSET_REF = re.compile(r"(?:src|href)=\"(/[^\"]+)\"")
 
@@ -192,6 +258,7 @@ def check_mcp(base: str, fixture: Path) -> str | None:
         expected = {
             "suggest_parameters",
             "generate_template",
+            "generate_helm_chart",
             "render_template",
             "validate_template",
         }
@@ -311,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         if mcp_error:
             print(f"FAIL MCP over streamable HTTP: {mcp_error}")
             return 1
-        print("PASS MCP over streamable HTTP: 4 tools; generate_template round-trips")
+        print("PASS MCP over streamable HTTP: 5 tools; generate_template round-trips")
 
     if args.expect_ner or os.environ.get("TEMPLATIZE_OFFLINE_EXPECT_NER") == "1":
         ok, msg = check_ner(base, args.fixtures / "business_letter.txt")
@@ -335,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     for path in fixtures:
         err = check_fixture(base, path)
         if err is None or err.startswith("ok:"):
-            extra = f" (with {err[3:]} variant(s))" if err else ""
+            extra = f" (with {err[3:]})" if err else ""
             print(f"PASS {path.name}{extra}")
         else:
             failures += 1

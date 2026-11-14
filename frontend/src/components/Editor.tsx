@@ -1,6 +1,8 @@
 import { useState } from "preact/hooks";
 
-import { SAMPLE, SAMPLE_VARIANT } from "../sample.ts";
+import { SAMPLES } from "../sample.ts";
+
+const SAMPLE_GROUPS = [...new Set(SAMPLES.map((s) => s.group))];
 
 interface Props {
   text: string;
@@ -59,18 +61,36 @@ export function Editor({ text, variants, maxVariants, maxChars, busy, onText, on
           </button>
         ) : null}
         <span class="spacer" />
-        {!text ? (
-          <button
-            class="link"
-            onClick={() => {
-              onText(SAMPLE);
-              onVariants([SAMPLE_VARIANT]);
-              setTab(0);
-            }}
-          >
-            Load sample
-          </button>
-        ) : null}
+        <select
+          class="sample-picker"
+          aria-label="Load a sample document"
+          title="Load a sample document (examples are included where shown)"
+          value=""
+          onChange={(e) => {
+            const sel = e.target as HTMLSelectElement;
+            const sample = SAMPLES.find((s) => s.id === sel.value);
+            sel.value = "";
+            if (!sample) return;
+            const pristine = !text || SAMPLES.some((s) => s.text === text);
+            if (!pristine && !confirm("Replace the current document and examples with this sample?")) return;
+            onText(sample.text);
+            onVariants((sample.variants ?? []).slice(0, maxVariants));
+            setTab(0);
+          }}
+        >
+          <option value="" disabled>
+            Load sample…
+          </option>
+          {SAMPLE_GROUPS.map((group) => (
+            <optgroup key={group} label={group}>
+              {SAMPLES.filter((s) => s.group === group).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
       </div>
       <textarea
         class="input"

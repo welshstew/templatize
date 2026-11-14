@@ -43,6 +43,7 @@ def test_check_fixture_against_app(monkeypatch: pytest.MonkeyPatch) -> None:
         return r.status_code, r.content, dict(r.headers)
 
     monkeypatch.setattr(offline_check, "_post", post)
+    monkeypatch.setattr(offline_check, "_get_json", lambda _b, path: client.get(path).json())
     for path in sorted(p for p in FIXTURES.iterdir() if p.is_file()):
         result = offline_check.check_fixture("http://test", path)
         assert result is None or result.startswith("ok:"), (path.name, result)
@@ -96,6 +97,9 @@ def test_check_ui(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     js.write_text("console.log(1)")
     assert offline_check.check_ui("http://test") is None
-    js.write_text('fetch("https://telemetry.example.com/x")')
+    # Sample documents mention RFC 2606 domains as text: allowed.
+    js.write_text('const sample = "url: https://app.example.com/x";')
+    assert offline_check.check_ui("http://test") is None
+    js.write_text('fetch("https://telemetry.acme.io/x")')
     err = offline_check.check_ui("http://test")
-    assert err is not None and "telemetry.example.com" in err
+    assert err is not None and "telemetry.acme.io" in err

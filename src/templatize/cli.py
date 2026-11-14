@@ -18,9 +18,11 @@ from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
 
 from templatize.build import BuildResult, VariableSpec, build, specs_from_candidates
-from templatize.bundle import make_zip
+from templatize.bundle import make_chart_zip, make_zip
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, apply_review, review_candidates
 from templatize.emitters import EMITTERS
+from templatize.helm import ChartError
+from templatize.helm import build as build_helm_chart
 from templatize.ir import Candidate, IRValidationError
 from templatize.suggest import InputLimitError, SuggestResult, suggest
 
@@ -123,6 +125,62 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0 if rt.ok else 2
 
 
+def cmd_chart(args: argparse.Namespace) -> int:
+    text = _read(args.file)
+    variants = [_read(v) for v in args.variant]
+    specs: list[VariableSpec]
+    if args.vars:
+        specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
+    else:
+        res = _suggest(text, variants, args.llm_url)
+        specs = specs_from_candidates(_select(res, args.min_confidence))
+    labels = args.label or None
+    result = build_helm_chart(
+        args.style, text, specs, variants, chart_name=args.name, variant_labels=labels
+    )
+    if args.output:
+        root = args.output / result.chart_name
+        for f in result.files:
+            target = root / f.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(f.content.encode("utf-8", "surrogatepass"))
+        print(
+            f"wrote chart {result.chart_name!r} ({len(result.files)} files) to {root}",
+            file=sys.stderr,
+        )
+    if args.zip:
+        args.zip.write_bytes(make_chart_zip(result))
+        print(f"wrote {args.zip}", file=sys.stderr)
+    if args.json:
+        print(result.model_dump_json(indent=2))
+    elif not (args.output or args.zip):
+        for f in result.files:
+            sys.stdout.write(f"# --- {f.path}\n{f.content}")
+            if not f.content.endswith("\n"):
+                sys.stdout.write("\n")
+    for rt in result.roundtrips:
+        verdict = "PASS" if rt.ok else "FAIL"
+        print(
+            f"round-trip {rt.document} with {rt.label}: {verdict}"
+            + (f": {rt.error}" if not rt.ok else ""),
+            file=sys.stderr,
+        )
+    for cov in result.coverage:
+        if not cov.available:
+            print(f"coverage {cov.document}: not checked ({cov.error})", file=sys.stderr)
+        elif cov.error:
+            print(f"coverage {cov.document} with {cov.label}: ERROR {cov.error}", file=sys.stderr)
+        else:
+            print(
+                f"coverage {cov.document} with {cov.label}: {cov.percent:.0f}% of fields identical "
+                f"({cov.lost} lost, {cov.changed} changed, {cov.added} added by the scaffold)",
+                file=sys.stderr,
+            )
+    for note in result.notes:
+        print(f"note: {note}", file=sys.stderr)
+    return 0 if result.ok else 2
+
+
 def make_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="templatize", description="Turn text into a template.")
     sub = p.add_subparsers(dest="command", required=True)
@@ -149,6 +207,35 @@ def make_parser() -> argparse.ArgumentParser:
     b.add_argument("--print", choices=["template", "env", "script"])
     b.add_argument("--json", action="store_true", help="print the full build result as JSON")
     b.set_defaults(func=cmd_build)
+
+    c = sub.add_parser("chart", help="generate a Helm chart from Kubernetes manifests")
+    c.add_argument("file", help="manifests file ('-' for stdin)")
+    c.add_argument(
+        "--variant",
+        action="append",
+        default=[],
+        help="the same manifests for another environment (becomes values-<label>.yaml)",
+    )
+    c.add_argument(
+        "--label", action="append", default=[], help="label for each --variant, e.g. staging"
+    )
+    csel = c.add_mutually_exclusive_group(required=True)
+    csel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
+    csel.add_argument("--vars", help="JSON file with a list of variable specs")
+    c.add_argument("--name", help="chart name (default: the first workload's name)")
+    c.add_argument(
+        "--style",
+        choices=["exact", "scaffold"],
+        default="exact",
+        help="exact: your manifests as templates (byte-for-byte); scaffold: the helm create "
+        "chart filled in from them (coverage checked with helm)",
+    )
+    c.add_argument("--min-confidence", type=float, default=0.0)
+    c.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
+    c.add_argument("-o", "--output", type=Path, help="write the chart directory under this path")
+    c.add_argument("--zip", type=Path, help="write the chart as a zip")
+    c.add_argument("--json", action="store_true", help="print the full result as JSON")
+    c.set_defaults(func=cmd_chart)
     return p
 
 
@@ -160,6 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         InputLimitError,
         IRValidationError,
+        ChartError,
         ValidationError,
         UnicodeDecodeError,
         OSError,

@@ -2,7 +2,19 @@ import { useState } from "preact/hooks";
 
 import type { RoundTrip } from "../api.ts";
 
-export function RoundTripBadge({ result, pending }: { result: RoundTrip | null; pending: boolean }) {
+export function RoundTripBadge({
+  result,
+  pending,
+  scope = null,
+  failedDocument = null,
+}: {
+  result: RoundTrip | null;
+  pending: boolean;
+  /** What was checked, e.g. "input + 1 example" (Helm charts). */
+  scope?: string | null;
+  /** For charts: which document failed ("input" or "example 2"). */
+  failedDocument?: string | null;
+}) {
   const [open, setOpen] = useState(false);
   if (!result) {
     return <span class="badge neutral">{pending ? "Round-trip: checking…" : "Round-trip: —"}</span>;
@@ -14,7 +26,7 @@ export function RoundTripBadge({ result, pending }: { result: RoundTrip | null; 
         role="status"
         title="Rendering the template with the extracted values reproduces the input exactly"
       >
-        ✓ Round-trip PASS · {result.expected_bytes.toLocaleString()} bytes identical
+        ✓ Round-trip PASS · {scope ?? `${result.expected_bytes.toLocaleString()} bytes identical`}
       </span>
     );
   }
@@ -34,7 +46,14 @@ export function RoundTripBadge({ result, pending }: { result: RoundTrip | null; 
               <pre class="code">{result.actual_excerpt}</pre>
             </>
           ) : null}
-          <p class="muted">This is a bug in templatize; please report it with the input.</p>
+          {failedDocument && failedDocument !== "input" ? (
+            <p class="muted">
+              The {failedDocument} values file does not reproduce that example: accept the suggestions marked
+              “examples” (or select the differing text) so every difference is a variable.
+            </p>
+          ) : (
+            <p class="muted">This is a bug in templatize; please report it with the input.</p>
+          )}
         </div>
       ) : null}
     </span>

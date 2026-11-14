@@ -37,11 +37,12 @@ async def _call(client: Client, name: str, args: dict[str, Any]) -> Any:
     return res
 
 
-def test_lists_four_read_only_tools() -> None:
+def test_lists_five_read_only_tools() -> None:
     async def main() -> None:
         async with Client(create_server()) as c:
             listed = (await c.list_tools()).tools
             assert sorted(t.name for t in listed) == [
+                "generate_helm_chart",
                 "generate_template",
                 "render_template",
                 "suggest_parameters",
@@ -174,7 +175,7 @@ def test_stdio_transport() -> None:
 
     async def main() -> None:
         async with Client(params) as c:
-            assert len((await c.list_tools()).tools) == 4
+            assert len((await c.list_tools()).tools) == 5
             gen = await c.call_tool(
                 "generate_template",
                 {"text": TEXT, "variables": [{"name": "port", "value": "5432"}]},
@@ -217,7 +218,7 @@ def test_streamable_http_on_api_app(http_server: str) -> None:
 
     async def main() -> None:
         async with Client(f"{http_server}/mcp") as c:
-            assert len((await c.list_tools()).tools) == 4
+            assert len((await c.list_tools()).tools) == 5
             gen = await c.call_tool(
                 "generate_template",
                 {"text": TEXT, "variables": [{"name": "db_host", "value": "db01.example.com"}]},

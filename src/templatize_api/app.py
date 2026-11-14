@@ -21,13 +21,18 @@ from pydantic import ValidationError
 
 from templatize import __version__
 from templatize.build import BuildResult, build
-from templatize.bundle import make_zip
+from templatize.bundle import make_chart_zip, make_zip
 from templatize.detectors import HEURISTIC_DETECTORS, Detector, default_detectors
 from templatize.detectors import ner as ner_detector
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, check_health, review_candidates
 from templatize.emitters import EMITTERS, TemplateRenderError, get_emitter
-from templatize.emitters.base import Emitter
+from templatize.emitters.base import EmittedFile, Emitter
 from templatize.emitters.jinja2 import Jinja2Emitter
+from templatize.helm import ChartError, ChartResult
+from templatize.helm import build as build_helm_chart
+from templatize.helm import coverage as helm_coverage
+from templatize.helm import values as helm_values
+from templatize.helm.chart import CHART_NAME_RE, render_templates
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, IRValidationError
 from templatize.suggest import InputLimitError, SuggestResult, suggest
 from templatize_api.middleware import BodyLimitMiddleware, SecurityHeadersMiddleware
@@ -35,6 +40,10 @@ from templatize_api.schemas import (
     MAX_VARIABLES,
     BuildRequest,
     BuildResponse,
+    ChartRenderRequest,
+    ChartRenderResponse,
+    ChartRequest,
+    ChartResponse,
     ErrorResponse,
     InfoResponse,
     Limits,
@@ -75,6 +84,24 @@ def _run_build(req: BuildRequest) -> BuildResult:
     except ValidationError as exc:
         raise ApiError(422, _validation_message(exc)) from None
     except (IRValidationError, ValueError) as exc:  # includes UnknownEngineError
+        raise ApiError(422, str(exc)) from None
+
+
+def _run_chart(req: ChartRequest) -> ChartResult:
+    try:
+        return build_helm_chart(
+            req.style,
+            req.text,
+            req.variables,
+            req.variants,
+            chart_name=req.chart_name,
+            variant_labels=req.variant_labels,
+        )
+    except InputLimitError as exc:
+        raise ApiError(413, str(exc)) from None
+    except ValidationError as exc:
+        raise ApiError(422, _validation_message(exc)) from None
+    except (ChartError, IRValidationError, ValueError) as exc:
         raise ApiError(422, str(exc)) from None
 
 
@@ -219,6 +246,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engines=sorted(EMITTERS),
             detectors=list(HEURISTIC_DETECTORS),
             optional_detectors={"ner": ner_health.ok(), "llm": llm_health.ok()},
+            helm=helm_coverage.helm_binary() is not None,
             mcp_http="/mcp" if mcp_routes else None,
             limits=Limits(
                 max_input_chars=MAX_INPUT_CHARS,
@@ -311,6 +339,64 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={
                 "content-disposition": 'attachment; filename="template-bundle.zip"',
                 "x-roundtrip": "pass" if result.roundtrip.ok else "fail",
+            },
+        )
+
+    @app.post("/chart", tags=["helm"], responses=ERRORS)
+    def chart_endpoint(req: ChartRequest) -> ChartResponse:
+        """Build a Helm chart from Kubernetes manifests and the chosen variables.
+
+        One template per resource, a nested ``values.yaml`` (from each variable's
+        ``values_path``) and a ``values-<label>.yaml`` per example document. The round
+        trip is checked for the input and for every example."""
+        result = _run_chart(req)
+        return ChartResponse(**result.model_dump(), ok=result.ok)
+
+    @app.post("/chart/render", tags=["helm"], responses=ERRORS)
+    def chart_render_endpoint(req: ChartRenderRequest) -> ChartRenderResponse:
+        """Render chart templates with (edited) values, for the live preview.
+
+        Exact style: the ``{{ .Values.x }}`` references templatize generates, rendered
+        in-process. Scaffold style: the whole chart through ``helm template``."""
+        if req.style == "scaffold":
+            if not CHART_NAME_RE.match(req.chart_name):
+                raise ApiError(422, "invalid chart name")
+            files = [f for f in req.files if f.path != "values.yaml"]
+            files.append(EmittedFile(path="values.yaml", content=req.values_yaml))
+            try:
+                rendered = helm_coverage.helm_template(files, req.chart_name, req.overlay_yaml)
+            except helm_coverage.HelmUnavailable:
+                return ChartRenderResponse(ok=False, error="the preview needs helm on the server")
+            except ValueError as exc:
+                return ChartRenderResponse(ok=False, error=str(exc))
+            return ChartRenderResponse(ok=True, files=rendered)
+        try:
+            tree = helm_values.load(req.values_yaml)
+            if req.overlay_yaml is not None:
+                tree = helm_values.merge(tree, helm_values.load(req.overlay_yaml, "overlay"))
+            files = render_templates(req.templates, tree)
+        except (TemplateRenderError, helm_values.ValuesError) as exc:
+            return ChartRenderResponse(ok=False, error=str(exc))
+        return ChartRenderResponse(ok=True, files=files)
+
+    @app.post(
+        "/chart/download",
+        tags=["helm"],
+        responses={
+            **ERRORS,
+            200: {"content": {"application/zip": {}}, "description": "Chart directory as a zip"},
+        },
+        response_class=Response,
+    )
+    def chart_download_endpoint(req: ChartRequest) -> Response:
+        """Same input as /chart; returns ``<chart>/...`` as a zip."""
+        result = _run_chart(req)
+        return Response(
+            content=make_chart_zip(result),
+            media_type="application/zip",
+            headers={
+                "content-disposition": f'attachment; filename="{result.chart_name}-chart.zip"',
+                "x-roundtrip": "pass" if result.ok else "fail",
             },
         )
 

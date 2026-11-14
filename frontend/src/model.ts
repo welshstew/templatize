@@ -30,6 +30,8 @@ export interface Item {
   originalName: string;
   /** Set when the LLM thinks this is fixed text rather than a parameter. */
   llmNote: string | null;
+  /** Helm values.yaml location (["image", "tag"]); null derives it from the name. */
+  valuesPath: string[] | null;
 }
 
 export const VAR_TYPES = [
@@ -71,6 +73,7 @@ export function itemsFromCandidates(cands: Candidate[]): Item[] {
     nameOrigin: c.name_origin,
     originalName: c.name,
     llmNote: null,
+    valuesPath: c.values_path ?? null,
   }));
 }
 
@@ -81,7 +84,7 @@ export interface ReviewOutcome {
   added: number;
 }
 
-const PROTECTED_ORIGINS = new Set(["key", "manual"]);
+const PROTECTED_ORIGINS = new Set(["schema", "key", "manual"]);
 
 /** Merge an LLM review that arrives after the user may already have acted:
  * only pending suggestions the user has not renamed are renamed (never key-derived
@@ -135,7 +138,24 @@ export function specsFor(items: Item[]): VariableSpec[] {
     spans: i.spans,
     type: i.type,
     sources: i.manual ? ["manual"] : i.sources,
+    ...(i.valuesPath ? { values_path: i.valuesPath } : {}),
+    ...(i.variantValues ? { variant_values: i.variantValues } : {}),
   }));
+}
+
+const VALUES_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Parse a dotted values path ("image.tag"). Empty means "derive from the name". */
+export function parseValuesPath(raw: string): { path: string[] | null; error: string | null } {
+  const s = raw.trim().replace(/^\.?Values\./, "");
+  if (!s) return { path: null, error: null };
+  const parts = s.split(".");
+  if (parts.length > 8) return { path: null, error: "at most 8 levels" };
+  const bad = parts.find((p) => !VALUES_KEY_RE.test(p));
+  if (bad !== undefined) {
+    return { path: null, error: `"${bad}" is not a valid key: letters, digits and _, not starting with a digit` };
+  }
+  return { path: parts, error: null };
 }
 
 /** Returns an error message, or null if ``name`` is valid for item ``selfId``. */
@@ -265,6 +285,7 @@ export function addManual(items: Item[], map: OffsetMap, req: ManualRequest): Ma
     nameOrigin: "manual",
     originalName: req.name,
     llmNote: null,
+    valuesPath: null,
   };
   const next = items.map((i) =>
     i.status === "suggested" && i.spans.some((s) => spans.some((n) => overlaps(s, n)))
