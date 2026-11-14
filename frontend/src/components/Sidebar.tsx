@@ -177,6 +177,8 @@ function VariableRow({ item, items, loops, selected, checked, onCheck, onSelect,
     if (!error && draft !== item.name) onUpdate(item.id, { name: draft });
     else if (error) setDraft(item.name);
   };
+  const multiline = /[\r\n]/.test(item.value) || /[\r\n]/.test(item.previewValue);
+  const newline = item.value.includes("\r\n") ? "\r\n" : "\n";
   return (
     <li class={`var ${selected ? "selected" : ""} ${checked ? "checked" : ""}`} onClick={() => onSelect(item.id)}>
       <div class="row">
@@ -226,12 +228,26 @@ function VariableRow({ item, items, loops, selected, checked, onCheck, onSelect,
       {error ? <div class="field-error">{error}</div> : null}
       <label class="value">
         <span>value</span>
-        <input
-          value={item.previewValue}
-          aria-label={`Preview value for ${item.name}`}
-          spellcheck={false}
-          onInput={(e) => onUpdate(item.id, { previewValue: (e.target as HTMLInputElement).value })}
-        />
+        {multiline ? (
+          // A value over several lines (an address): a text area keeps its line breaks,
+          // written back with the document's own line ending.
+          <textarea
+            value={item.previewValue.replace(/\r\n/g, "\n")}
+            rows={Math.min(item.previewValue.split("\n").length, 6)}
+            aria-label={`Preview value for ${item.name}`}
+            spellcheck={false}
+            onInput={(e) =>
+              onUpdate(item.id, { previewValue: (e.target as HTMLTextAreaElement).value.replace(/\n/g, newline) })
+            }
+          />
+        ) : (
+          <input
+            value={item.previewValue}
+            aria-label={`Preview value for ${item.name}`}
+            spellcheck={false}
+            onInput={(e) => onUpdate(item.id, { previewValue: (e.target as HTMLInputElement).value })}
+          />
+        )}
       </label>
       {helm ? <ValuesPathField key={item.valuesPath?.join(".") ?? ""} item={item} onUpdate={onUpdate} /> : null}
       <div class="meta">

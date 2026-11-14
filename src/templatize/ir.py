@@ -111,6 +111,7 @@ class VarType(StrEnum):
     DATE = "date"
     DATETIME = "datetime"
     TIME = "time"
+    ADDRESS = "address"
     SEMVER = "semver"
     PATH = "path"
     MAC = "mac"
