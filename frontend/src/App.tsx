@@ -7,12 +7,15 @@ import {
   type ChartResponse,
   type ChartStyle,
   type DocumentProfile,
+  type DocumentType,
+  type DocumentTypeInfo,
   type Info,
   type Notice,
   type RenderResponse,
   type RoundTrip,
 } from "./api.ts";
 import { ChartView } from "./components/ChartView.tsx";
+import { DocumentTypePicker } from "./components/DocumentTypePicker.tsx";
 import { DocumentView, type TextSelection } from "./components/DocumentView.tsx";
 import { Editor } from "./components/Editor.tsx";
 import { OutputPanel } from "./components/OutputPanel.tsx";
@@ -79,6 +82,8 @@ function describeResources(profile: DocumentProfile): string {
 
 export function App() {
   const [info, setInfo] = useState<Info | null>(null);
+  const [docTypes, setDocTypes] = useState<DocumentTypeInfo[]>([]);
+  const [docType, setDocType] = useState<DocumentType | null>(null);
   const [mode, setMode] = useState<"edit" | "review">("edit");
   const [text, setText] = useState("");
   const [variants, setVariants] = useState<string[]>([]);
@@ -117,14 +122,17 @@ export function App() {
 
   useEffect(() => {
     api.info().then(setInfo, () => setInfo(null));
+    api.documentTypes().then(setDocTypes, () => setDocTypes([]));
   }, []);
 
-  const analyze = async () => {
+  /** Analyse the document; ``documentType`` confirms its type (null: detect it). */
+  const analyze = async (documentType: string | null = null) => {
     setBusy(true);
     setError(null);
     try {
       const docVariants = variants.filter((v) => v.length > 0);
-      const res = await api.suggest(text, docVariants);
+      const res = await api.suggest(text, docVariants, documentType);
+      setDocType(res.document_type ?? null);
       setItems(itemsFromCandidates(res.candidates));
       setLoops(loopsFromCandidates(res.loops ?? [], new OffsetMap(text)));
       setNotices(res.notices);
@@ -142,7 +150,7 @@ export function App() {
       setPreview(null);
       reviewedText.current = text;
       setMode("review");
-      startLlmReview(text, variants.filter((v) => v.length > 0));
+      startLlmReview(text, variants.filter((v) => v.length > 0), documentType);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -152,7 +160,7 @@ export function App() {
 
   // Heuristic results are shown instantly; the optional local LLM review is merged in
   // when (if) it arrives, without overriding anything the user changed meanwhile.
-  const startLlmReview = (docText: string, docVariants: string[]) => {
+  const startLlmReview = (docText: string, docVariants: string[], documentType: string | null = null) => {
     llmAbort.current?.abort();
     if (!info?.optional_detectors.llm) {
       setLlm({ state: "off" });
@@ -161,7 +169,7 @@ export function App() {
     const ctrl = new AbortController();
     llmAbort.current = ctrl;
     setLlm({ state: "running" });
-    api.suggestLlm(docText, docVariants, ctrl.signal).then(
+    api.suggestLlm(docText, docVariants, ctrl.signal, documentType).then(
       (res) => {
         if (ctrl.signal.aborted) return;
         if (!res.available || !res.review) {
@@ -466,7 +474,7 @@ export function App() {
             busy={busy}
             onText={setText}
             onVariants={setVariants}
-            onAnalyze={analyze}
+            onAnalyze={() => void analyze(null)}
             onEngine={setEngine}
           />
           <section class="intro">
@@ -490,6 +498,17 @@ export function App() {
           <section class={`doc-pane ${folded ? "folded" : ""}`} aria-label="Document">
             <div class="pane-head">
               <h2>Document</h2>
+              {docType && docTypes.length && !folded ? (
+                <DocumentTypePicker
+                  current={docType}
+                  types={docTypes}
+                  onConfirm={(id) => {
+                    const accepted = items.some((i) => i.status === "accepted") || loops.some((l) => l.status === "accepted");
+                    if (accepted && !confirm("Analyse again as this type? Accepted variables and lists are suggested again.")) return;
+                    void analyze(id);
+                  }}
+                />
+              ) : null}
               {folded ? (
                 <span class="muted small">Show it to select text and add a variable to the chart.</span>
               ) : (

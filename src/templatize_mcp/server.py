@@ -25,6 +25,7 @@ from pydantic import Field
 
 from templatize import __version__
 from templatize.build import VariableInput
+from templatize.doctypes import TYPES
 from templatize_mcp import tools
 
 INSTRUCTIONS = """\
@@ -77,6 +78,14 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHin
 DEFAULT_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
 
 
+DOCUMENT_TYPE_HELP = (
+    "Confirm what kind of document this is, so its format rules apply (omit to detect it; "
+    "the result's document_type says what was detected). One of: "
+    + ", ".join(t.id for t in TYPES)
+    + "."
+)
+
+
 def create_server() -> MCPServer:
     quiet_sdk_logging()
     server: MCPServer = MCPServer(
@@ -97,12 +106,16 @@ def create_server() -> MCPServer:
         min_confidence: Annotated[
             float, Field(ge=0, le=1, description="Drop candidates below this confidence.")
         ] = 0.0,
+        document_type: Annotated[
+            str | None,
+            Field(description=DOCUMENT_TYPE_HELP, max_length=64),
+        ] = None,
     ) -> tools.SuggestParametersResult:
         """Find parts of a document that should become template variables (IPs, hostnames,
         dates, emails, key/value pairs, repeated tokens, and regions that differ between
         example variants). Returns scored candidates; spans are Unicode code-point offsets."""
         with _tool_errors("suggest_parameters"):
-            return tools.suggest_parameters(text, variants, min_confidence)
+            return tools.suggest_parameters(text, variants, min_confidence, document_type)
 
     @server.tool(annotations=READ_ONLY)
     def generate_template(
@@ -138,12 +151,18 @@ def create_server() -> MCPServer:
                 )
             ),
         ] = "jinja2",
+        document_type: Annotated[
+            str | None,
+            Field(description=DOCUMENT_TYPE_HELP, max_length=64),
+        ] = None,
     ) -> tools.GenerateTemplateResult:
         """Build a template, its values file and a script that renders it, from a document,
         and verify the round trip (template + values must reproduce the input byte for
         byte). Tell the user any `notes`."""
         with _tool_errors("generate_template"):
-            return tools.generate_template(text, variables, variants, min_confidence, engine)
+            return tools.generate_template(
+                text, variables, variants, min_confidence, engine, document_type
+            )
 
     @server.tool(annotations=READ_ONLY)
     def generate_helm_chart(

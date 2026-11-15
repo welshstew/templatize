@@ -296,3 +296,24 @@ def test_render_accepts_nested_lists_and_map_loops(client: TestClient, engine: s
         "/render", json={"template": templates[engine], "values": values, "engine": engine}
     )
     assert res.json() == {"ok": True, "output": "a: x y;b:; B=2 A=1", "error": None}
+
+
+def test_document_types_and_confirming_one(client: TestClient) -> None:
+    types = client.get("/document-types").json()
+    assert {
+        "id": "ssh-config",
+        "label": "SSH client config",
+        "category": "Server configuration",
+    } in types
+    text = "Host bastion\n  HostName 10.0.0.5\n"
+    detected = client.post("/suggest", json={"text": text}).json()
+    assert detected["document_type"]["confirmed"] is False
+    confirmed = client.post("/suggest", json={"text": text, "document_type": "ssh-config"}).json()
+    assert confirmed["document_type"] == {
+        **confirmed["document_type"],
+        "id": "ssh-config",
+        "confirmed": True,
+    }
+    assert "bastion" in {c["value"] for c in confirmed["candidates"]}
+    bad = client.post("/suggest", json={"text": text, "document_type": "liquid"})
+    assert bad.status_code == 422 and "unknown document type" in bad.json()["detail"]

@@ -819,6 +819,32 @@ Register new detectors in `detectors/__init__.py`.
 - `.env` values are double-quoted with `\\ \" \n \r \t \v \f \a \b` escapes and read with
   `interpolate=False`, so `${HOME}`, `#`, quotes and CR/LF survive.
 
+## Document types
+
+Each analysis says what kind of document it thinks the text is: one of about 40 types
+(Kubernetes manifest, Docker Compose file, GitHub Actions workflow, cloud-init, nginx,
+HAProxy, ssh_config, systemd unit, `.env`, INI, TOML, CSV, SQL, access log, letter,
+email, …), with the runners-up. The list is `GET /document-types`.
+
+**Confirming a type** applies its format rules:
+- **Configs read as configs:** a two-line ssh_config is read as `Keyword value` lines,
+  and a `redis.conf` as `keyword value` lines.
+- **Prose never read as config:** a letter, email or Markdown file is never read as
+  configuration lines.
+- **Kubernetes structure rules:** these apply only to a confirmed Kubernetes manifest.
+- **Detected types change nothing:** a type that is only detected leaves
+  auto-detection as it is.
+
+How to confirm it:
+- **UI:** the **Document type** picker next to the document shows "Detected: …".
+  Choosing a type analyses the document again with it.
+- **API:** `document_type` on `/suggest` and `/suggest/llm`.
+- **MCP:** `document_type` on `suggest_parameters` and `generate_template`.
+- **CLI:** `--type ID`.
+
+Detection is cheap pattern matching on the first 200,000 characters. Every fixture,
+sample and corpus document has its expected type in `tests/core/test_doctypes.py`.
+
 ## Engines
 
 | Engine | Template | Values | Renders with | Loops |

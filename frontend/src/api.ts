@@ -85,6 +85,7 @@ export interface SuggestResult {
   notices: Notice[];
   profile?: DocumentProfile;
   loops?: LoopCandidate[];
+  document_type?: DocumentType | null;
 }
 
 export interface LoopSpec {
@@ -260,6 +261,24 @@ export interface RenderResponse {
   error: string | null;
 }
 
+export interface DocumentTypeScore {
+  id: string;
+  label: string;
+  confidence: number;
+}
+
+/** What kind of document this is: detected, or confirmed by the user. */
+export interface DocumentType extends DocumentTypeScore {
+  confirmed: boolean;
+  alternatives: DocumentTypeScore[];
+}
+
+export interface DocumentTypeInfo {
+  id: string;
+  label: string;
+  category: string;
+}
+
 export interface Info {
   name: string;
   version: string;
@@ -314,10 +333,15 @@ export const api = {
     if (!resp.ok) throw await errorFrom(resp);
     return (await resp.json()) as Info;
   },
-  suggest: (text: string, variants: string[], signal?: AbortSignal) =>
-    post<SuggestResult>("/suggest", { text, variants }, signal),
-  suggestLlm: (text: string, variants: string[], signal?: AbortSignal) =>
-    post<LlmReviewResponse>("/suggest/llm", { text, variants }, signal),
+  suggest: (text: string, variants: string[], documentType: string | null = null, signal?: AbortSignal) =>
+    post<SuggestResult>("/suggest", { text, variants, document_type: documentType }, signal),
+  suggestLlm: (text: string, variants: string[], signal?: AbortSignal, documentType: string | null = null) =>
+    post<LlmReviewResponse>("/suggest/llm", { text, variants, document_type: documentType }, signal),
+  documentTypes: async (): Promise<DocumentTypeInfo[]> => {
+    const resp = await fetch("/document-types");
+    if (!resp.ok) throw await errorFrom(resp);
+    return (await resp.json()) as DocumentTypeInfo[];
+  },
   build: (text: string, variables: VariableSpec[], loops: LoopSpec[], engine: string, signal?: AbortSignal) =>
     post<BuildResponse>("/build", { text, variables, loops, engine }, signal),
   render: (template: string, values: RenderValues, engine: string, signal?: AbortSignal) =>

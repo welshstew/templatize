@@ -34,6 +34,15 @@ key -> value mapping."""
 class SuggestRequest(BaseModel):
     text: Document
     variants: list[Document] = Field(default_factory=list, max_length=MAX_VARIANTS)
+    document_type: Annotated[str, Field(max_length=64)] | None = None
+    """Confirm the document's type (an id from GET /document-types): its format rules
+    then apply. Omit to let it be detected."""
+
+
+class DocumentTypeInfo(BaseModel):
+    id: str
+    label: str
+    category: str
 
 
 class LlmReviewResponse(BaseModel):
