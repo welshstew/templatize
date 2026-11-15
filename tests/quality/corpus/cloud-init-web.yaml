@@ -1,0 +1,22 @@
+#cloud-config
+hostname: web-03
+fqdn: web-03.shop.example.com
+timezone: UTC
+package_update: true
+packages:
+  - nginx
+  - certbot
+users:
+  - name: ops
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIQ9w ops@workstation
+write_files:
+  - path: /etc/nginx/conf.d/shop.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      server { listen 80; server_name shop.example.com; }
+runcmd:
+  - systemctl restart nginx

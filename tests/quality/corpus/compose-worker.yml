@@ -1,0 +1,19 @@
+services:
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    command: ["celery", "-A", "tasks", "worker", "--concurrency", "4"]
+    restart: on-failure
+    environment:
+      - BROKER_URL=redis://queue:6379/0
+      - QUEUE_NAME=emails
+    networks:
+      - backend
+  queue:
+    image: redis:7.4-alpine
+    networks:
+      - backend
+networks:
+  backend:
+    driver: bridge

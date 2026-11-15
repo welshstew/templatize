@@ -1,0 +1,14 @@
+#cloud-config
+hostname: db-02
+timezone: Europe/Berlin
+ntp:
+  servers:
+    - 0.de.pool.ntp.org
+    - 1.de.pool.ntp.org
+mounts:
+  - [/dev/nvme1n1, /var/lib/postgresql, ext4, "defaults,noatime", "0", "2"]
+packages:
+  - postgresql-16
+power_state:
+  mode: reboot
+  delay: "+5"
