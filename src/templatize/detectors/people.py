@@ -230,6 +230,72 @@ def _names_from_emails(text: str) -> list[Candidate]:
     return out
 
 
+_SIGN_OFF_NAME = re.compile(
+    rf"^(?:(?:Mr|Mrs|Ms|Miss|Mx|Dr|Prof)\.?[ ]+)?((?:[A-Z]\.[ ]?)*{_NAME_WORD}(?: {_NAME_WORD}){{0,2}})$"
+)
+
+
+def _unclosed_signature(text: str) -> list[Candidate]:
+    """A letter with a greeting that ends with a name and title, no "Regards," above:
+    "Mrs J. Thompson / Headteacher, Oakfield Primary School"."""
+    if not _GREETING.search(text) or _CLOSING.search(text):
+        return []
+    paras = [m for m in re.finditer(r"(?:[^\n]*\S[^\n]*(?:\r?\n|$))+", text)]
+    if not paras:
+        return []
+    last = paras[-1]
+    lines = [m for m in re.finditer(r"[^\r\n]+", last.group(0)) if m.group(0).strip()]
+    if not 1 <= len(lines) <= 3:
+        return []
+    first = lines[0].group(0).strip()
+    nm = _SIGN_OFF_NAME.match(first)
+    if nm is None or (len(lines) == 1 and " " not in nm.group(1)):
+        return []
+    base = (
+        last.start() + lines[0].start() + (len(lines[0].group(0)) - len(lines[0].group(0).lstrip()))
+    )
+    # "Northbank Customer Services": an organisation signs, not a person.
+    org = any(w.lower() in _NOT_PERSON_WORDS for w in nm.group(1).split())
+    out = [
+        _candidate(
+            text,
+            Span(start=base + nm.start(1), end=base + nm.end(1)),
+            "sender_company" if org else "sender_name",
+            "the organisation signing the letter" if org else "the name signing the letter",
+        )
+    ]
+    if org:
+        return out
+    if len(lines) > 1:
+        line = lines[1].group(0).strip()
+        ls = (
+            last.start()
+            + lines[1].start()
+            + (len(lines[1].group(0)) - len(lines[1].group(0).lstrip()))
+        )
+        cut = line.find(", ")
+        title_end = cut if cut > 0 else len(line)
+        if _JOB_WORDS.search(line[:title_end]) or cut > 0:
+            out.append(
+                _candidate(
+                    text,
+                    Span(start=ls, end=ls + title_end),
+                    "sender_title",
+                    "the signatory's job title",
+                )
+            )
+            if cut > 0:
+                out.append(
+                    _candidate(
+                        text,
+                        Span(start=ls + cut + 2, end=ls + len(line)),
+                        "sender_company",
+                        "the signatory's organisation",
+                    )
+                )
+    return out
+
+
 def _signature(text: str) -> list[Candidate]:
     out: list[Candidate] = []
     for m in _CLOSING.finditer(text):
@@ -578,6 +644,7 @@ _PERSON_PHRASES: list[tuple[re.Pattern[str], str]] = [
         "lead_name",
     ),
     (re.compile(rf"\b[Aa]pproved by {_PERSON}"), "approver_name"),
+    (re.compile(rf"\b(?:Dr|Doctor)\.? {_PERSON}"), "doctor_name"),
     (
         re.compile(rf"^[ \t]*Signed(?: for| on behalf of)? [^:\n]{{1,80}}: {_PERSON}", re.M),
         "signatory_name",
@@ -774,7 +841,7 @@ class PeopleDetector:
             if not any(sp.overlaps(t) for sp in c.spans for t in taken)
         ]
         companies = [c for c in _companies(text) if not any(sp in taken for sp in c.spans)]
-        signature = _signature(text)
+        signature = _signature(text) or _unclosed_signature(text)
         # A name that signs the letter is the sender, even when its email is there too.
         signed = {c.value for c in signature}
         contacts = [c for c in contacts if c.value not in signed]

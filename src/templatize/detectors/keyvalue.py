@@ -40,6 +40,20 @@ _MD_RANGE = re.compile(
 # `terraform plan` output: attribute lines carry a change marker (+, ~, -/+).
 _TF_PLAN = re.compile(r"Terraform will perform the following actions|^Plan: \d+ to add", re.M)
 _TF_PLAN_MARK = re.compile(r"^[ \t]*([+~])[ \t]+(?=[\w\"]+[ \t]*=)")
+_FUNCTION_WORDS = re.compile(
+    r"\b(?:the|and|will|to|is|are|a|an|of|for|with|on|in|at|be|by|this|that|you|your|we|our|"
+    r"please|can|need|then|it|has|have)\b"
+)
+
+
+def _prose_value(value: str) -> bool:
+    """A sentence rather than a setting: it ends like one, or reads like one."""
+    v = value.rstrip()
+    if v[-1:] in ".,!?:" and not re.search(r"[\w/][.:]\w", v[-3:]):
+        return True
+    return len(v.split()) >= 4 and len(_FUNCTION_WORDS.findall(v)) >= 2
+
+
 _PROSE_END = re.compile(r"[.!?,]$")
 # Dockerfile instructions whose arguments are values.
 _DOCKER_FIRST = re.compile(
@@ -437,6 +451,8 @@ class KeyValueDetector:
                 continue
 
             sm = _SPACED.match(line) if spaced_ok else None
+            if sm and _prose_value(sm.group(2)):
+                sm = None  # "Then run `ssh buildbox` and check the fingerprint is"
             if sm:
                 value, s = _unquote(sm.group(2), sm.start(2))
                 self._add(
@@ -489,8 +505,11 @@ class KeyValueDetector:
         CamelCase keyword (``HostName``) or one that repeats (``Host`` per block)."""
         if len(content) < 3:
             return False
-        keys = [m.group(1) for ln in content if (m := _SPACED.match(ln))]
-        if len(keys) / len(content) < _SPACED_MIN_SHARE:
+        matches = [m for ln in content if (m := _SPACED.match(ln))]
+        # Sentences ("Children will need a packed lunch.") count for neither side.
+        prose = sum(1 for m in matches if _prose_value(m.group(2)))
+        keys = [m.group(1) for m in matches if not _prose_value(m.group(2))]
+        if len(keys) < 3 or len(keys) / (len(content) - prose) < _SPACED_MIN_SHARE:
             return False
         camel = any(sum(c.isupper() for c in k) >= 2 or "_" in k for k in keys)
         return camel or len(set(keys)) < len(keys)

@@ -335,7 +335,10 @@ PATTERNS: list[Pattern] = [
         "regex.reference",
         VarType.STRING,
         # Ticket, order and document references: "INC-20931", "#A-778213", "PO-55821".
-        re.compile(r"(?<![\w-])#?([A-Z]{1,6}-\d{3,}(?:-\d+)*)(?![\w-])"),
+        re.compile(
+            r"(?<![\w-])#?(?!(?:SHA|MD|AES|RSA|ISO|UTF|TLS|SSL|RFC|ECDSA|ED|HS|RS|ES|PS)-\d)"
+            r"([A-Z]{1,6}-\d{3,}(?:-\d+)*)(?![\w-])"
+        ),
         0.75,
         group=1,
         name="reference",
@@ -510,6 +513,16 @@ PATTERNS: list[Pattern] = [
         0.75,
         group=1,
         name="payment_reference",
+    ),
+    Pattern(
+        "regex.checksum",
+        VarType.STRING,
+        # A hex digest on its own: MD5 (32), SHA-1 (40), SHA-256 (64), SHA-512 (128).
+        re.compile(
+            r"(?<![\w:/.-])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)(?:[0-9a-f]{128}|[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32})(?![\w/.-])"
+        ),
+        0.7,
+        name="checksum",
     ),
     Pattern(
         "regex.semver",

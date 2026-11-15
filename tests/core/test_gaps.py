@@ -333,3 +333,48 @@ def test_version_after_a_lowercase_product() -> None:
 
 def test_logfmt_value_with_underscore() -> None:
     assert values("ERROR request_id=req_8Kq2Zt timeout=30s\n")["req_8Kq2Zt"] == "request_id"
+
+
+# --- corpus batch eight -----------------------------------------------------------
+
+
+def test_prose_is_not_a_keyword_config() -> None:
+    text = (
+        "Dear Parents and Carers,\n\nYear 6 will visit the museum. Pay through\n"
+        "ParentPay by 22 January 2027.\n\nChildren will need a packed lunch and a coat.\n\n"
+        "Mrs J. Thompson\nHeadteacher, Oakfield Primary School\n"
+    )
+    found = values(text)
+    assert "Parents and Carers," not in found
+    assert not any(v.startswith("will need") for v in found)
+    assert found["J. Thompson"] == "sender_name"
+    assert found["Headteacher"] == "sender_title"
+    assert found["Oakfield Primary School"] == "sender_company"
+
+
+def test_ssh_block_in_markdown_still_read() -> None:
+    text = (
+        "Add this to `~/.ssh/config`:\n\n    Host buildbox\n      HostName 10.20.0.15\n"
+        "      User ci\n      Port 2201\n\nThen run `ssh buildbox` and check the fingerprint is\n"
+    )
+    found = values(text)
+    assert {"buildbox", "10.20.0.15", "ci", "2201"} <= set(found)
+    assert not any(v.startswith("run `ssh") for v in found)
+
+
+def test_organisation_sign_off() -> None:
+    text = "Dear Ms Hughes,\n\nYour balance is £3.00.\n\nNorthbank Customer Services\n"
+    assert values(text)["Northbank Customer Services"] == "sender_company"
+
+
+def test_doctor_name() -> None:
+    assert (
+        people("your appointment with Dr. Hannah Moore at 09:20")["doctor_name"] == "Hannah Moore"
+    )
+
+
+def test_checksums_and_algorithm_names() -> None:
+    digest = "4e1b9a2c7d0f3e6b8a5c2d9f1e0b7a4c6d3f8e2b1a9c0d7e5f4b3a2c1d0e9f8a"
+    found = values(f"Checksum (SHA-256): {digest}\nSigned with RSA-2048 over TLS-1.3.\n")
+    assert found[digest] == "checksum"
+    assert not {"SHA-256", "RSA-2048"} & set(found)

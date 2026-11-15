@@ -480,3 +480,33 @@ nginx_error.log:
 oncall_handover.txt:
   want: [Sam Rivera, Priya Desai, INC-4412, vpn.acme.example.com, 20 December 2026, +44 20 7946 0123]
   reject: []
+
+# Eighth batch: everyday letters and notices, a device config, a release note.
+
+appointment.txt:
+  want: [Patel, Hannah Moore, Tuesday 19 January 2027 at 09:20, 0161 496 0321, 943 476 5919]
+  reject: []
+  names: {Hannah Moore: doctor_name, 943 476 5919: nhs_number}
+
+utility_bill.txt:
+  want: [8821 4470 19, 2 December 2026, 1 November 2026, 30 November 2026, 312 kWh, £94.53, 16 December 2026]
+  reject: []
+  names: {1 November 2026: start_date, 30 November 2026: end_date}
+
+school_letter.txt:
+  want: [Thursday 4 February 2027, 8:45am, 3:30pm, "18", 22 January 2027, J. Thompson, Headteacher, Oakfield Primary School]
+  reject: ["Parents and Carers,", will need a packed lunch and a waterproof coat.]
+  names: {J. Thompson: sender_name, Oakfield Primary School: sender_company}
+
+mqtt_device.conf:
+  want: [gw-lon-0042, mqtt.iot.acme.example.com, "8883", sites/london/floor-3/temperature, 30s, /etc/gateway/ca.pem]
+  reject: []
+
+release_tag.txt:
+  want: [v2.9.0, staging, "1.23", "22.11", https://github.com/acme/acme-cli/releases/tag/v2.9.0, 4e1b9a2c7d0f3e6b8a5c2d9f1e0b7a4c6d3f8e2b1a9c0d7e5f4b3a2c1d0e9f8a]
+  reject: [SHA-256]
+  names: {4e1b9a2c7d0f3e6b8a5c2d9f1e0b7a4c6d3f8e2b1a9c0d7e5f4b3a2c1d0e9f8a: checksum}
+
+known_hosts_note.md:
+  want: [~/.ssh/config, buildbox, 10.20.0.15, ci, "2201"]
+  reject: [run `ssh buildbox` and check the fingerprint is]
