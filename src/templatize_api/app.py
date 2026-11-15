@@ -29,6 +29,7 @@ from templatize.compose import kompose_binary
 from templatize.detectors import HEURISTIC_DETECTORS, Detector, default_detectors
 from templatize.detectors import ner as ner_detector
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, check_health, review_candidates
+from templatize.doctypes import TYPES, UnknownDocumentTypeError
 from templatize.emitters import EMITTERS, TemplateRenderError, get_emitter
 from templatize.emitters.base import EmittedFile, Emitter
 from templatize.emitters.jinja2 import Jinja2Emitter
@@ -49,6 +50,7 @@ from templatize_api.schemas import (
     ChartRenderResponse,
     ChartRequest,
     ChartResponse,
+    DocumentTypeInfo,
     ErrorResponse,
     InfoResponse,
     Limits,
@@ -217,7 +219,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ner_health = _HealthCache(settings.ner_url, probe=ner_detector.check_health)
     llm_slots = _LlmSlots(settings.llm_concurrency, settings.llm_queue)
 
-    def run_suggest(text: str, variants: list[str]) -> SuggestResult:
+    def run_suggest(
+        text: str, variants: list[str], document_type: str | None = None
+    ) -> SuggestResult:
         """Heuristics, plus the NER service when it is up (it answers in milliseconds;
         if it fails mid-request the result just carries a notice)."""
         detectors: list[Detector] = default_detectors()
@@ -231,7 +235,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     )
                 )
             )
-        return suggest(text, variants, detectors=detectors)
+        try:
+            return suggest(text, variants, detectors=detectors, document_type=document_type)
+        except UnknownDocumentTypeError as exc:
+            raise ApiError(422, str(exc)) from None
 
     mcp_routes, mcp_lifespan = _mcp_http(settings)
 
@@ -275,6 +282,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/document-types", tags=["meta"])
+    def document_types() -> list[DocumentTypeInfo]:
+        """The document types /suggest detects and accepts as ``document_type``."""
+        return [DocumentTypeInfo(id=t.id, label=t.label, category=t.category) for t in TYPES]
+
     @app.get("/info", tags=["meta"])
     def info() -> InfoResponse:
         return InfoResponse(
@@ -299,7 +311,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         Spans are Unicode code-point offsets into ``text``."""
         try:
-            return run_suggest(req.text, req.variants)
+            return run_suggest(req.text, req.variants, req.document_type)
         except InputLimitError as exc:
             raise ApiError(413, str(exc)) from None
 
@@ -313,7 +325,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.llm_url:
             return LlmReviewResponse(available=False, detail="no LLM configured")
         try:
-            heuristic = run_suggest(req.text, req.variants)
+            heuristic = run_suggest(req.text, req.variants, req.document_type)
         except InputLimitError as exc:
             raise ApiError(413, str(exc)) from None
         config = LlmConfig(

@@ -175,3 +175,19 @@ test("the nginx envsubst sample leaves nginx's own variables alone", async ({ pa
   await expect(code).toContainText("server_name ${SERVER_NAME};");
   await expect(code).toContainText("proxy_set_header Host $host;");
 });
+
+test("confirming the document type applies its rules", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Document text").fill("Host bastion\n  HostName 10.0.0.5\n");
+  await analyze(page);
+  const picker = page.getByLabel("Document type");
+  await expect(picker.locator("option").first()).toContainText("Detected: SSH client config");
+  // Two lines are too few to read it as ssh_config on its own: bastion is not suggested.
+  await expect(page.locator("mark", { hasText: "bastion" })).toHaveCount(0);
+  const reanalysed = page.waitForResponse((r) => r.url().endsWith("/suggest") && r.request().method() === "POST");
+  await picker.selectOption("ssh-config");
+  const body = await (await reanalysed).json();
+  expect(body.document_type).toMatchObject({ id: "ssh-config", confirmed: true });
+  await expect(page.locator("mark", { hasText: "bastion" }).first()).toBeVisible();
+  await expect(picker).toHaveValue("ssh-config");
+});

@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+from templatize.doctypes import DocumentType, Profile, profile_for
 from templatize.ir import Candidate, Notice
 
 
@@ -22,6 +23,12 @@ from templatize.ir import Candidate, Notice
 class DetectionContext:
     text: str
     variants: tuple[str, ...] = ()
+    doc_type: DocumentType | None = None
+    """The document's type; when the user confirmed it, its format rules apply."""
+
+    @property
+    def profile(self) -> Profile:
+        return profile_for(self.doc_type)
 
 
 @dataclass

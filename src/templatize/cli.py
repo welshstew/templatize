@@ -29,6 +29,7 @@ from templatize.build import (
 )
 from templatize.bundle import make_chart_zip, make_role_zip, make_zip
 from templatize.detectors.llm import LlmConfig, LlmUnavailable, apply_review, review_candidates
+from templatize.doctypes import TYPES, UnknownDocumentTypeError
 from templatize.emitters import EMITTERS
 from templatize.helm import ChartError
 from templatize.helm import build as build_helm_chart
@@ -68,6 +69,10 @@ def _print_candidates(res: SuggestResult, min_conf: float) -> None:
         where = f" at {n.span.start}" if n.span else ""
         print(f"note: {n.kind}{where}: {n.message}")
     print(f"{len(rows)} candidate(s)")
+    d = res.document_type
+    if d is not None:
+        how = "confirmed" if d.confirmed else f"detected, {d.confidence:.2f}"
+        print(f"document type: {d.label} ({d.id}, {how})")
 
 
 def _select(res: SuggestResult, min_conf: float) -> list[Candidate]:
@@ -85,8 +90,10 @@ def _write_outputs(result: BuildResult, outdir: Path | None, zip_path: Path | No
         print(f"wrote {zip_path}", file=sys.stderr)
 
 
-def _suggest(text: str, variants: list[str], llm_url: str | None) -> SuggestResult:
-    res = suggest(text, variants)
+def _suggest(
+    text: str, variants: list[str], llm_url: str | None, document_type: str | None = None
+) -> SuggestResult:
+    res = suggest(text, variants, document_type=document_type)
     if not llm_url:
         return res
     # The key comes from the environment, never a flag (shell history, `ps`).
@@ -108,8 +115,15 @@ def _suggest(text: str, variants: list[str], llm_url: str | None) -> SuggestResu
     )
 
 
+TYPE_HELP = "confirm the document type (its format rules then apply): " + ", ".join(
+    t.id for t in TYPES
+)
+
+
 def cmd_suggest(args: argparse.Namespace) -> int:
-    res = _suggest(_read(args.file), [_read(v) for v in args.variant], args.llm_url)
+    res = _suggest(
+        _read(args.file), [_read(v) for v in args.variant], args.llm_url, args.document_type
+    )
     if args.json:
         print(res.model_dump_json(indent=2))
     else:
@@ -124,7 +138,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     if args.vars:
         specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
     else:
-        res = _suggest(text, [_read(v) for v in args.variant], args.llm_url)
+        res = _suggest(text, [_read(v) for v in args.variant], args.llm_url, args.document_type)
         chosen = _select(res, args.min_confidence)
         if args.no_loops or args.loops:
             specs = specs_from_candidates(chosen)
@@ -171,7 +185,7 @@ def cmd_chart(args: argparse.Namespace) -> int:
     if args.vars:
         specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
     else:
-        res = _suggest(text, variants, args.llm_url)
+        res = _suggest(text, variants, args.llm_url, getattr(args, "document_type", None))
         chosen = _select(res, args.min_confidence)
         if args.no_loops or args.style == "scaffold":
             specs = specs_from_candidates(chosen)
@@ -236,6 +250,7 @@ def make_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("suggest", help="list parameter candidates")
     s.add_argument("file", help="input file ('-' for stdin)")
     s.add_argument("--variant", action="append", default=[], help="another example of the document")
+    s.add_argument("--type", dest="document_type", metavar="ID", help=TYPE_HELP)
     s.add_argument("--json", action="store_true")
     s.add_argument("--min-confidence", type=float, default=0.0)
     s.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
@@ -244,6 +259,7 @@ def make_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("build", help="generate template, .env and render script")
     b.add_argument("file", help="input file ('-' for stdin)")
     b.add_argument("--variant", action="append", default=[])
+    b.add_argument("--type", dest="document_type", metavar="ID", help=TYPE_HELP)
     sel = b.add_mutually_exclusive_group(required=True)
     sel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
     sel.add_argument("--vars", help="JSON file with a list of variable specs")
@@ -333,7 +349,7 @@ def cmd_role(args: argparse.Namespace) -> int:
     if args.vars:
         specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
     else:
-        res = _suggest(text, variants, args.llm_url)
+        res = _suggest(text, variants, args.llm_url, getattr(args, "document_type", None))
         chosen = _select(res, args.min_confidence)
         if args.no_loops:
             specs = specs_from_candidates(chosen)
@@ -391,6 +407,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ValidationError,
         UnicodeDecodeError,
         OSError,
+        UnknownDocumentTypeError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

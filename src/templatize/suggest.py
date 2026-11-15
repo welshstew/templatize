@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from templatize.compose import compose_profile
 from templatize.detectors import DetectionContext, Detector, default_detectors
 from templatize.detectors.k8s import split_spans
+from templatize.doctypes import DocumentType, detect_type
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice, Span
 from templatize.k8s import DocumentProfile, detect_profile, structural_spans
 from templatize.loops import detect_loops, explained_notices
@@ -28,6 +29,8 @@ class SuggestResult(BaseModel):
     """What kind of document this is (e.g. Kubernetes manifests: a Helm chart can be built)."""
     loops: list[LoopCandidate] = []
     """Repeated blocks (list items, SQL rows, keyword lines) that can become loops."""
+    document_type: DocumentType | None = None
+    """What kind of document this is (detected, or confirmed by the caller)."""
 
 
 def check_limits(text: str, variants: Sequence[str] = ()) -> None:
@@ -67,9 +70,13 @@ def suggest(
     text: str,
     variants: Sequence[str] = (),
     detectors: Sequence[Detector] | None = None,
+    document_type: str | None = None,
 ) -> SuggestResult:
+    """Suggest variables and loops. ``document_type`` (an id from
+    :data:`templatize.doctypes.TYPES`) confirms the type: its format rules apply."""
     check_limits(text, variants)
-    ctx = DetectionContext(text=text, variants=tuple(variants))
+    doc_type = detect_type(text, confirmed=document_type)
+    ctx = DetectionContext(text=text, variants=tuple(variants), doc_type=doc_type)
     raw: list[Candidate] = []
     notices: list[Notice] = []
     for det in detectors if detectors is not None else default_detectors():
@@ -79,7 +86,7 @@ def suggest(
     profile = detect_profile(text)
     if profile.format is None:
         profile = compose_profile(text) or profile
-    if profile.format == "kubernetes":
+    if profile.format == "kubernetes" and ctx.profile.kubernetes is not False:
         # apiVersion/kind and mapping keys are structure, never parameters; whole
         # images are superseded by their repository/tag parts.
         fixed = structural_spans(text)
@@ -105,4 +112,5 @@ def suggest(
         notices=explained_notices(notices, loops),
         profile=profile,
         loops=loops,
+        document_type=doc_type,
     )

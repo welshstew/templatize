@@ -308,3 +308,21 @@ def test_generate_with_other_engines(engine: str, placeholder: str, values_file:
             assert out["template"].count(placeholder) == 2
 
     run(main)
+
+
+def test_document_type_detected_and_confirmed() -> None:
+    async def main() -> None:
+        async with Client(create_server()) as c:
+            text = "Host bastion\n  HostName 10.0.0.5\n"
+            res = await c.call_tool("suggest_parameters", {"text": text})
+            assert res.structured_content["document_type"]["confirmed"] is False
+            res = await c.call_tool(
+                "suggest_parameters", {"text": text, "document_type": "ssh-config"}
+            )
+            out = res.structured_content
+            assert out["document_type"]["id"] == "ssh-config" and out["document_type"]["confirmed"]
+            assert "bastion" in {cand["value"] for cand in out["candidates"]}
+            bad = await c.call_tool("suggest_parameters", {"text": text, "document_type": "liquid"})
+            assert bad.is_error
+
+    run(main)

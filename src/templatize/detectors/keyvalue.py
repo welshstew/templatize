@@ -248,13 +248,19 @@ def _confidence(value: str, base: float) -> float:
     return base
 
 
+def _decide(forced: bool | None, detected: bool) -> bool:
+    """A confirmed document type's rule, else what auto-detection found."""
+    return detected if forced is None else forced
+
+
 class KeyValueDetector:
     name = "key_value"
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
+        profile = ctx.profile  # a confirmed document type overrides the format guesses
         if _VCAL_START.match(ctx.text):
             return DetectorResult(candidates=self._vcal(ctx.text))
-        if _DOCKER_FIRST.match(ctx.text):
+        if _decide(profile.dockerfile, bool(_DOCKER_FIRST.match(ctx.text))):
             return DetectorResult(candidates=self._dockerfile(ctx.text))
         if _XML_START.match(ctx.text):
             return DetectorResult(candidates=self._xml(ctx.text))
@@ -262,15 +268,17 @@ class KeyValueDetector:
         content = [
             ln for _, ln in _lines(ctx.text) if ln.strip() and not ln.lstrip().startswith("#")
         ]
-        spaced_ok = self._spaced_format(content)
-        lower_ok = self._lower_spaced_format(content)
-        manifest = bool(_TOP_API.search(ctx.text)) and bool(_TOP_KIND.search(ctx.text))
+        spaced_ok = _decide(profile.keyword_lines, self._spaced_format(content))
+        lower_ok = _decide(profile.lower_keyword_lines, self._lower_spaced_format(content))
+        manifest = _decide(
+            profile.kubernetes, bool(_TOP_API.search(ctx.text)) and bool(_TOP_KIND.search(ctx.text))
+        )
         chart = bool(_TOP_API.search(ctx.text)) and bool(_TOP_APPVERSION.search(ctx.text))
         stack: list[tuple[int, str]] = []  # YAML (indent, key) parents
         scopes = _Scopes(ctx.text)
         section: str | None = None  # INI [section]
         last_name: tuple[int, str, str] | None = None  # (indent, name value, candidate id)
-        tf_plan = bool(_TF_PLAN.search(ctx.text))
+        tf_plan = _decide(profile.terraform_plan, bool(_TF_PLAN.search(ctx.text)))
         for line_start, line in _lines(ctx.text):
             if not line.strip():
                 continue
