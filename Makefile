@@ -9,7 +9,7 @@ NER_IMAGE ?= templatize-ner:dev
 OFFLINE = $(COMPOSE) -p templatize-offline -f compose.yaml -f compose.offline.yaml
 PLATFORMS ?= linux/amd64,linux/arm64
 
-PHONY_EXTRA = samples frontend frontend-dev frontend-test check-all up-llm up-llm-gpu up-llm-gpu-large model model-large llm-image offline-test-llm ner-image ner-model up-ner
+PHONY_EXTRA = e2e e2e-ci corpus-report samples frontend frontend-dev frontend-test check-all up-llm up-llm-gpu up-llm-gpu-large model model-large llm-image offline-test-llm ner-image ner-model up-ner
 .PHONY: $(PHONY_EXTRA) install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
 
 install:
@@ -31,6 +31,10 @@ frontend-test:
 # is analyzed, accepted and round-tripped in Chrome; suggestions go to frontend/e2e-report/.
 e2e:
 	cd frontend && npx playwright test
+
+# The same suite against a fresh server started from source (what CI runs; needs make frontend).
+e2e-ci:
+	scripts/e2e.sh
 
 # Detection quality on tests/quality/corpus: what is missed and what is noise.
 corpus-report:

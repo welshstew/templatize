@@ -743,7 +743,9 @@ noise.
 **UI end-to-end tests.** `make e2e` (against a running app, e.g. `make up`) drives the UI
 in Chrome with Playwright: every sample and corpus document is analyzed, every
 suggestion accepted, and the round trip must pass; what was suggested is written to
-`frontend/e2e-report/`.
+`frontend/e2e-report/`. `make e2e-ci` runs the same suite against a fresh server started
+from source (after `make frontend`), as CI does; set `E2E_CHANNEL=` to use Playwright's
+bundled Chromium instead of Google Chrome.
 
 **Names from context.** A generic key inside a keyed block or INI section is
 qualified by it: `DATABASE = {"host": ...}` gives `database_host`, `[server] port`
