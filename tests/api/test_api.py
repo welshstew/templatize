@@ -58,7 +58,7 @@ def test_fixture_flow_via_api(client: TestClient, fixture_path: Path) -> None:
     rendered = client.post(
         "/render", json={"template": body["template"]["content"], "values": values}
     )
-    assert rendered.json() == {"ok": True, "output": text, "error": None}
+    assert rendered.json() == {"ok": True, "output": text, "error": None, "schema_check": None}
 
     dl = client.post("/download", json={"text": text, "variables": specs(cands)})
     assert dl.status_code == 200
@@ -84,7 +84,12 @@ def test_render_live_preview_with_edited_values(client: TestClient) -> None:
         "/render",
         json={"template": built["template"]["content"], "values": {"HOST": "db02", "port": "6543"}},
     ).json()
-    assert out == {"ok": True, "output": "server db02 port 6543\n", "error": None}
+    assert out == {
+        "ok": True,
+        "output": "server db02 port 6543\n",
+        "error": None,
+        "schema_check": None,
+    }
 
 
 def test_render_errors_are_reported_not_raised(client: TestClient) -> None:
@@ -205,7 +210,12 @@ def test_build_with_loops_and_render_lists(client: TestClient) -> None:
         "/render",
         json={"template": built["template"]["content"], "values": {"hosts": ["x", "y", "z"]}},
     ).json()
-    assert rendered == {"ok": True, "output": "hosts:\n- x\n- y\n- z\n", "error": None}
+    assert rendered == {
+        "ok": True,
+        "output": "hosts:\n- x\n- y\n- z\n",
+        "error": None,
+        "schema_check": None,
+    }
     bad = client.post("/build", json={"text": text, "loops": [{**loop, "name": "for"}]})
     assert bad.status_code == 422 and "reserved" in bad.json()["detail"]
 
@@ -262,7 +272,7 @@ def test_build_render_and_download_with_other_engines(
         "/render",
         json={"template": built["template"]["content"], "values": values, "engine": engine},
     ).json()
-    assert rendered == {"ok": True, "output": text, "error": None}
+    assert rendered == {"ok": True, "output": text, "error": None, "schema_check": None}
     dl = client.post("/download", json=body)
     names = set(zipfile.ZipFile(io.BytesIO(dl.content)).namelist())
     assert names == files
@@ -295,7 +305,12 @@ def test_render_accepts_nested_lists_and_map_loops(client: TestClient, engine: s
     res = client.post(
         "/render", json={"template": templates[engine], "values": values, "engine": engine}
     )
-    assert res.json() == {"ok": True, "output": "a: x y;b:; B=2 A=1", "error": None}
+    assert res.json() == {
+        "ok": True,
+        "output": "a: x y;b:; B=2 A=1",
+        "error": None,
+        "schema_check": None,
+    }
 
 
 def test_document_types_and_confirming_one(client: TestClient) -> None:
@@ -334,3 +349,17 @@ def test_suggest_with_a_schema(client: TestClient) -> None:
     assert "2" not in values and values["api"] == "url"
     bad = client.post("/suggest", json={"text": text, "schema": "[1]"})
     assert bad.status_code == 422 and "JSON Schema" in bad.json()["detail"]
+
+
+def test_render_checks_the_output_against_its_schema(client: TestClient) -> None:
+    template = (
+        "apiVersion: v1\nkind: Service\nmetadata:\n  name: web\nspec:\n  ports:\n"
+        "    - port: {{ port }}\n"
+    )
+    body = {"template": template, "check_schema": True, "document_type": "kubernetes"}
+    ok = client.post("/render", json={**body, "values": {"port": "80"}}).json()
+    assert ok["schema_check"]["ok"]
+    assert ok["schema_check"]["schemas"] == ["Kubernetes Service (v1)"]
+    bad = client.post("/render", json={**body, "values": {"port": "eighty"}}).json()
+    assert bad["ok"] and not bad["schema_check"]["ok"]
+    assert bad["schema_check"]["problems"][0]["path"] == "spec.ports.0.port"

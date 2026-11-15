@@ -285,11 +285,14 @@ export function App() {
       if (mode !== "review" || !build) return;
       // An engine without loops built them as literal text: send only the plain values.
       const values = previewValues(items, build.loops?.length ? loops : []);
-      api.render(build.template.content, values, build.engine, signal).then(setPreview, (e) => {
+      // The output is checked against the schema of the document as analysed: the one
+      // supplied in the Schema tab, else the bundled one for its type.
+      const check = { schema: schemaText.trim() || null, documentType: docType?.id ?? null };
+      api.render(build.template.content, values, build.engine, signal, check).then(setPreview, (e) => {
         if (!isAbort(e)) setPreview({ ok: false, output: null, error: String(e) });
       });
     },
-    [mode, build?.template.content, build?.engine, valuesKey],
+    [mode, build?.template.content, build?.engine, valuesKey, docType?.id],
     200,
   );
 

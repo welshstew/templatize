@@ -39,6 +39,7 @@ from templatize.helm import coverage as helm_coverage
 from templatize.helm import values as helm_values
 from templatize.helm.chart import CHART_NAME_RE, render_templates
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, IRValidationError
+from templatize.schemacheck import check_output
 from templatize.suggest import InputLimitError, SuggestResult, suggest
 from templatize.userschema import SchemaError
 from templatize_api.middleware import BodyLimitMiddleware, SecurityHeadersMiddleware
@@ -381,7 +382,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 output = emitter.render(req.template, values)
         except TemplateRenderError as exc:
             return RenderResponse(ok=False, error=str(exc))
-        return RenderResponse(ok=True, output=output)
+        check = None
+        if req.check_schema:
+            try:
+                check = check_output(
+                    output, schema=req.json_schema, document_type=req.document_type
+                )
+            except (SchemaError, UnknownDocumentTypeError) as exc:
+                raise ApiError(422, str(exc)) from None
+        return RenderResponse(ok=True, output=output, schema_check=check)
 
     @app.post(
         "/download",

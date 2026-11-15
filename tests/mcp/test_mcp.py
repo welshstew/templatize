@@ -106,7 +106,12 @@ def test_render_and_validate() -> None:
             r = await c.call_tool(
                 "render_template", {"template": "a={{ x }}\n", "values": {"X": "1"}}
             )
-            assert r.structured_content == {"ok": True, "output": "a=1\n", "error": None}
+            assert r.structured_content == {
+                "ok": True,
+                "output": "a=1\n",
+                "error": None,
+                "schema_check": None,
+            }
             r = await c.call_tool("render_template", {"template": "{{ missing }}"})
             assert r.structured_content["ok"] is False and not r.is_error
             r = await c.call_tool("render_template", {"template": "a\nb", "newline": "\r\n"})
@@ -337,5 +342,26 @@ def test_suggest_with_a_schema() -> None:
             out = res.structured_content
             assert not res.is_error and out["schema_info"]["provided"]
             assert "api" in {cand["value"] for cand in out["candidates"]}
+
+    run(main)
+
+
+def test_render_template_checks_the_schema() -> None:
+    async def main() -> None:
+        async with Client(create_server()) as c:
+            template = "apiVersion: v1\nkind: Service\nmetadata:\n  name: web\nspec:\n  ports:\n    - port: ${port}\n"
+            res = await c.call_tool(
+                "render_template",
+                {
+                    "template": template,
+                    "values": {"port": "eighty"},
+                    "engine": "terraform",
+                    "check_schema": True,
+                },
+            )
+            out = res.structured_content
+            assert not res.is_error and out["ok"]
+            assert not out["schema_check"]["ok"]
+            assert out["schema_check"]["problems"][0]["path"] == "spec.ports.0.port"
 
     run(main)

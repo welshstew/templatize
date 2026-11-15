@@ -33,6 +33,7 @@ from templatize.ir import MAX_INPUT_CHARS, Candidate, IRValidationError, Notice,
 from templatize.k8s import DocumentProfile
 from templatize.loops import loop_values
 from templatize.roundtrip import RoundTripResult
+from templatize.schemacheck import SchemaCheck, check_output
 from templatize.suggest import SuggestResult, check_limits, suggest
 from templatize.userschema import SchemaInfo
 from templatize.validate import validate_template as core_validate
@@ -54,8 +55,11 @@ def _suggest(
     return suggest(text, variants, detectors=detectors, document_type=document_type, schema=schema)
 
 
-RenderValue = str | list[str] | list[dict[str, str]]
-"""A variable's string, or a loop's list (strings, or one mapping per item)."""
+RenderValue = (
+    str | list[str] | list[dict[str, str | list[str] | list[dict[str, str]]]] | dict[str, str]
+)
+"""A variable's string, or a loop's value: a list of strings, a list of objects (whose
+values may be a nested list), or a map loop's key -> value object."""
 
 
 class ToolInputError(ValueError):
@@ -132,6 +136,9 @@ class RenderTemplateResult(BaseModel):
     ok: bool
     output: str | None = None
     error: str | None = None
+    schema_check: SchemaCheck | None = None
+    """With check_schema: the output's problems against its JSON Schema (None: no schema
+    applies). Fix the values (or the template) until it is ok."""
 
 
 class ValidateTemplateResult(BaseModel):
@@ -308,6 +315,9 @@ def render_template(
     values: dict[str, RenderValue] | None = None,
     newline: Newline | None = None,
     engine: str = "jinja2",
+    check_schema: bool = False,
+    schema: str | None = None,
+    document_type: str | None = None,
 ) -> RenderTemplateResult:
     if len(template) > MAX_INPUT_CHARS * 2:
         raise ToolInputError("template too large")
@@ -323,7 +333,13 @@ def render_template(
             output = emitter.render(template, lowered)
     except TemplateRenderError as exc:
         return RenderTemplateResult(ok=False, error=str(exc))
-    return RenderTemplateResult(ok=True, output=output)
+    check = None
+    if check_schema:
+        try:
+            check = check_output(output, schema=schema, document_type=document_type)
+        except ValueError as exc:
+            raise ToolInputError(str(exc)) from None
+    return RenderTemplateResult(ok=True, output=output, schema_check=check)
 
 
 def validate_template(

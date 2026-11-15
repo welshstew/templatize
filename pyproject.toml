@@ -10,6 +10,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "pydantic>=2.8",
     "pyyaml>=6.0",
+    "jsonschema>=4.20",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +66,10 @@ strict = true
 python_version = "3.11"
 plugins = ["pydantic.mypy"]
 files = ["src/templatize", "src/templatize_api", "src/templatize_mcp", "src/templatize_ner"]
+
+[[tool.mypy.overrides]]
+module = ["jsonschema", "jsonschema.*"]
+ignore_missing_imports = true  # no stubs shipped; used only in templatize.schemacheck
 
 [tool.ruff]
 line-length = 100
