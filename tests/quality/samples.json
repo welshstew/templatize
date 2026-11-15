@@ -121,6 +121,21 @@
     "variants": []
   },
   {
+    "id": "vault-policy",
+    "text": "# Policy for the orders service: read its own secrets, renew its token.\npath \"secret/data/orders/production/*\" {\n  capabilities = [\"read\", \"list\"]\n}\n\npath \"database/creds/orders-readonly\" {\n  capabilities = [\"read\"]\n}\n\npath \"transit/encrypt/orders-payments\" {\n  capabilities = [\"update\"]\n}\n\npath \"auth/token/renew-self\" {\n  capabilities = [\"update\"]\n}\n",
+    "variants": []
+  },
+  {
+    "id": "vault-agent",
+    "text": "pid_file = \"/run/vault-agent/pidfile\"\n\nvault {\n  address = \"https://vault.acme.example.com:8200\"\n  ca_cert = \"/etc/vault/ca.pem\"\n}\n\nauto_auth {\n  method \"kubernetes\" {\n    mount_path = \"auth/kubernetes-prod\"\n    config = {\n      role = \"orders-api\"\n    }\n  }\n\n  sink \"file\" {\n    config = {\n      path = \"/home/vault/.vault-token\"\n    }\n  }\n}\n\ntemplate {\n  destination = \"/etc/orders/database.env\"\n  contents    = <<EOT\n{{ with secret \"database/creds/orders-readonly\" }}\nDB_USER={{ .Data.username }}\nDB_PASSWORD={{ .Data.password }}\n{{ end }}\nEOT\n  perms       = \"0640\"\n}\n",
+    "variants": []
+  },
+  {
+    "id": "terraform-vault",
+    "text": "provider \"vault\" {\n  address   = \"https://vault.acme.example.com:8200\"\n  namespace = \"platform\"\n}\n\ndata \"vault_kv_secret_v2\" \"orders_db\" {\n  mount = \"secret\"\n  name  = \"orders/production/database\"\n}\n\nresource \"kubernetes_secret\" \"orders_db\" {\n  metadata {\n    name      = \"orders-db\"\n    namespace = \"orders\"\n  }\n\n  data = {\n    username = data.vault_kv_secret_v2.orders_db.data[\"username\"]\n    password = data.vault_kv_secret_v2.orders_db.data[\"password\"]\n  }\n}\n",
+    "variants": []
+  },
+  {
     "id": "cloud-init",
     "text": "#cloud-config\nhostname: app-01\ntimezone: Europe/London\n\npackages:\n  - nginx\n  - postgresql-client\n  - fail2ban\n\nusers:\n  - name: deploy\n    groups: sudo\n    shell: /bin/bash\n    ssh_authorized_keys:\n      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK1x deploy@laptop\n  - name: monitor\n    groups: adm\n    shell: /bin/bash\n    ssh_authorized_keys:\n      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM2y monitor@ops\n      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN3z monitor@backup\n\nruncmd:\n  - systemctl enable --now nginx\n",
     "variants": []

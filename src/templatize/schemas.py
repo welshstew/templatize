@@ -230,9 +230,84 @@ def _candidate(text: str, start: int, end: int, name: str, why: str) -> Candidat
 _ENV_ITEM = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)=(.+)")
 
 
+# --- HCL: Terraform, Vault policies, Vault Agent ------------------------------------
+
+HCL_TYPES = frozenset({"terraform", "vault-policy", "vault-agent"})
+HCL_CONFIDENCE = 0.8
+"""Labelled HCL blocks (packer, vault) are detected at 0.8; the HCL rules apply there."""
+# A block and its labels: resource "aws_instance" "web" {, method "kubernetes" {.
+_HCL_LABELS = re.compile(r'^[ \t]*([A-Za-z_][\w-]*)((?:[ \t]+"[^"\n]*")+)[ \t]*\{', re.MULTILINE)
+_HCL_LABEL = re.compile(r'"([^"\n]*)"')
+# Vault policy capabilities: permission keywords, not values.
+_CAPABILITIES = re.compile(r"\bcapabilities[ \t]*=[ \t]*\[[^\]\n]*\]")
+# An unquoted expression: data.vault_kv_secret_v2.db.data["username"], var.region, local.x.
+_HCL_REFERENCE = re.compile(
+    r"^[ \t]*[A-Za-z_][\w-]*[ \t]*=[ \t]*((?:var|local|data|module|each|count|path|self|"
+    r"terraform)\.[^\n#]*?)[ \t]*$",
+    re.MULTILINE,
+)
+_HEREDOC = re.compile(r"=[ \t]*(<<-?[A-Z_]+)[ \t]*$", re.MULTILINE)
+# Labels that are the value itself (a Vault policy's path).
+_VALUE_LABELS = frozenset({"path"})
+
+
+def structure_regions(text: str, doc_type: DocumentType | None) -> list[Span]:
+    """Parts of an HCL document that are never values: block labels (except a policy's
+    path), capability lists, unquoted references and heredoc markers."""
+    if (
+        doc_type is None
+        or doc_type.id not in HCL_TYPES
+        or not (doc_type.confirmed or doc_type.confidence >= HCL_CONFIDENCE)
+    ):
+        return []
+    out: list[Span] = []
+    for m in _HCL_LABELS.finditer(text):
+        if m.group(1) in _VALUE_LABELS:
+            continue
+        base = m.start(2)
+        for lm in _HCL_LABEL.finditer(m.group(2)):
+            out.append(Span(start=base + lm.start(1), end=base + lm.end(1)))
+    for pattern in (_CAPABILITIES, _HCL_REFERENCE, _HEREDOC):
+        group = 0 if pattern is _CAPABILITIES else 1
+        out.extend(Span(start=m.start(group), end=m.end(group)) for m in pattern.finditer(text))
+    return [s for s in out if s.end > s.start]
+
+
+_POLICY_PATH = re.compile(r'^path[ \t]+"([^"\n]+)"[ \t]*\{', re.MULTILINE)
+
+
+def _policy_path_names(text: str) -> dict[tuple[int, int], str]:
+    """A Vault policy's paths named after their mount: secret/data/... -> secret_data_path."""
+    out: dict[tuple[int, int], str] = {}
+    for m in _POLICY_PATH.finditer(text):
+        parts = [p for p in m.group(1).split("/") if p and p != "*"][:2]
+        if parts:
+            out[(m.start(1), m.end(1))] = snake_case("_".join(parts)) + "_path"
+    return out
+
+
+def _inside(span: Span, regions: list[Span]) -> bool:
+    return any(r.start <= span.start and span.end <= r.end for r in regions)
+
+
 def apply(text: str, doc_type: DocumentType | None, raw: list[Candidate]) -> list[Candidate]:
     """``raw`` with the type's schema rules applied: structure removed, values renamed,
     and the values the schema knows about suggested."""
+    regions = structure_regions(text, doc_type)
+    if regions:
+        raw = [
+            c.model_copy(update={"spans": kept}) if len(kept) != len(c.spans) else c
+            for c in raw
+            if (kept := [s for s in c.spans if not _inside(s, regions)])
+        ]
+    if regions and doc_type is not None and doc_type.id == "vault-policy":
+        names_by_span = _policy_path_names(text)
+        raw = [
+            c.model_copy(update={"name": n, "name_origin": "schema"})
+            if len(c.spans) == 1 and (n := names_by_span.get((c.spans[0].start, c.spans[0].end)))
+            else c
+            for c in raw
+        ]
     rules = rules_for(doc_type)
     if not rules:
         return raw

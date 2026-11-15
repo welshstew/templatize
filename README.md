@@ -79,6 +79,14 @@ selected, to show it off:
 
 Accept a sample's lists ("Accept list …") to see them as loops.
 
+Three samples show HashiCorp Vault:
+- **A Vault policy:** the paths are the values, named after their mount
+  (`secret_data_path`); capabilities are permission keywords.
+- **A Vault Agent config:** it fetches a database secret into a file. The agent's own
+  `{{ with secret … }}` template is kept as literal text.
+- **Terraform reading a secret from Vault:** block labels and `data.…` references are
+  never values.
+
 The frontend is Preact + TypeScript, built with Vite, with no other runtime dependencies
 (about 37 KB of JS, 14 KB gzipped) and system fonts only. `npm run build` type-checks,
 bundles, and fails if the output references any external URL. `npm test` runs the

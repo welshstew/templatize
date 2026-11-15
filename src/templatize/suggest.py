@@ -17,6 +17,7 @@ from templatize.k8s import DocumentProfile, detect_profile, structural_spans
 from templatize.loops import detect_loops, explained_notices
 from templatize.merge import compose_candidates, merge_candidates
 from templatize.schemas import apply as apply_schema
+from templatize.schemas import structure_regions
 from templatize.userschema import SchemaInfo, find_reference, load_schema, without_reference
 from templatize.userschema import apply as apply_user_schema
 
@@ -134,6 +135,15 @@ def suggest(
     candidates, composed = compose_candidates(text, merge_candidates(raw))
     notices.extend(composed)
     loops = detect_loops(text, variants, taken_names=[c.name for c in candidates])
+    if regions := structure_regions(text, doc_type):
+        # A list made only of structure (a policy's capabilities) is not a loop.
+        loops = [
+            lp
+            for lp in loops
+            if not all(
+                any(r.start <= s.start and s.end <= r.end for r in regions) for s in lp.items
+            )
+        ]
     return SuggestResult(
         candidates=candidates,
         notices=explained_notices(notices, loops),

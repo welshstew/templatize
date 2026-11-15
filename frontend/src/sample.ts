@@ -626,6 +626,94 @@ bnovak,bruno.novak@example.com,payments,developer
 cmendes,carla.mendes@example.com,support,viewer
 `,
   },
+  // HashiCorp Vault: who may read which secrets, and how an app gets them.
+  {
+    id: "vault-policy",
+    label: "HashiCorp Vault policy (HCL)",
+    group: "Config & infrastructure",
+    text: `# Policy for the orders service: read its own secrets, renew its token.
+path "secret/data/orders/production/*" {
+  capabilities = ["read", "list"]
+}
+
+path "database/creds/orders-readonly" {
+  capabilities = ["read"]
+}
+
+path "transit/encrypt/orders-payments" {
+  capabilities = ["update"]
+}
+
+path "auth/token/renew-self" {
+  capabilities = ["update"]
+}
+`,
+  },
+  {
+    id: "vault-agent",
+    label: "Vault Agent: fetch a database secret (HCL)",
+    group: "Config & infrastructure",
+    text: `pid_file = "/run/vault-agent/pidfile"
+
+vault {
+  address = "https://vault.acme.example.com:8200"
+  ca_cert = "/etc/vault/ca.pem"
+}
+
+auto_auth {
+  method "kubernetes" {
+    mount_path = "auth/kubernetes-prod"
+    config = {
+      role = "orders-api"
+    }
+  }
+
+  sink "file" {
+    config = {
+      path = "/home/vault/.vault-token"
+    }
+  }
+}
+
+template {
+  destination = "/etc/orders/database.env"
+  contents    = <<EOT
+{{ with secret "database/creds/orders-readonly" }}
+DB_USER={{ .Data.username }}
+DB_PASSWORD={{ .Data.password }}
+{{ end }}
+EOT
+  perms       = "0640"
+}
+`,
+  },
+  {
+    id: "terraform-vault",
+    label: "Terraform reading a secret from Vault",
+    group: "Config & infrastructure",
+    text: `provider "vault" {
+  address   = "https://vault.acme.example.com:8200"
+  namespace = "platform"
+}
+
+data "vault_kv_secret_v2" "orders_db" {
+  mount = "secret"
+  name  = "orders/production/database"
+}
+
+resource "kubernetes_secret" "orders_db" {
+  metadata {
+    name      = "orders-db"
+    namespace = "orders"
+  }
+
+  data = {
+    username = data.vault_kv_secret_v2.orders_db.data["username"]
+    password = data.vault_kv_secret_v2.orders_db.data["password"]
+  }
+}
+`,
+  },
   // Other engines: these load with their engine selected in the output panel.
   {
     id: "cloud-init",
