@@ -510,3 +510,113 @@ release_tag.txt:
 known_hosts_note.md:
   want: [~/.ssh/config, buildbox, 10.20.0.15, ci, "2201"]
   reject: [run `ssh buildbox` and check the fingerprint is]
+
+# Ninth batch: Kubernetes, Compose, GitHub Actions and cloud-init documents written to
+# measure the schema rules (17 problems before, 0 after).
+
+k8s-statefulset.yaml:
+  want:
+  - orders-db
+  - orders
+  - '3'
+  - '16.4'
+  - 250m
+  - 512Mi
+  - '1'
+  - 2Gi
+  - fast-ssd
+  - 50Gi
+  reject:
+  - IfNotPresent
+  - TCP
+  - ReadWriteOnce
+  - StatefulSet
+  - apps/v1
+  names:
+    fast-ssd: storage_class_name
+k8s-hpa-svc.yaml:
+  want:
+  - checkout
+  - shop
+  - '80'
+  - '8080'
+  - '2'
+  - '10'
+  - '70'
+  - ClusterIP
+  reject:
+  - TCP
+  - Utilization
+  - Resource
+  - Deployment
+  - autoscaling/v2
+  names:
+    '70': average_utilization
+compose-app.yml:
+  want:
+  - ghcr.io/acme/billing-api:2.3.0
+  - '8081'
+  - B1llingPw
+  - billing
+  - info
+  - 512M
+  - postgres:16.4
+  reject:
+  - unless-stopped
+  - always
+compose-worker.yml:
+  want:
+  - ./worker
+  - emails
+  - redis:7.4-alpine
+  reject:
+  - on-failure
+  - bridge
+  - Dockerfile
+gha-release.yml:
+  want:
+  - ghcr.io
+  - acme/inventory-service
+  - ubuntu-24.04
+  - '30'
+  - '1.23'
+  reject:
+  - write
+  names:
+    ubuntu-24.04: runs_on
+    '1.23': go_version
+    '30': timeout_minutes
+gha-matrix.yml:
+  want: []
+  reject:
+  - pull_request
+  - 'false'
+  - main
+  loops:
+    os: 2
+    python: 3
+cloud-init-web.yaml:
+  want:
+  - web-03
+  - web-03.shop.example.com
+  - UTC
+  - ops
+  - /etc/nginx/conf.d/shop.conf
+  reject:
+  - '#cloud-config'
+  - 'true'
+  names:
+    web-03: hostname
+    web-03.shop.example.com: fqdn
+cloud-init-db.yaml:
+  want:
+  - db-02
+  - Europe/Berlin
+  - 0.de.pool.ntp.org
+  - /dev/nvme1n1
+  - postgresql-16
+  reject:
+  - reboot
+  names:
+    db-02: hostname
+    Europe/Berlin: timezone

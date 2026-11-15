@@ -16,6 +16,7 @@ from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidat
 from templatize.k8s import DocumentProfile, detect_profile, structural_spans
 from templatize.loops import detect_loops, explained_notices
 from templatize.merge import compose_candidates, merge_candidates
+from templatize.schemas import apply as apply_schema
 
 
 class InputLimitError(ValueError):
@@ -54,13 +55,17 @@ def _outside_template_syntax(text: str, raw: list[Candidate]) -> list[Candidate]
         return raw
     starts = [a for a, _ in exprs]  # disjoint and sorted: finditer does not overlap
 
-    def inside(s: Span) -> bool:
+    def touches(s: Span) -> bool:
+        """Inside an expression, or containing one (``tags: ${{ env.REGISTRY }}/...``
+        is already templated: a variable would replace the expressions with text)."""
         i = bisect_right(starts, s.start) - 1
-        return i >= 0 and s.end <= exprs[i][1]
+        if i >= 0 and s.start < exprs[i][1]:
+            return True
+        return i + 1 < len(exprs) and exprs[i + 1][0] < s.end
 
     out = []
     for c in raw:
-        kept = [s for s in c.spans if not inside(s)]
+        kept = [s for s in c.spans if not touches(s)]
         if kept:
             out.append(c if len(kept) == len(c.spans) else c.model_copy(update={"spans": kept}))
     return out
@@ -104,6 +109,7 @@ def suggest(
             )
         ]
     raw = _outside_template_syntax(text, raw)
+    raw = apply_schema(text, doc_type, raw)
     candidates, composed = compose_candidates(text, merge_candidates(raw))
     notices.extend(composed)
     loops = detect_loops(text, variants, taken_names=[c.name for c in candidates])

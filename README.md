@@ -845,6 +845,29 @@ How to confirm it:
 Detection is cheap pattern matching on the first 200,000 characters. Every fixture,
 sample and corpus document has its expected type in `tests/core/test_doctypes.py`.
 
+### Schema rules
+
+Kubernetes, Compose, GitHub Actions and cloud-init have **schema rules**
+(`src/templatize/schemas.py`): what their fields mean, drawn from the official specs and
+keyed by the field's path in the YAML. A rule takes one of four actions:
+
+| Action | Example |
+|---|---|
+| structure: never a value | `**.imagePullPolicy`, `services.*.restart`, `permissions.*`, `package_update` |
+| name the value | `jobs.*.runs-on` → `runs_on`, `jobs.*.timeout-minutes` → `timeout_minutes` |
+| suggest it even if no detector did | cloud-init `hostname`, `timezone`, a one-item `packages:` list |
+| `KEY=value` item | Compose `environment: [QUEUE_NAME=emails]` → `queue_name` |
+
+**When they apply:** when the type is confirmed, or detected with confidence ≥ 0.9.
+
+**How they were measured:** on eight unseen documents (`tests/quality/corpus`, batch
+nine), the rules took the problems from 17 to 0. On every earlier document they only
+removed noise (`restart:`, `imagePullPolicy:`) and improved names.
+
+**Two judgements that run the other way:**
+- **A Service's `type`** (ClusterIP, LoadBalancer) stays a value, as in Helm charts.
+- **A workflow's trigger branch** stays fixed.
+
 ## Engines
 
 | Engine | Template | Values | Renders with | Loops |
