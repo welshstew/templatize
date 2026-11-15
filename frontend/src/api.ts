@@ -92,6 +92,9 @@ export interface SuggestResult {
 export interface SchemaInfo {
   reference: { url: string; source: string } | null;
   provided: boolean;
+  /** "supplied" (the user's) or "catalog" (bundled with templatize). */
+  source?: "supplied" | "catalog" | null;
+  catalog?: string[];
   title: string | null;
   matched_fields: number;
   notes: string[];

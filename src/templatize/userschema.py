@@ -29,6 +29,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel
 
+from templatize import catalog
+from templatize.doctypes import DocumentType
 from templatize.ir import Candidate, Source, Span, VarType
 from templatize.naming import snake_case
 from templatize.schemas import Field, fields
@@ -57,10 +59,13 @@ class SchemaInfo(BaseModel):
     reference: SchemaReference | None = None
     """A schema the document points at (reported, not downloaded)."""
     provided: bool = False
-    """The caller supplied a schema, and it was applied."""
+    """A schema was applied: the caller's, or a bundled one (see ``source``)."""
+    source: Literal["supplied", "catalog"] | None = None
+    catalog: list[str] = []
+    """Ids of the bundled schemas applied (one per Kubernetes resource kind)."""
     title: str | None = None
     matched_fields: int = 0
-    """Document fields the supplied schema describes."""
+    """Document fields the applied schema(s) describe."""
     notes: list[str] = []
 
 
@@ -199,6 +204,18 @@ class _Schema:
                 return []
         return [b for n in nodes for b in self.branches(n)]
 
+    def named(self, path: tuple[str, ...]) -> bool:
+        """Is the field's last key a named property (not an open map's value or a list
+        item)? Only those have descriptions worth showing."""
+        if not path or path[-1] == "[]":
+            return False
+        parents = self.at(path[:-1])
+        return any(
+            isinstance(b.get("properties"), dict) and path[-1] in b["properties"]
+            for p in parents
+            for b in self.branches(p)
+        )
+
 
 # --- what a field's schema says --------------------------------------------------
 
@@ -230,6 +247,18 @@ class _Facts:
         self.default = any("default" in s and str(s["default"]) == value for s in schemas)
         title = next((s["title"] for s in schemas if isinstance(s.get("title"), str)), None)
         self.name = snake_case(title) if title and len(title.split()) <= 3 else None
+        desc = next(
+            (s["description"] for s in schemas if isinstance(s.get("description"), str)), None
+        )
+        self.description = _first_sentence(desc) if desc else None
+
+
+def _first_sentence(text: str, limit: int = 140) -> str:
+    """The description's first sentence, short enough for a tooltip."""
+    s = " ".join(text.split())
+    m = re.match(r"(.+?[.!?])(?:\s|$)", s)
+    s = m.group(1) if m else s
+    return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
 
 
 def _candidate(text: str, span: Span, name: str, vtype: VarType, why: str) -> Candidate:
@@ -247,21 +276,28 @@ def _candidate(text: str, span: Span, name: str, vtype: VarType, why: str) -> Ca
 
 
 def apply(
-    text: str, schema: dict[str, Any], raw: list[Candidate]
+    text: str, schema: dict[str, Any], raw: list[Candidate], *, doc: int | None = None
 ) -> tuple[list[Candidate], SchemaInfo]:
-    """``raw`` with a supplied schema applied, and what was matched."""
+    """``raw`` with a schema applied, and what was matched. ``doc`` limits it to one
+    YAML document (``---``) of a multi-document file."""
     s = _Schema(schema)
     title = schema.get("title") if isinstance(schema.get("title"), str) else None
     structure: set[tuple[int, int]] = set()
     facts: dict[tuple[int, int], tuple[_Facts, Field]] = {}
     for f in fields(text):
+        if doc is not None and f.doc != doc:
+            continue
         subs = s.at(f.path)
         if subs:
-            facts[(f.span.start, f.span.end)] = (_Facts(subs, f.value), f)
+            fact = _Facts(subs, f.value)
+            if fact.description and not s.named(f.path):
+                fact.description = None
+            facts[(f.span.start, f.span.end)] = (fact, f)
     for key, (fact, _) in facts.items():
         if fact.const:
             structure.add(key)
     covered: list[Span] = []
+    described: set[tuple[int, int]] = set()
     # A name from a key (server.port -> server_port) is kept over the schema's title.
     keyed = {(sp.start, sp.end) for c in raw if c.name_origin == "key" for sp in c.spans}
     out: list[Candidate] = []
@@ -280,7 +316,10 @@ def apply(
                 update.update(name=fact.name, name_origin="schema")
             if fact.default:
                 update["confidence"] = round(c.confidence * DEFAULT_FACTOR, 3)
-            notes = []
+            # One candidate per span carries the description (the merge joins reasons).
+            first = (spans[0].start, spans[0].end) not in described
+            notes = [f"schema: {fact.description}"] if fact.description and first else []
+            described.update((sp.start, sp.end) for sp in spans)
             if fact.default:
                 notes.append("the schema's default")
             if fact.enum:
@@ -295,14 +334,78 @@ def apply(
             continue
         field_key = next((p for p in reversed(f.path) if p != "[]"), "item")
         name = fact.name or snake_case(field_key)
-        why = f"{fact.vtype.value} by the schema"
+        why = f"{fact.vtype.value} by the schema" + (
+            f"; schema: {fact.description}" if fact.description else ""
+        )
         out.append(_candidate(text, span, name, fact.vtype, why))
     notes = []
     if s.external_refs:
         shown = ", ".join(sorted(s.external_refs)[:3])
         notes.append(f"external $ref not followed (offline): {shown}")
-    info = SchemaInfo(provided=True, title=title, matched_fields=len(facts), notes=notes)
+    info = SchemaInfo(
+        provided=True, source="supplied", title=title, matched_fields=len(facts), notes=notes
+    )
     return out, info
 
 
 __all__ = ["SchemaError", "SchemaInfo", "SchemaReference", "apply", "find_reference", "load_schema"]
+
+
+# --- the bundled catalogue ---------------------------------------------------------
+
+CATALOG_CONFIDENCE = 0.9
+"""A detected (not confirmed) type's bundled schema applies from this confidence on."""
+
+
+def apply_catalog(
+    text: str,
+    doc_type: DocumentType | None,
+    reference: SchemaReference | None,
+    raw: list[Candidate],
+) -> tuple[list[Candidate], SchemaInfo | None]:
+    """Apply the bundled schema the document references, or the one of its (confirmed
+    or confidently detected) type; Kubernetes manifests get one schema per resource
+    kind. ``None`` info when no bundled schema applies."""
+    plan: list[tuple[catalog.Entry, int | None]] = []
+    referenced = catalog.for_url(reference.url) if reference else None
+    if referenced is not None:
+        plan.append((referenced, None))
+    elif doc_type is not None and (doc_type.confirmed or doc_type.confidence >= CATALOG_CONFIDENCE):
+        if doc_type.id == "kubernetes":
+            heads: dict[int, dict[str, str]] = {}
+            for f in fields(text):
+                if f.path in (("apiVersion",), ("kind",)):
+                    heads.setdefault(f.doc, {})[f.path[0]] = f.value
+            for i, head in sorted(heads.items()):
+                entry = catalog.for_k8s(head.get("apiVersion", ""), head.get("kind", ""))
+                if entry is not None:
+                    plan.append((entry, i))
+        elif (entry := catalog.for_type(doc_type.id)) is not None:
+            plan.append((entry, None))
+    if not plan:
+        return raw, None
+    matched = 0
+    notes: list[str] = []
+    used: list[str] = []
+    for entry, doc in plan:
+        raw, info = apply(text, catalog.load(entry.id), raw, doc=doc)
+        matched += info.matched_fields
+        notes += [n for n in info.notes if n not in notes]
+        if entry.id not in used:
+            used.append(entry.id)
+    titles = list(dict.fromkeys(e.title for e, _ in plan))
+    title = (
+        titles[0]
+        if len(titles) == 1
+        else "Kubernetes: "
+        + ", ".join(t.removeprefix("Kubernetes ").split(" (")[0] for t in titles)
+    )
+    return raw, SchemaInfo(
+        reference=reference,
+        provided=True,
+        source="catalog",
+        catalog=used,
+        title=title,
+        matched_fields=matched,
+        notes=notes,
+    )

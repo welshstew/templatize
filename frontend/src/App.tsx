@@ -521,7 +521,7 @@ export function App() {
                   title={[schemaInfo.reference?.url, ...schemaInfo.notes].filter(Boolean).join("\n")}
                 >
                   {schemaInfo.provided
-                    ? `Schema: ${schemaInfo.title ?? "supplied"}, ${schemaInfo.matched_fields} field${schemaInfo.matched_fields === 1 ? "" : "s"} matched`
+                    ? `${schemaInfo.source === "catalog" ? "Bundled schema" : "Schema"}: ${schemaInfo.title ?? "supplied"}, ${schemaInfo.matched_fields} field${schemaInfo.matched_fields === 1 ? "" : "s"} matched`
                     : "References a schema (not downloaded: paste it in the Schema tab to use it)"}
                 </span>
               ) : null}

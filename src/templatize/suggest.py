@@ -18,7 +18,13 @@ from templatize.loops import detect_loops, explained_notices
 from templatize.merge import compose_candidates, merge_candidates
 from templatize.schemas import apply as apply_schema
 from templatize.schemas import structure_regions
-from templatize.userschema import SchemaInfo, find_reference, load_schema, without_reference
+from templatize.userschema import (
+    SchemaInfo,
+    apply_catalog,
+    find_reference,
+    load_schema,
+    without_reference,
+)
 from templatize.userschema import apply as apply_user_schema
 
 
@@ -124,12 +130,14 @@ def suggest(
     if user_schema is not None:
         raw, schema_info = apply_user_schema(text, user_schema, raw)
         schema_info.reference = reference
+    elif (bundled := apply_catalog(text, doc_type, reference, raw))[1] is not None:
+        raw, schema_info = bundled
     elif reference is not None:
         schema_info = SchemaInfo(
             reference=reference,
             notes=[
-                "the document references a schema; it is not downloaded (offline). "
-                "Supply its text to use it."
+                "the document references a schema that is not in the bundled catalogue; "
+                "it is not downloaded (offline). Supply its text to use it."
             ],
         )
     candidates, composed = compose_candidates(text, merge_candidates(raw))
