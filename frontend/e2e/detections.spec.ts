@@ -137,6 +137,7 @@ test("the cloud-init sample opens in Terraform and keeps nested lists as loops",
   await page.getByLabel("Load a sample document").selectOption("cloud-init");
   await analyze(page);
   await expect(page.getByLabel("Template engine")).toHaveValue("terraform");
+  await expect(page.locator(".loop-for.nested").first()).toContainText("%{ for ssh_authorized_key_index,");
   await page.getByRole("button", { name: "Accept list packages", exact: true }).click();
   await page.getByRole("button", { name: "Accept list users", exact: true }).click();
   await page.getByRole("button", { name: "Accept all", exact: true }).click();
@@ -145,6 +146,21 @@ test("the cloud-init sample opens in Terraform and keeps nested lists as loops",
   const code = page.getByLabel("Generated output").locator("pre.code");
   await expect(code).toContainText("%{ for user_index, user in users }");
   await expect(code).toContainText("in user.ssh_authorized_keys }");
+  // The live preview renders nested lists (each user's keys).
+  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  await expect(code).toContainText("monitor@backup");
+  await expect(page.getByLabel("Generated output").locator(".error-box")).toHaveCount(0);
+});
+
+test("a map list (environment:) previews in Jinja2", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("compose");
+  await analyze(page);
+  await page.getByRole("button", { name: "Accept list web_environment", exact: true }).click();
+  await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText("environment:");
+  await expect(page.getByLabel("Generated output").locator(".error-box")).toHaveCount(0);
 });
 
 test("the nginx envsubst sample leaves nginx's own variables alone", async ({ page }) => {

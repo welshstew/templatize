@@ -273,3 +273,26 @@ def test_build_render_and_download_with_other_engines(
 def test_unknown_engine_is_a_client_error(client: TestClient) -> None:
     res = client.post("/build", json={"text": "a\n", "variables": [], "engine": "liquid"})
     assert res.status_code in (400, 422)
+
+
+@pytest.mark.parametrize("engine", ["jinja2", "terraform"])
+def test_render_accepts_nested_lists_and_map_loops(client: TestClient, engine: str) -> None:
+    """The live preview sends a nested list inside each row, and a map loop as an object."""
+    templates = {
+        "jinja2": (
+            "{% for u in users %}{{ u.name }}:{% for k in u.ssh_keys %} {{ k }}{% endfor %};{% endfor %}"
+            "{% for key, value in env.items() %} {{ key }}={{ value }}{% endfor %}"
+        ),
+        "terraform": (
+            "%{ for u_index, u in users }${u.name}:%{ for k_index, k in u.ssh_keys } ${k}%{ endfor };"
+            "%{ endfor }%{ for e_index, e in env } ${e.key}=${e.value}%{ endfor }"
+        ),
+    }
+    values = {
+        "users": [{"name": "a", "ssh_keys": ["x", "y"]}, {"name": "b", "ssh_keys": []}],
+        "env": {"B": "2", "A": "1"},
+    }
+    res = client.post(
+        "/render", json={"template": templates[engine], "values": values, "engine": engine}
+    )
+    assert res.json() == {"ok": True, "output": "a: x y;b:; B=2 A=1", "error": None}

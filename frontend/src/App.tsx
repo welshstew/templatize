@@ -537,6 +537,7 @@ export function App() {
             onLoopUpdate={onLoopUpdate}
             helm={helm}
             chartStyle={chartStyle}
+            engine={engine}
           />
           {helm ? (
             <ChartView

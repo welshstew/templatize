@@ -21,6 +21,8 @@ interface Props {
   onSelect: (id: string) => void;
   onStatus: (id: string, status: LoopItem["status"]) => void;
   onUpdate: (id: string, patch: Partial<LoopItem>) => void;
+  /** The output's template engine: the loop is shown in its syntax. */
+  engine?: string;
 }
 
 function NameInput({
@@ -76,7 +78,8 @@ function cell(rows: LoopRows, i: number, field: string, scalar: boolean): string
   return (v as string | undefined) ?? "";
 }
 
-export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onUpdate }: Props) {
+export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onUpdate, engine = "jinja2" }: Props) {
+  const tf = engine === "terraform";
   const accepted = loop.status === "accepted";
   const blocker = accepted ? null : loopBlocker(loop, items, loops);
   const rows = accepted ? loop.previewRows : loop.rows;
@@ -164,13 +167,17 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
         )}
       </div>
 
-      {loop.map ? (
+      {engine === "envsubst" ? (
+        <div class="loop-for">
+          <span class="hint">envsubst has no loops: this list stays literal text.</span>
+        </div>
+      ) : loop.map && !tf ? (
         <div class="loop-for">
           <code>{`{% for ${loop.fields[0]?.name ?? "key"}, ${loop.fields[1]?.name ?? "value"} in ${loop.name}.items() %}`}</code>
         </div>
       ) : (
       <div class="loop-for">
-        <code>{"{% for "}</code>
+        <code>{tf ? `%{ for ${loop.item}_index, ` : "{% for "}</code>
         {accepted ? (
           <NameInput
             key={loop.item}
@@ -183,14 +190,20 @@ export function LoopCard({ loop, items, loops, selected, onSelect, onStatus, onU
         ) : (
           <code>{loop.item}</code>
         )}
-        <code>{` in ${loop.name} %}`}</code>
+        <code>{tf ? ` in ${loop.name} }` : ` in ${loop.name} %}`}</code>
       </div>
       )}
-      {loop.children.map((c) => (
-        <div key={c.name} class="loop-for nested">
-          <code>{`{% for ${c.item} in ${loop.item}.${c.name} %}`}</code>
-        </div>
-      ))}
+      {engine === "envsubst"
+        ? null
+        : loop.children.map((c) => (
+            <div key={c.name} class="loop-for nested">
+              <code>
+                {tf
+                  ? `%{ for ${c.item}_index, ${c.item} in ${loop.item}.${c.name} }`
+                  : `{% for ${c.item} in ${loop.item}.${c.name} %}`}
+              </code>
+            </div>
+          ))}
       {blocker ? <div class="field-error">Can't make this a loop: {blocker}.</div> : null}
 
       <div class="loop-table-wrap">
