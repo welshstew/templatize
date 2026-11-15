@@ -184,11 +184,7 @@ def test_awkward_values_with_real_envsubst(tmp_path: Path) -> None:
     assert out.stdout == text.encode("utf-8")
 
 
-@pytest.mark.skipif(TERRAFORM is None, reason="terraform / tofu not installed")
-@pytest.mark.parametrize("name", ["nginx.conf", "business_letter.txt", "jinja_literals.txt"])
-def test_main_tf_with_real_terraform(tmp_path: Path, name: str) -> None:
-    text = DOCS[name]
-    result = _built(text, "terraform")
+def _terraform_output(tmp_path: Path, result) -> bytes:  # type: ignore[no-untyped-def]
     for f in result.files:
         (tmp_path / f.path).write_bytes(f.content.encode("utf-8", "surrogatepass"))
     assert TERRAFORM is not None
@@ -196,7 +192,42 @@ def test_main_tf_with_real_terraform(tmp_path: Path, name: str) -> None:
     subprocess.run([TERRAFORM, "init", "-input=false"], **run)  # type: ignore[call-overload]
     subprocess.run([TERRAFORM, "apply", "-auto-approve", "-input=false"], **run)  # type: ignore[call-overload]
     out = subprocess.run([TERRAFORM, "output", "-raw", "rendered"], **run)  # type: ignore[call-overload]
-    assert out.stdout == text.encode("utf-8", "surrogatepass")
+    return bytes(out.stdout)
+
+
+@pytest.mark.skipif(TERRAFORM is None, reason="terraform / tofu not installed")
+@pytest.mark.parametrize("name", list(DOCS))
+def test_main_tf_with_real_terraform(tmp_path: Path, name: str) -> None:
+    text = DOCS[name]
+    assert _terraform_output(tmp_path, _built(text, "terraform")) == text.encode(
+        "utf-8", "surrogatepass"
+    )
+
+
+@pytest.mark.skipif(TERRAFORM is None, reason="terraform / tofu not installed")
+@pytest.mark.parametrize(
+    "literal", ["$${x}", "$$${x}", "%%{", "$", "$$", "%", "${", "%{ for }", "a\rb", "\r", "\r\n"]
+)
+def test_awkward_literal_text_with_real_terraform(tmp_path: Path, literal: str) -> None:
+    text = f"{literal}V{literal}$V%V\n"
+    i = text.index("V")
+    result = build(
+        text, [VariableSpec(name="v", spans=[Span(start=i, end=i + 1)])], engine="terraform"
+    )
+    assert _terraform_output(tmp_path, result) == text.encode("utf-8")
+
+
+@pytest.mark.skipif(TERRAFORM is None, reason="terraform / tofu not installed")
+def test_awkward_values_with_real_terraform(tmp_path: Path) -> None:
+    values = [v for v in AWKWARD_VALUES if v]
+    text = "".join(f"k{i}: {v}|\n" for i, v in enumerate(values))
+    specs = []
+    for i, v in enumerate(values):
+        start = text.index(f"k{i}: ") + len(f"k{i}: ")
+        specs.append(VariableSpec(name=f"v{i}", spans=[Span(start=start, end=start + len(v))]))
+    assert _terraform_output(tmp_path, build(text, specs, engine="terraform")) == text.encode(
+        "utf-8"
+    )
 
 
 @pytest.mark.parametrize(

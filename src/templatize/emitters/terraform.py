@@ -8,7 +8,8 @@ Fidelity rules
   followed by another one, or a ``$`` just before a placeholder, is written as the
   expression ``${"$"}`` (``${"%"}``), so no run of them can be read two ways.
 * Backslashes, quotes and newlines are literal in a template file; every other
-  character is copied as it is.
+  character is copied as it is, except a lone carriage return (old Mac line ending),
+  written ``${"\\r"}``: after a raw one Terraform stops interpolating.
 * Values go to ``terraform.tfvars`` as a map of HCL strings, with the same escapes plus
   the string escapes (``\\\\``, ``\\"``, ``\\n``, ``\\r``, ``\\t``, ``\\uNNNN``).
 * No loops in this version: HCL's ``%{ for }`` is not generated (``supports_loops``).
@@ -61,8 +62,17 @@ def _escape_pieces(s: str, following: str = "") -> list[tuple[str, bool]]:
 
 
 def escape_template(s: str, *, following: str = "") -> str:
-    """Literal text for an HCL template file, followed by ``following``."""
-    return "".join(piece for piece, _ in _escape_pieces(s, following))
+    """Literal text for an HCL template file, followed by ``following``.
+
+    A lone carriage return (not part of CR LF) is written ``${"\\r"}``: after a raw one,
+    Terraform (checked with 1.17) stops recognising ``${...}`` for the rest of the file.
+    """
+    out: list[str] = []
+    pieces = _escape_pieces(s, following)
+    for i, (piece, _) in enumerate(pieces):
+        nxt = s[i + 1] if i + 1 < len(s) else following
+        out.append('${"\\r"}' if piece == "\r" and nxt != "\n" else piece)
+    return "".join(out)
 
 
 def hcl_string(value: str) -> str:

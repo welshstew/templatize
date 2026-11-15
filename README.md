@@ -832,6 +832,8 @@ Register new detectors in `detectors/__init__.py`.
 - **Escapes:** a literal `${` / `%{` is written `$${` / `%%{`. A `$` followed by
   another `$`, or just before a placeholder (`$4,000`), is written `${"$"}`, so nothing
   can be read two ways.
+- **Lone carriage returns:** a lone CR (an old Mac line ending) is written `${"\r"}`.
+  After a raw one, Terraform stops interpolating for the rest of the file.
 - **Values:** `terraform.tfvars` holds a `map(string)`, with HCL string escapes.
 - **Running it:** `main.tf` declares no providers, so `terraform init` downloads nothing.
 
@@ -843,7 +845,9 @@ literal text, and the build says so in `notes` (API, MCP, CLI and UI).
   values file and parser, for every fixture, sample and corpus document.
 - **Real envsubst:** the tests also run the generated `render.sh` with the real
   `envsubst` for every document.
-- **Real Terraform:** `main.tf` is tested with Terraform/OpenTofu when it's installed.
+- **Real Terraform:** when Terraform or OpenTofu is installed, the tests run the
+  generated `main.tf` for every document and every awkward-literal and value case
+  (checked with Terraform 1.17.2).
 
 ## Adding an engine emitter
 
