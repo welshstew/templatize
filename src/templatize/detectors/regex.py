@@ -5,13 +5,14 @@ from __future__ import annotations
 import ipaddress
 import itertools
 import re
+from bisect import bisect_right
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span, VarType
-from templatize.naming import TEXT_DATE, TIME, type_name
+from templatize.naming import TEXT_DATE, TIME, snake_case, type_name
 
 _TRAILING_PUNCT = ".,;:!?)]}'\""
 
@@ -135,6 +136,24 @@ def _valid_cidr(v: str) -> bool:
         return False
 
 
+def _valid_iban(v: str) -> bool:
+    """ISO 13616 check digits (mod 97)."""
+    s = v.replace(" ", "")
+    if not 15 <= len(s) <= 34:
+        return False
+    digits = "".join(str(int(ch, 36)) for ch in s[4:] + s[:4])
+    return int(digits) % 97 == 1
+
+
+def _valid_endpoint(v: str) -> bool:
+    host, _, port = v.rpartition(":")
+    if not _valid_port(port):
+        return False
+    if host[0].isdigit() and host.replace(".", "").isdigit():
+        return _valid_ipv4(host)
+    return _hostname_ok(host)
+
+
 def _valid_phone(v: str) -> bool:
     digits = sum(c.isdigit() for c in v)
     if v.startswith("+"):
@@ -171,6 +190,8 @@ class Pattern:
     validate: Callable[[str], bool] | None = None
     group: int = 0
     strip_trailing_punct: bool = False
+    name: str | None = None
+    """The variable name, when the pattern says more than the type (``pin``)."""
 
 
 PATTERNS: list[Pattern] = [
@@ -229,6 +250,117 @@ PATTERNS: list[Pattern] = [
         _valid_ipv6,
     ),
     Pattern(
+        "regex.host_port",
+        VarType.STRING,
+        # "10.0.1.11:8080", "api.prod.example.com:8443": an endpoint, kept whole.
+        re.compile(
+            r"(?:(?<=://)|(?<![\w.:/@-]))((?:\d{1,3}\.){3}\d{1,3}|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+            r"[A-Za-z][A-Za-z0-9-]{1,62}):(\d{2,5})(?![\w.:-])"
+        ),
+        0.9,
+        _valid_endpoint,
+        name="endpoint",
+    ),
+    Pattern(
+        "regex.token",
+        VarType.STRING,
+        # API tokens with a known prefix (npm, GitHub, GitLab, Slack, Stripe, AWS) and JWTs.
+        re.compile(
+            r"(?<![\w-])(?:npm_[A-Za-z0-9]{30,}|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{40,}"
+            r"|glpat-[\w-]{20,}|xox[abpors]-[\w-]{10,}|(?:sk|pk|rk)_(?:live|test)_\w{16,}"
+            r"|AKIA[0-9A-Z]{16}|eyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{8,})(?![\w-])"
+        ),
+        0.85,
+        name="token",
+    ),
+    Pattern(
+        "regex.arn",
+        VarType.STRING,
+        re.compile(r"\barn:aws[\w-]*:[\w-]*:[\w-]*:\d{0,12}:[\w/:.+=@-]*[\w/=+@-]"),
+        0.85,
+        name="arn",
+    ),
+    Pattern(
+        "regex.region",
+        VarType.STRING,
+        # AWS (eu-west-2, ap-southeast-1) and GCP (europe-west4, us-central1) regions.
+        re.compile(
+            r"(?<![\w.-])(?:(?:us|eu|ap|sa|ca|me|af|il|mx)(?:-gov)?-(?:north|south|east|west|central|"
+            r"northeast|southeast|northwest|southwest)-\d"
+            r"|(?:us|europe|asia|australia|northamerica|southamerica|me|africa)-(?:north|south|east|west|"
+            r"central|northeast|southeast|northwest|southwest)\d)(?![\w-]|\.\w)"
+        ),
+        0.8,
+        name="region",
+    ),
+    Pattern(
+        "regex.duration",
+        VarType.INT,
+        # "14 days overdue", "expires in 10 minutes", "a 30-day trial": named by the unit.
+        re.compile(
+            r"(?<![\w.,:/-])(\d{1,4})[ -](?=(?:second|minute|hour|day|week|month|year)s?\b)"
+        ),
+        0.4,  # weak: a key's whole value ("28 days plus public holidays") wins
+        group=1,
+    ),
+    Pattern(
+        "regex.size",
+        VarType.STRING,
+        # Data sizes: "512Mi", "900MiB", "12G", "8GB" (Kubernetes, configs, prose).
+        re.compile(r"(?<![\w.-])\d+(?:\.\d+)?(?:[KMGTP]i?B?|[KMGT]|kB)(?![\w-])"),
+        0.6,
+        name="size",
+    ),
+    Pattern(
+        "regex.channel",
+        VarType.STRING,
+        # Chat channels: "#team-platform" (not "#912", "#ffcc00", "# heading").
+        re.compile(
+            r"(?<![\w#&/])#(?![0-9a-fA-F]{3}\b|[0-9a-fA-F]{6}\b)[a-z][a-z0-9_-]{1,79}(?![\w-])"
+        ),
+        0.6,
+        name="channel",
+    ),
+    Pattern(
+        "regex.iban",
+        VarType.STRING,
+        re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){3,7}(?:[ ]?[A-Z0-9]{1,3})?\b"),
+        0.8,
+        _valid_iban,
+        name="iban",
+    ),
+    Pattern(
+        "regex.reference",
+        VarType.STRING,
+        # Ticket, order and document references: "INC-20931", "#A-778213", "PO-55821".
+        re.compile(r"(?<![\w-])#?([A-Z]{1,6}-\d{3,}(?:-\d+)*)(?![\w-])"),
+        0.75,
+        group=1,
+        name="reference",
+    ),
+    Pattern(
+        "regex.opaque_id",
+        VarType.STRING,
+        # Upper-case IDs that mix letters and digits: "P7X2KQ1" (not "SHA256" or "HTTP2").
+        re.compile(r"(?<![\w-])(?=[A-Z0-9]{6,12}(?![\w-]))(?:[A-Z]+\d+){2,}[A-Z]*(?![\w-])"),
+        0.6,
+        name="id",
+    ),
+    Pattern(
+        "regex.amount",
+        VarType.FLOAT,
+        # Money: "$12,500", "£45.00", "GBP 87.95", "18,450.00"; a bare "14.66" only at the
+        # end of a padded receipt line.
+        re.compile(
+            r"(?:(?<=[$£€¥])|(?<=\b(?:USD|GBP|EUR|CHF|JPY|AUD|CAD) ))\d{1,3}(?:,\d{3})*(?:\.\d{2})?(?![\d.,]\d)"
+            r"|(?<![\w.,])\d{1,3}(?:,\d{3})+\.\d{2}(?![\d.,]\d)"
+            r"|(?<=[ \t]{2})\d+\.\d{2}(?=[ \t]*\r?$)",
+            re.MULTILINE,
+        ),
+        0.7,
+        name="amount",
+    ),
+    Pattern(
         "regex.datetime",
         VarType.DATETIME,
         re.compile(
@@ -237,6 +369,17 @@ PATTERNS: list[Pattern] = [
         ),
         0.8,
         _valid_iso_date,
+    ),
+    Pattern(
+        "regex.datetime_text",
+        VarType.DATETIME,
+        # A date and a time together: "12/11/2026 16:42", "3 March 2026 at 14:00",
+        # "2026-10-03 14:12 UTC" is the ISO form above.
+        re.compile(
+            rf"(?<![\w/.-])(?:\d{{1,2}}([/.-])\d{{1,2}}\1\d{{4}}|\b{TEXT_DATE})"
+            rf",?[ \t]+(?:at[ \t]+)?{TIME}(?![\w:]|\.\d)"
+        ),
+        0.8,
     ),
     Pattern(
         "regex.date_iso",
@@ -281,6 +424,19 @@ PATTERNS: list[Pattern] = [
         _valid_phone,
     ),
     Pattern(
+        "regex.access_code",
+        VarType.STRING,
+        # "PIN 66 41 09", "Passcode: 4417", "Meeting ID 845 2210 9931", "access code #1234"
+        re.compile(
+            r"\b(PIN|Passcode|Pass code|Access code|Meeting ID|Conference ID|Participant code|"
+            r"Verification code|Security code|One-time code|OTP|Confirmation code)"
+            r"(?:[ \t]*[:#]|[ \t]+(?:is|code)?)?[ \t]*#?[ \t]*(\d[\d \t-]{2,16}\d)(?![\w-])",
+            re.IGNORECASE,
+        ),
+        0.75,
+        group=2,
+    ),
+    Pattern(
         "regex.semver",
         VarType.SEMVER,
         re.compile(
@@ -311,7 +467,7 @@ PATTERNS: list[Pattern] = [
         "regex.hostname",
         VarType.HOSTNAME,
         re.compile(
-            r"(?<![\w.@/-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+            r"(?:(?<=://)|(?<![\w.@/-]))(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
             r"[A-Za-z][A-Za-z0-9-]{1,62}(?![\w-]|\.\w|\()"
         ),
         0.65,
@@ -353,9 +509,15 @@ class RegexDetector:
                     continue
                 if pat.validate is not None and not pat.validate(value):
                     continue
+                name = pat.name or type_name(pat.type)
+                if pat.detector == "regex.duration":
+                    unit = re.match(r"[ -]([a-z]+?)s?\b", text[end : end + 12])
+                    name = f"{unit.group(1)}s" if unit else "duration"
+                if pat.detector == "regex.access_code":
+                    name = snake_case(m.group(1))
                 out.append(
                     Candidate(
-                        name=type_name(pat.type),
+                        name=name,
                         name_origin="type",
                         type=pat.type,
                         value=value,
@@ -367,13 +529,266 @@ class RegexDetector:
                     )
                 )
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
-        return DetectorResult(candidates=_name_ranges(text, out))
+        out = [c for c in out if not (c.type is VarType.HOSTNAME and _is_key(text, c.spans[0]))]
+        out = _drop_inner(_shared_hosts(text, _split_shared_datetimes(out)))
+        out = _context_names(text, _line_labels(text, _name_ranges(text, out)))
+        return DetectorResult(candidates=out)
 
 
 # "from 14:00 to 15:30", "9 July - 12 July", "between 9:00 and 10:00": the ends of a range
 # (hyphen, en dash or em dash).
 _RANGE_BETWEEN = re.compile(r"^[ \t]*(?:to|until|till|through|thru|-|\u2013|\u2014|and)[ \t]*$")
 _PORT_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"']?$")
+
+
+# Whole values whose parts other patterns also match: the IP inside a URL, the host
+# of an endpoint, the time of a timestamp. The whole value wins.
+_WHOLE = frozenset(
+    {
+        "regex.url",
+        "regex.email",
+        "regex.host_port",
+        "regex.datetime",
+        "regex.datetime_text",
+        "regex.date_text",
+        "regex.phone",
+        "regex.arn",
+    }
+)
+
+
+def _split_shared_datetimes(found: list[Candidate]) -> list[Candidate]:
+    """ "Thursday 9 July, 14:00" stays a date and a time when that date or time is also
+    written on its own elsewhere ("on Thursday 9 July from 14:00"): one variable each."""
+    combined = [c for c in found if c.detectors[0] == "regex.datetime_text"]
+    if not combined:
+        return found
+    parts = [c for c in found if c.type in (VarType.DATE, VarType.TIME)]
+
+    def inside(p: Candidate, w: Candidate) -> bool:
+        return w.spans[0].start <= p.spans[0].start and p.spans[0].end <= w.spans[0].end
+
+    drop = set()
+    for w in combined:
+        mine = {p.value for p in parts if inside(p, w)}
+        if any(p.value in mine and not inside(p, w) for p in parts):
+            drop.add(id(w))
+    return [c for c in found if id(c) not in drop]
+
+
+def _shared_hosts(text: str, found: list[Candidate]) -> list[Candidate]:
+    """A host in several endpoints (``kafka-3:9092`` and ``kafka-3:9093``) is one
+    variable: those endpoints become the host, and their ports stay ports."""
+    by_host: dict[str, list[Candidate]] = {}
+    for c in found:
+        if c.detectors[0] == "regex.host_port":
+            by_host.setdefault(c.value.rpartition(":")[0], []).append(c)
+    shared = {h for h, cs in by_host.items() if len({c.value for c in cs}) > 1}
+    if not shared:
+        return found
+    out = [
+        c
+        for c in found
+        if not (c.detectors[0] == "regex.host_port" and c.value.rpartition(":")[0] in shared)
+    ]
+    for host in shared:
+        for c in by_host[host]:
+            s = c.spans[0]
+            host_span = Span(start=s.start, end=s.start + len(host))
+            port_span = Span(start=host_span.end + 1, end=s.end)
+            kind = VarType.IPV4 if host.replace(".", "").isdigit() else VarType.HOSTNAME
+            for span, vtype in ((host_span, kind), (port_span, VarType.PORT)):
+                if not any(o.spans[0] == span for o in out):
+                    out.append(
+                        Candidate(
+                            name=type_name(vtype),
+                            name_origin="type",
+                            type=vtype,
+                            value=text[span.start : span.end],
+                            spans=[span],
+                            sources=[Source.REGEX],
+                            detectors=["regex.host_port"],
+                            confidence=0.85 if vtype is not VarType.PORT else 0.6,
+                            reason="the host of several endpoints"
+                            if vtype is not VarType.PORT
+                            else "a port",
+                        )
+                    )
+    return out
+
+
+def _drop_inner(found: list[Candidate]) -> list[Candidate]:
+    wholes = sorted(
+        (c.spans[0] for c in found if c.detectors[0] in _WHOLE), key=lambda s: (s.start, -s.end)
+    )
+    if not wholes:
+        return found
+    starts = [s.start for s in wholes]
+
+    def inside(s: Span) -> bool:
+        i = bisect_right(starts, s.start)
+        return any(
+            w.start <= s.start and s.end <= w.end and (w.start, w.end) != (s.start, s.end)
+            for w in wholes[max(0, i - 8) : i]
+        )
+
+    return [c for c in found if not inside(c.spans[0])]
+
+
+# "Dial-in: +1 415 555 0199, PIN 66 41 09": a short label opening the line.
+_LINE_LABEL = re.compile(r"[ \t]*([A-Z][A-Za-z]*(?:[ -][A-Za-z]+){0,3})[ \t]*:[ \t]")
+
+
+_PROSE_WORD = re.compile(r"\b[a-z]{3,}\b")
+_ACCESS_WORDS = re.compile(
+    r"\b(?:pin|passcode|pass code|access code|meeting id|conference id|participant code|"
+    r"verification code|security code|one-time code|otp|confirmation code|is)\b",
+    re.IGNORECASE,
+)
+
+
+def _line_labels(text: str, found: list[Candidate]) -> list[Candidate]:
+    """Phones and access codes after a line label are named after it: ``dial_in_phone``,
+    ``dial_in_pin``, ``support_phone``."""
+    out: list[Candidate] = []
+    for c in found:
+        labelled = c.type is VarType.PHONE or c.detectors == ["regex.access_code"]
+        if not labelled or c.name_origin != "type":
+            out.append(c)
+            continue
+        s = c.spans[0]
+        line_start = text.rfind("\n", 0, s.start) + 1
+        m = _LINE_LABEL.match(text, line_start, s.start)
+        between = text[m.end() : s.start] if m else ""
+        if m is None or _PROSE_WORD.search(_ACCESS_WORDS.sub("", between)):
+            out.append(c)
+            continue
+        label = snake_case(m.group(1))
+        suffix = "phone" if c.type is VarType.PHONE else c.name
+        name = label if label.endswith(suffix) else f"{label}_{suffix}"
+        out.append(c.model_copy(update={"name": name, "name_origin": "context"}))
+    return out
+
+
+_CONTEXT_NAMED = {
+    "regex.reference": "reference",
+    "regex.opaque_id": "id",
+    "regex.amount": "amount",
+    "regex.size": "size",
+}
+_CONTEXT_SKIP = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "of",
+        "is",
+        "are",
+        "was",
+        "be",
+        "to",
+        "for",
+        "on",
+        "at",
+        "in",
+        "by",
+        "with",
+        "and",
+        "or",
+        "your",
+        "our",
+        "my",
+        "its",
+        "this",
+        "that",
+        "number",
+        "no",
+        "nr",
+        "ref",
+        "id",
+        "code",
+        "usd",
+        "gbp",
+        "eur",
+        "chf",
+        "jpy",
+        "aud",
+        "cad",
+        "subject",
+        "re",
+        "fw",
+        "fwd",
+    ]
+)
+_SIZE_WORDS = frozenset(
+    ["limit", "request", "requests", "memory", "size", "quota", "capacity", "storage", "disk"]
+)
+_MONEY_WORDS = frozenset(
+    [
+        "total",
+        "subtotal",
+        "vat",
+        "tax",
+        "amount",
+        "price",
+        "balance",
+        "fee",
+        "fees",
+        "cost",
+        "charge",
+        "deposit",
+        "discount",
+        "refund",
+        "salary",
+        "budget",
+        "payment",
+    ]
+)
+_WORD_BEFORE = re.compile(r"([A-Za-z][A-Za-z-]*)[^A-Za-z\n]*$")
+
+
+def _context_names(text: str, found: list[Candidate]) -> list[Candidate]:
+    """References, IDs and amounts named after the word before them: "order #A-778213"
+    -> order_reference, "service P7X2KQ1" -> service_id, "Subtotal  87.95" -> subtotal."""
+    out: list[Candidate] = []
+    for c in found:
+        kind = _CONTEXT_NAMED.get(c.detectors[0])
+        if kind is None or c.name_origin != "type":
+            out.append(c)
+            continue
+        s = c.spans[0]
+        line_start = text.rfind("\n", 0, s.start) + 1
+        before = text[line_start : s.start]
+        word = None
+        for _ in range(4):
+            m = _WORD_BEFORE.search(before)
+            if m is None:
+                break
+            if m.group(1).lower() not in _CONTEXT_SKIP:
+                word = m.group(1)
+                break
+            before = before[: m.start()]
+        if word is None:
+            out.append(c)
+            continue
+        base = snake_case(word)
+        if kind == "size":
+            name = base if base in _SIZE_WORDS else f"{base}_size"
+        elif kind == "amount":
+            name = base if base in _MONEY_WORDS or base.endswith("_amount") else f"{base}_amount"
+        else:
+            name = base if base.endswith(kind) else f"{base}_{kind}"
+        out.append(c.model_copy(update={"name": name, "name_origin": "context"}))
+    return out
+
+
+_KEY_AFTER = re.compile(r"[ \t]*(?:=|:(?![/\d]))")
+
+
+def _is_key(text: str, s: Span) -> bool:
+    """``net.core.somaxconn = 4096``, ``log.retention.hours=168``: a dotted key, not a host."""
+    line_start = text.rfind("\n", 0, s.start) + 1
+    return not text[line_start : s.start].strip() and bool(_KEY_AFTER.match(text, s.end))
 
 
 def _port_mapping(text: str, s: Span) -> bool:

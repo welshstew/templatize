@@ -1,0 +1,9 @@
+[default]
+region = us-west-2
+output = json
+
+[profile prod-admin]
+role_arn = arn:aws:iam::210987654321:role/OrganizationAccountAccessRole
+source_profile = default
+region = eu-west-1
+mfa_serial = arn:aws:iam::123456789012:mfa/j.smith

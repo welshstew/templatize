@@ -1,0 +1,337 @@
+# Detection quality on documents the detectors were not written against (corpus/).
+# Same keys as expectations.yaml (want / reject / occurrences / names / loops);
+# loops are only checked when given. Heuristic detectors only, no examples.
+
+terraform.tfvars:
+  want: [eu-west-2, staging, 10.42.0.0/16, t3.medium, "2", "6", db.r6g.large, orders, staging.shop.example.com, "arn:aws:acm:eu-west-2:123456789012:certificate/8f2c1d4e-5a6b-4c7d-9e8f-0a1b2c3d4e5f", platform-team, CC-4410]
+  reject: [region, tags, Owner]
+  names: {eu-west-2: region, staging: environment, 10.42.0.0/16: vpc_cidr, t3.medium: instance_type}
+
+ssh_config:
+  want: [bastion.prod.example.com, ops, "2222", ~/.ssh/prod_ed25519, deploy, ~/.ssh/deploy_ed25519]
+  reject: [Host, HostName, User, Port, IdentityFile]
+
+haproxy.cfg:
+  want: ["4096", /etc/haproxy/certs/www.example.com.pem, "10.0.1.11:8080", "10.0.1.12:8080"]
+  reject: [global, defaults, frontend, backend]
+
+vhost.conf:
+  want: [intranet.example.org, www.intranet.example.org, /var/www/intranet/public, /etc/ssl/certs/intranet.example.org.crt, /etc/ssl/private/intranet.example.org.key, http://127.0.0.1:9000/api]
+  reject: [VirtualHost, ServerName]
+
+prometheus.yml:
+  want: [15s, 30s, "alertmanager.monitoring.svc:9093", "api.prod.example.com:8443", /internal/metrics]
+  reject: [scrape_configs, static_configs, targets]
+
+deploy.yml:
+  want: [ghcr.io/acme, billing-api, us-east-1, ubuntu-24.04, billing]
+  reject: [jobs, steps, name, main]
+
+Dockerfile:
+  want: [python:3.12.7-slim-bookworm, 2.4.1, /srv/app, "8000", info, "10001"]
+  reject: [FROM, WORKDIR, COPY, RUN]
+  names: {2.4.1: app_version, info: log_level}
+
+application.properties:
+  want: [inventory-service, "8081", inventory_app, Xk2!pQ9vLm, validate, DEBUG]
+  reject: [spring, datasource]
+  names: {inventory-service: spring_application_name, "8081": server_port}
+
+appsettings.json:
+  want: [Information, Warning, sql-prod-02.corp.example.com, Payroll, payroll_svc, Tr0ub4dor&3, smtp.example.com, "587", payroll-noreply@example.com, payroll.example.com]
+  reject: [Logging, LogLevel, Default, Server, Database]
+
+postgresql.conf:
+  want: [10.20.0.5, "5433", "300", 8GB, 24GB, 32MB, replica, Europe/London]
+  reject: [port, wal_level]
+
+crontab:
+  want: [ops-alerts@example.com, s3://acme-backups/nightly, https://status.example.com/ping/5f2a91, finance@example.com, /var/log/backup.log]
+  reject: [MAILTO, "*", "2>&1"]
+
+secret.yaml:
+  want: [payments-db, payments-prod, payments-db.cluster-abc123.eu-west-1.rds.amazonaws.com, payments, 7hS#e2!kW9qz, payments-config, "checkout_v2,fraud_scoring", https://hooks.example.com/payments/9c1e]
+  reject: [Secret, ConfigMap, Opaque, v1]
+  occurrences: {payments-prod: 2}
+
+inventory.ini:
+  want: [web-01.prod.example.com, 10.10.1.21, web-02.prod.example.com, 10.10.1.22, db-01.prod.example.com, 10.10.2.31, "2222", deploy, /usr/bin/python3]
+  reject: [web, db, ansible_host]
+
+redis.conf:
+  want: [10.30.0.7, "6380", s3cr3t-redis-pass, 4gb, allkeys-lru, /var/lib/redis/6380, /var/log/redis/redis-6380.log]
+  reject: [bind, port, maxmemory]
+
+incident.txt:
+  want: [INC-20931, checkout-api, SEV-2, "2026-10-03 14:12", "2026-10-03 15:47", Priya Raman, eu-west-1, v3.18.2, v3.18.1, Daniel Kim, daniel.kim@example.com, https://wiki.example.com/postmortems/INC-20931]
+  reject: [Status, Summary, HTTP]
+  names: {Priya Raman: incident_commander, Daniel Kim: follow_up_owner}
+
+shipping.txt:
+  want: [Marcus, A-778213, DPD, "15501234567890", Friday 14 November, "Flat 3, 27 Elm Grove\nLeeds LS6 2AB", https://track.example.com/A-778213, Larkspur Home]
+  reject: [Carrier, Good]
+  names: {Friday 14 November: estimated_delivery}
+
+receipt.txt:
+  want: [R-55120, "12/11/2026 16:42", "87.95", "14.66", support@larkspur.example.com, 0113 496 0721]
+  reject: [Subtotal, Total]
+
+invite.ics:
+  want: [7d1b2c4e-9f0a-4b3c-8d2e-1f6a5b4c3d2e@acme.example.com, 20261120T140000Z, 20261120T150000Z, Quarterly architecture review, "Room 4.12, Harbour House", Lena Fischer, lena.fischer@acme.example.com, Tom Baker, tom.baker@acme.example.com]
+  reject: [VEVENT, VCALENDAR, BEGIN]
+  names: {20261120T140000Z: dtstart, Quarterly architecture review: summary}
+
+contact.vcf:
+  want: [Grace Liu, Brightline Analytics, Head of Data Engineering, +1 646 555 0187, grace.liu@brightline.example.com]
+  reject: [VCARD, WORK]
+
+us_letter.txt:
+  want: [Harper & Lane LLP, "1200 Market Street, Suite 800\nPhiladelphia, PA 19107", "November 3, 2026", David, Chen, Operations Director, Keystone Freight Inc., "455 Industrial Parkway\nAllentown, PA 18109", "12,500", "December 1, 2026", (215) 555-0143, jordan.hale@harperlane.example.com, Jordan Hale, Partner]
+  reject: [Dear, Sincerely]
+  names: {"November 3, 2026": letter_date, Chen: recipient_last_name, Keystone Freight Inc.: recipient_company, Jordan Hale: sender_name}
+  occurrences: {Keystone Freight Inc.: 2}
+
+runbook.md:
+  want: [pg-orders-replica.internal, monitor, ops, /var/lib/postgresql/16/main, orders-api, orders-prod, P7X2KQ1, +44 20 7946 0958]
+  reject: [Failover, psql, select]
+
+users.csv:
+  loops: {rows: 3}
+  want: []
+  reject: [id, email, role]
+
+main.tf:
+  want: [eu-central-1, acme-web-assets-prod, ami-0a1b2c3d4e5f67890, t3.micro, subnet-0f1e2d3c4b5a69788, ops-2026, bastion-prod]
+  reject: [aws, resource, provider, aws_instance]
+
+server.properties:
+  want: ["3", /data/kafka/logs, "12", "168", kafka-3.prod.example.com]
+  reject: [PLAINTEXT, SSL]
+
+.npmrc:
+  want: [https://npm.internal.example.com/, npm_7Qx2vLk9PzR4sT1uW8yB3nM6cD5fG0hJ]
+  reject: [registry]
+
+values.yaml:
+  want: ["3", registry.example.com/platform/search-api, 5.2.0, IfNotPresent, ClusterIP, "8080", nginx, search.example.com, search-example-com-tls, 500m, 768Mi, "https://es.internal.example.com:9200", "300"]
+  reject: [image, service, enabled]
+
+kubeconfig:
+  want: [prod-eu, "https://k8s-api.prod-eu.example.com:6443", ci-deployer, platform]
+  reject: [Config, clusters, contexts]
+  occurrences: {prod-eu: 4, ci-deployer: 2}
+
+sms.txt:
+  want: ["482913", 0800 555 0199, Larkspur Bank, "10"]
+  reject: []
+  names: {"482913": verification_code}
+
+welcome_email.txt:
+  want: [Priya, Acme Robotics, priya.raman, https://acme-robotics.northstar.example.com, Business, "25", 1 March 2027, Tomás García, tomas.garcia@acme-robotics.example.com]
+  reject: [Username, Plan]
+  names: {priya.raman: username, 1 March 2027: renewal_date}
+
+# --- second batch: new document types ------------------------------------------------
+
+fluent-bit.conf:
+  want: ["5", info, "2020", tail, /var/log/containers/*.log, kube.*, es, logs.internal.example.com, "9200", k8s-logs]
+  reject: [SERVICE, INPUT, OUTPUT, Name]
+
+Caddyfile:
+  want: [shop.example.com, "10.0.4.21:3000", "10.0.4.22:3000", ops@example.com, /var/log/caddy/shop.log]
+  reject: [encode, reverse_proxy]
+
+Cargo.toml:
+  want: [ledger-sync, 0.9.3, "2021", Mira Kowalski, mira@ledger.example.com, "1.41", 0.12.9]
+  reject: [package, dependencies]
+
+pom.xml:
+  want: [com.acme.billing, invoice-service, 3.4.0-SNAPSHOT, "21", 3.3.5]
+  reject: [project, properties, modelVersion]
+
+web.config:
+  want: [Production, https://api.contoso.example.com/v2, "50", sqlprod01, Contoso, web_app, Pa55w0rd!]
+  reject: [configuration, appSettings, add, key]
+  names: {Production: environment, "50": max_upload_mb}
+
+package.json:
+  want: ["@acme/storefront", 4.12.0, "3100", 15.0.3, 19.0.0, ">=22.11.0"]
+  reject: [scripts, dependencies]
+
+.gitlab-ci.yml:
+  want: [registry.gitlab.example.com/platform/gateway, gateway-staging, bitnami/kubectl:1.31, staging, https://gateway.staging.example.com]
+  reject: [stages, script, only]
+
+playbook.yml:
+  want: [Configure web servers, webservers, "8080", www-app, /srv/www/portal, nginx=1.24.0-2ubuntu7, /usr/sbin/nologin]
+  reject: [tasks, "{{ app_user }}"]
+
+variables.tf:
+  want: [orders-eks-prod, "5", 203.0.113.0/24, 198.51.100.0/24]
+  reject: [variable, string, number]
+  names: {orders-eks-prod: cluster_name, "5": node_count}
+
+Chart.yaml:
+  want: [notification-service, Sends email and SMS notifications, 1.7.2, 2.15.0, Platform Team, platform@example.com]
+  reject: [v2, application]
+
+ingress.yaml:
+  want: [docs-portal, docs, letsencrypt-prod, nginx, docs.example.com, docs-example-com-tls, "8080"]
+  reject: [Ingress, Prefix, networking.k8s.io/v1]
+  occurrences: {docs.example.com: 2, docs-portal: 2}
+
+aws_config:
+  want: [us-west-2, json, "arn:aws:iam::210987654321:role/OrganizationAccountAccessRole", eu-west-1, "arn:aws:iam::123456789012:mfa/j.smith"]
+  reject: [profile]
+
+sysctl.conf:
+  want: ["4096", 1024 65000, "10", "2097152"]
+  reject: [net.core.somaxconn]
+
+zone.db:
+  want: [example.org, "3600", ns1.example.org, 192.0.2.10, 192.0.2.25, mail.example.org]
+  reject: [IN, SOA, CNAME]
+
+hosts:
+  want: [10.8.0.10, gitlab.internal, 10.8.0.11, nexus.internal, 10.8.0.12, vault.internal]
+  reject: [localhost]
+
+wg0.conf:
+  want: [10.66.0.1/24, "51820", yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=, xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=, 10.66.0.2/32, "vpn.example.com:51820"]
+  reject: [Interface, Peer]
+
+access.log:
+  want: [203.0.113.45, 198.51.100.7]
+  reject: [GET, HTTP/1.1]
+
+grants.sql:
+  want: [reporting_ro, Rp7!x2Lq, analytics, sales]
+  reject: [GRANT, SELECT, SCHEMA]
+  occurrences: {reporting_ro: 4, sales: 2}
+
+outage_notice.txt:
+  want: [Saturday 22 November, "01:00", "03:00", shop.example.com, support@example.com, +44 20 7946 0123, Elena Petrova, Head of Customer Operations]
+  reject: [Dear, customer]
+  occurrences: {Saturday 22 November: 2}
+  names: {"01:00": start_time, "03:00": end_time, Elena Petrova: sender_name}
+
+interview.txt:
+  want: [Jamal, Senior Site Reliability Engineer, Fernleaf, Tuesday 18 November, "10:30", https://meet.google.example.com/abc-defg-hij, Hannah Lewis, Omar Haddad, Rachel Green, Talent Partner]
+  reject: [Google, Meet, Fernleaf Ltd, Engineer]
+  # "Fernleaf Ltd" and "at Fernleaf": the name is the variable, "Ltd" stays text.
+  names: {Jamal: recipient_first_name, Rachel Green: sender_name, Fernleaf: sender_company}
+  occurrences: {Fernleaf: 2}
+
+CHANGELOG.md:
+  want: [2.8.0, 2026-11-02, 2.7.4, 2026-10-15]
+  reject: [Added, Fixed]
+
+table.md:
+  loops: {rows: 3}
+  want: []
+  reject: [Service, Owner]
+
+gitconfig:
+  want: [Sam Rivera, sam.rivera@example.com, 3AA5C34371567BD2, vim, https://github.example.com/]
+  reject: [user, core]
+
+# --- third batch ----------------------------------------------------------------------
+
+cronjob.yaml:
+  want: [nightly-report, reporting, "30 3 * * *", registry.example.com/reporting/nightly, 1.8.0, s3://acme-reports]
+  reject: [CronJob, OnFailure]
+
+kustomization.yaml:
+  want: [checkout-prod, checkout-api, 123456789012.dkr.ecr.eu-west-1.amazonaws.com/checkout-api, 2026.11.3, "6"]
+  reject: [Kustomization]
+
+argocd-app.yaml:
+  want: [payments, argocd, platform, https://git.example.com/platform/deployments.git, release-42, apps/payments/overlays/prod, payments-prod]
+  reject: [Application]
+
+alerts.yml:
+  want: [HighErrorRate, 10m, page, payments, https://runbooks.example.com/api/high-error-rate]
+  reject: [groups, rules]
+
+Jenkinsfile:
+  want: [linux-docker, registry.example.com, orders/web, orders-staging]
+  reject: [pipeline, stages, steps]
+
+Makefile:
+  want: [billing-worker, 1.12.0, ghcr.io/acme, "9090"]
+  reject: [build]
+  names: {billing-worker: app, 1.12.0: version}
+
+my.cnf:
+  want: [10.4.0.15, "3307", /data/mysql, "500", 12G, backup, b4ckup!Pass]
+  reject: [mysqld, client]
+
+supervisord.conf:
+  want: [/opt/app, app, /var/log/worker.out.log, "redis://cache.internal:6379/2", production, "8", emails]
+  reject: [program]
+
+packer.pkr.hcl:
+  want: [eu-west-1, t3.small, ami-0abcdef1234567890, ubuntu, acme-base-2026-11]
+  reject: [amazon-ebs, source]
+
+vault-policy.hcl:
+  want: [secret/data/payments/*, database/creds/payments-ro]
+  reject: [path, capabilities]
+
+mongod.conf:
+  want: [/var/lib/mongodb, "27018", 10.5.0.8, rs-orders, /etc/mongo/keyfile]
+  reject: [storage, net]
+
+traefik.toml:
+  want: [certs@example.com, /letsencrypt/acme.json]
+  reject: [entryPoints, web]
+
+release_email.txt:
+  want: [4.3.0, Wednesday 19 November at 09:00, 4.2.7, production, Lukas Weber]
+  reject: [Highlights, team]
+  occurrences: {4.2.7: 2}
+
+invoice_reminder.txt:
+  want: [Alvarez, INV-88213, "3,240.00", 1 October 2026, "14", DE89 3704 0044 0532 0130 00, Brightwater Supplies GmbH]
+  reject: [Dear, Kind]
+
+k8s-service.yaml:
+  want: [search-api, search, LoadBalancer, 34.89.12.201, "80", "8080"]
+  reject: [Service, TCP, v1]
+  occurrences: {search-api: 3}
+
+# --- fourth batch: prose, JSON, logs ---------------------------------------------------
+
+password_reset.txt:
+  want: [Nadia, Clearpath, nadia.ibrahim@example.org, "30", https://id.clearpath.example.com/reset/7Kp2xQ9mWz, security@clearpath.example.com]
+  reject: [Hello]
+
+ticket.txt:
+  want: [OPS-4471, Ines Duarte, Kofi Mensah, P2, staging-eu, billing-worker, 512Mi, 610Mi, 1Gi, 900MiB]
+  reject: [Ticket, Priority]
+  occurrences: {staging-eu: 2, billing-worker: 2}
+
+api_response.json:
+  want: [cus_Q8z2LmP4, billing@northwind.example.com, Northwind Components Ltd, 14 Harbour Road, Bristol, BS1 6AA, GB, gbp, "125000", "1762300800"]
+  reject: [address, line1]
+
+app.log:
+  want: [orders-api, "0.0.0.0:8080", production, 3.18.2, pg-orders-primary.internal, stripe]
+  reject: [INFO, WARN, ERROR]
+
+onboarding.md:
+  want: [Felix, LT-20931, "8 Canal Street, Manchester M1 3HE", Monday 17 November, Aisha Bello, Platform Reliability, Tuesday 18 November 2026, "#team-platform", "4"]
+  reject: [Welcome, Manager, Team]
+
+dns_change.txt:
+  want: [CHG-30512, api.northwind.example.com, A, 203.0.113.17, 203.0.113.42, "300", "2026-11-20 22:00", Marta Novak, marta.novak@example.com]
+  reject: [Type]
+
+offer_letter_us.txt:
+  want: [Jordan, Data Platform Engineer, "Coastline Analytics, Inc.", "January 5, 2027", "165,000", "10,000", "December 1, 2026", Priya Natarajan, VP of Engineering]
+  reject: [Dear, Sincerely]
+
+haproxy_backend.cfg:
+  want: [api_servers, leastconn]
+  reject: [backend, check]
+  loops: {servers: 3}

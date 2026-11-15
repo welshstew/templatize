@@ -44,8 +44,10 @@ terraform:
   reject: ["{"]
 
 gha:
-  want: [Deploy docs, ubuntu-24.04, production, "22", deploy@docs.example.com]
-  reject: []
+  # rsync deploy@docs.example.com:...: the ssh user and host, not an email address.
+  want: [Deploy docs, ubuntu-24.04, production, "22", docs.example.com]
+  reject: [deploy@docs.example.com]
+  names: {docs.example.com: ssh_host}
 
 ssh:
   want: [bastion, db-primary, 203.0.113.10, jmorgan, "2222", ~/.ssh/id_ed25519_work, 10.0.4.21]
@@ -89,6 +91,7 @@ meeting:
   want: [Amira Haddad, https://meet.example.com/j/8841-2207-553, Thursday 9 July, "14:00", "15:30"]
   reject: ["30", Amira, Haddad, Thursday, July]
   occurrences: {Thursday 9 July: 2, "14:00": 2}
+  names: {"+1 415 555 0199": dial_in_phone, "66 41 09": dial_in_pin, "14:00": start_time, "15:30": end_time}
 
 release:
   want: []

@@ -1,0 +1,9 @@
+[package]
+name = "ledger-sync"
+version = "0.9.3"
+edition = "2021"
+authors = ["Mira Kowalski <mira@ledger.example.com>"]
+
+[dependencies]
+tokio = { version = "1.41", features = ["full"] }
+reqwest = "0.12.9"

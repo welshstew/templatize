@@ -1,0 +1,14 @@
+pipeline {
+  agent { label 'linux-docker' }
+  environment {
+    REGISTRY = 'registry.example.com'
+    IMAGE = 'orders/web'
+  }
+  stages {
+    stage('Deploy') {
+      steps {
+        sh "helm upgrade --install web ./chart --namespace orders-staging --set image.tag=${env.BUILD_NUMBER}"
+      }
+    }
+  }
+}

@@ -39,6 +39,12 @@ def _combine(group: list[Candidate]) -> Candidate:
     if len(group) == 1:
         return group[0]
     spans = sorted({_sk(s): s for c in group for s in c.spans}.values(), key=_sk)
+    diffed = [c for c in group if Source.DIFF in c.sources and c.variant_values]
+    if diffed:
+        # The examples say exactly which occurrences change: another occurrence of the
+        # same text that stays the same in the examples is not this variable.
+        changing = {_sk(s) for c in diffed for s in c.spans}
+        spans = [s for s in spans if _sk(s) in changing]
     sources: list[Source] = []
     detectors: list[str] = []
     for c in group:
@@ -113,6 +119,8 @@ def merge_candidates(
         free = [s for s in c.spans if not occupied.overlaps(s)]
         if not free:
             continue
+        if c.detectors == ["repetition"] and len(free) < 2 <= len(c.spans):
+            continue  # no longer repeated: its other occurrence is part of a longer value
         if len(free) != len(c.spans):
             c = c.model_copy(update={"spans": free})
         for s in free:

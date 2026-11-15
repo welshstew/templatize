@@ -1,0 +1,13 @@
+Hi Priya,
+
+Welcome to Northstar! Your account for the Acme Robotics workspace is ready.
+
+Username: priya.raman
+Workspace URL: https://acme-robotics.northstar.example.com
+Plan: Business (25 seats)
+Renewal date: 1 March 2027
+
+Your administrator, Tomás García (tomas.garcia@acme-robotics.example.com), can add
+more seats.
+
+The Northstar team

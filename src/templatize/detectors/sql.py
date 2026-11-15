@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from templatize.detectors.base import DetectionContext, DetectorResult
-from templatize.ir import Candidate, Source, Span
+from templatize.ir import Candidate, Source, Span, VarType
 from templatize.naming import infer_type, snake_case
 
 _IDENT = r'(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][\w$]*)'
@@ -140,14 +140,71 @@ def insert_statements(text: str) -> Iterator[InsertStatement]:
         yield InsertStatement(table=_ident(m.group(1)), columns=cols, rows=rows)
 
 
+# Access control: CREATE USER/ROLE ... PASSWORD '...', GRANT ... ON DATABASE/SCHEMA ... TO ...
+_ACCESS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(?:PASSWORD|IDENTIFIED\s+BY)\s+'((?:[^'\n]|'')+)'", re.IGNORECASE), "password"),
+    (
+        re.compile(
+            r"\bCREATE\s+(?:USER|ROLE)\s+(?:IF\s+NOT\s+EXISTS\s+)?\"?([A-Za-z_]\w*)", re.IGNORECASE
+        ),
+        "role",
+    ),
+    (re.compile(r"\bGRANT\b[^;]*?\bTO\s+\"?([A-Za-z_]\w*)", re.IGNORECASE), "role"),
+    (re.compile(r"\bON\s+DATABASE\s+\"?([A-Za-z_]\w*)", re.IGNORECASE), "database"),
+    (re.compile(r"\b(?:ON|IN)\s+SCHEMA\s+\"?([A-Za-z_]\w*)", re.IGNORECASE), "schema"),
+    (
+        re.compile(
+            r"\bCREATE\s+(?:DATABASE|SCHEMA)\s+(?:IF\s+NOT\s+EXISTS\s+)?\"?([A-Za-z_]\w*)",
+            re.IGNORECASE,
+        ),
+        "database",
+    ),
+]
+_SQL_WORDS = frozenset({"public", "all", "postgres", "root"})
+
+
+def _access(text: str) -> list[Candidate]:
+    """Users, roles, passwords, databases and schemas of CREATE/GRANT statements; an
+    identifier covers every place it is used as a whole word."""
+    out: list[Candidate] = []
+    seen: set[str] = set()
+    for pattern, kind in _ACCESS:
+        for m in pattern.finditer(text):
+            value = m.group(1)
+            if value in seen or value.lower() in _SQL_WORDS or value.upper() in ("PUBLIC",):
+                continue
+            seen.add(value)
+            if kind == "password":
+                spans = [Span(start=m.start(1), end=m.end(1))]
+            else:
+                spans = [
+                    Span(start=o.start(), end=o.end())
+                    for o in re.finditer(rf"(?<![\w.]){re.escape(value)}(?![\w])", text)
+                ]
+            out.append(
+                Candidate(
+                    name=kind,
+                    name_origin="context",
+                    type=VarType.STRING,
+                    value=value,
+                    spans=spans,
+                    sources=[Source.KEY_VALUE],
+                    detectors=["sql.access"],
+                    confidence=0.8,
+                    reason=f"the {kind} of a CREATE/GRANT statement",
+                )
+            )
+    return out
+
+
 class SqlDetector:
     name = "sql"
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
         text = ctx.text
+        out: list[Candidate] = _access(text)
         if not re.search(r"\b(?:INSERT|UPDATE)\b", text, re.IGNORECASE):
-            return DetectorResult(candidates=[])
-        out: list[Candidate] = []
+            return DetectorResult(candidates=out)
         for stmt in insert_statements(text):
             table = _singular(stmt.table)
             for row in stmt.rows:

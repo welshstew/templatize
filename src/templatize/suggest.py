@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from bisect import bisect_right
 from collections.abc import Sequence
 
 from pydantic import BaseModel
@@ -9,7 +11,7 @@ from pydantic import BaseModel
 from templatize.compose import compose_profile
 from templatize.detectors import DetectionContext, Detector, default_detectors
 from templatize.detectors.k8s import split_spans
-from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice
+from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice, Span
 from templatize.k8s import DocumentProfile, detect_profile, structural_spans
 from templatize.loops import detect_loops, explained_notices
 from templatize.merge import compose_candidates, merge_candidates
@@ -35,6 +37,31 @@ def check_limits(text: str, variants: Sequence[str] = ()) -> None:
         if len(t) > MAX_INPUT_CHARS:
             label = "input" if i == 0 else f"variant {i}"
             raise InputLimitError(f"{label} exceeds {MAX_INPUT_CHARS} characters")
+
+
+# Template syntax already in the document (GitHub Actions ${{ github.sha }}, Jinja,
+# Helm): what is inside it is an expression, not a value to extract.
+_TEMPLATE_EXPR = re.compile(r"\$?\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
+
+
+def _outside_template_syntax(text: str, raw: list[Candidate]) -> list[Candidate]:
+    exprs = [
+        (m.start(), m.end()) for m in _TEMPLATE_EXPR.finditer(text) if m.end() - m.start() < 500
+    ]
+    if not exprs:
+        return raw
+    starts = [a for a, _ in exprs]  # disjoint and sorted: finditer does not overlap
+
+    def inside(s: Span) -> bool:
+        i = bisect_right(starts, s.start) - 1
+        return i >= 0 and s.end <= exprs[i][1]
+
+    out = []
+    for c in raw:
+        kept = [s for s in c.spans if not inside(s)]
+        if kept:
+            out.append(c if len(kept) == len(c.spans) else c.model_copy(update={"spans": kept}))
+    return out
 
 
 def suggest(
@@ -70,6 +97,7 @@ def suggest(
                 ]
             )
         ]
+    raw = _outside_template_syntax(text, raw)
     candidates, composed = compose_candidates(text, merge_candidates(raw))
     notices.extend(composed)
     loops = detect_loops(text, variants, taken_names=[c.name for c in candidates])

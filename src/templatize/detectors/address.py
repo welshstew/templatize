@@ -53,6 +53,9 @@ _STREET = re.compile(
     rf"|[A-Z][\w'-]*(?:straße|strasse|weg|laan|straat|gasse)[ ]+\d"
     r")"
 )
+_STREET_INLINE = re.compile(
+    rf"(?<![\w,])\d+[A-Za-z]?,?[ ]+(?:[A-Z][\w'-]*[ ]+){{0,4}}{_STREET_WORD},[ ]+[A-Z]"
+)
 _GREETING = re.compile(r"^[ \t]*(?:Dear|Hi|Hello|To whom)\b", re.MULTILINE)
 
 
@@ -79,15 +82,23 @@ def find_addresses(text: str) -> list[Span]:
     used_to = -1
     for i, (ls, le) in enumerate(lines):
         line = text[ls:le]
-        if len(line) > MAX_LINE or not _is_postcode_line(line):
+        if len(line) > 2 * MAX_LINE or not _is_postcode_line(line):
             continue
+        if len(line) > MAX_LINE and not _STREET_INLINE.search(line):
+            continue  # a long line: only a one-line address in prose
         top = i if _STREET.match(line) else None
+        inline = _STREET_INLINE.search(line) if top is None else None
         for j in range(i - 1, max(i - 1 - MAX_LINES_ABOVE, used_to), -1):
             above = text[lines[j][0] : lines[j][1]]
             if not above.strip() or len(above) > MAX_LINE or above.rstrip().endswith((".", ":")):
                 break
             if _STREET.match(above):
                 top = j
+        if top is None and inline is not None:
+            # "ships to 8 Canal Street, Manchester M1 3HE": a one-line address in prose.
+            found.append(Span(start=ls + inline.start(), end=ls + len(line.rstrip())))
+            used_to = i
+            continue
         if top is None:
             continue
         start = (

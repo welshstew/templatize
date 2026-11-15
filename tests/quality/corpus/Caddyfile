@@ -1,0 +1,8 @@
+shop.example.com {
+    encode gzip
+    reverse_proxy 10.0.4.21:3000 10.0.4.22:3000
+    tls ops@example.com
+    log {
+        output file /var/log/caddy/shop.log
+    }
+}

@@ -1,0 +1,12 @@
+Hi team,
+
+Release 4.3.0 of the Orders API goes out on Wednesday 19 November at 09:00 UTC.
+
+Highlights:
+- New endpoint /v2/refunds
+- Faster search (p95 down from 820 ms to 310 ms)
+
+Rollback plan: redeploy 4.2.7 with ./deploy.sh --version 4.2.7 --env production.
+
+Thanks,
+Lukas Weber

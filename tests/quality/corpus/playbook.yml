@@ -1,0 +1,16 @@
+- name: Configure web servers
+  hosts: webservers
+  become: true
+  vars:
+    nginx_port: 8080
+    app_user: www-app
+    app_root: /srv/www/portal
+  tasks:
+    - name: Install nginx
+      ansible.builtin.apt:
+        name: nginx=1.24.0-2ubuntu7
+        state: present
+    - name: Create app user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        shell: /usr/sbin/nologin

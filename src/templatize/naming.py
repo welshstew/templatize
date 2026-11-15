@@ -54,7 +54,7 @@ def snake_case(raw: str) -> str:
         s = "v_" + s
     s = s[:MAX_NAME_LEN].rstrip("_")
     if s in RESERVED_NAMES:
-        s = s + "_value"
+        s = s + ("_name" if s == "namespace" else "_value")
     return s
 
 
@@ -120,6 +120,89 @@ _HOST = re.compile(
 )
 
 
+FILE_EXTENSIONS = frozenset(
+    [
+        "txt",
+        "json",
+        "yaml",
+        "yml",
+        "py",
+        "js",
+        "ts",
+        "tsx",
+        "jsx",
+        "md",
+        "rst",
+        "log",
+        "conf",
+        "cfg",
+        "ini",
+        "toml",
+        "xml",
+        "html",
+        "htm",
+        "csv",
+        "lock",
+        "sh",
+        "bash",
+        "ps1",
+        "bat",
+        "pem",
+        "crt",
+        "key",
+        "cer",
+        "p12",
+        "tar",
+        "gz",
+        "tgz",
+        "zip",
+        "j2",
+        "tpl",
+        "tf",
+        "tfvars",
+        "env",
+        "sql",
+        "db",
+        "sqlite",
+        "png",
+        "jpg",
+        "jpeg",
+        "gif",
+        "svg",
+        "pdf",
+        "doc",
+        "docx",
+        "xls",
+        "xlsx",
+        "rb",
+        "go",
+        "rs",
+        "java",
+        "kt",
+        "c",
+        "h",
+        "cpp",
+        "hpp",
+        "cs",
+        "php",
+        "swift",
+        "properties",
+        "gradle",
+        "mk",
+        "service",
+        "socket",
+        "timer",
+        "pid",
+        "sock",
+    ]
+)
+
+
+def is_file_name(value: str) -> bool:
+    """``requirements.txt``, ``app.config.json``: a file name, not a host name."""
+    return "." in value and value.rsplit(".", 1)[1].lower() in FILE_EXTENSIONS
+
+
 def infer_type(value: str) -> VarType:
     v = value.strip()
     if not v:
@@ -166,6 +249,6 @@ def infer_type(value: str) -> VarType:
         return VarType.SEMVER
     if _PATH.match(v):
         return VarType.PATH
-    if _HOST.match(v):
+    if _HOST.match(v) and not is_file_name(v):
         return VarType.HOSTNAME
     return VarType.STRING

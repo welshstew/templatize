@@ -1,0 +1,10 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Grace Liu
+N:Liu;Grace;;;
+ORG:Brightline Analytics
+TITLE:Head of Data Engineering
+TEL;TYPE=WORK:+1 646 555 0187
+EMAIL:grace.liu@brightline.example.com
+ADR;TYPE=WORK:;;350 Fifth Avenue;New York;NY;10118;USA
+END:VCARD

@@ -1,0 +1,8 @@
+[user]
+    name = Sam Rivera
+    email = sam.rivera@example.com
+    signingkey = 3AA5C34371567BD2
+[core]
+    editor = vim
+[url "git@github.example.com:"]
+    insteadOf = https://github.example.com/

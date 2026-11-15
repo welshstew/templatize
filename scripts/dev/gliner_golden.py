@@ -13,7 +13,16 @@ from pathlib import Path
 
 from gliner import GLiNER
 
-LABELS = ["person", "organization", "location", "street address", "phone number", "money", "job title", "product"]
+LABELS = [
+    "person",
+    "organization",
+    "location",
+    "street address",
+    "phone number",
+    "money",
+    "job title",
+    "product",
+]
 EXTRA = {
     "sentence-hyphens": "Dr. Jean-Luc Picard-Smith met Anna_Maria O'Neil at Acme-Corp in São Paulo on Friday.",
     "phone-address": "Call Mrs. Priya Nair on +44 20 7946 0958 or visit 221B Baker Street, London NW1 6XE.",
@@ -21,15 +30,35 @@ EXTRA = {
     "labels-only-text": "...",
 }
 
-model = GLiNER.from_pretrained(sys.argv[1], load_onnx_model=True, load_tokenizer=True,
-                               onnx_model_file="onnx/model.onnx", local_files_only=True)
+model = GLiNER.from_pretrained(
+    sys.argv[1],
+    load_onnx_model=True,
+    load_tokenizer=True,
+    onnx_model_file="onnx/model.onnx",
+    local_files_only=True,
+)
 fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures"
 docs = {p.name: p.read_bytes().decode("utf-8") for p in sorted(fixtures.iterdir()) if p.is_file()}
 docs.update(EXTRA)
-out = {"labels": LABELS, "threshold": 0.5, "gliner_version": __import__("gliner").__version__, "cases": {}}
+out = {
+    "labels": LABELS,
+    "threshold": 0.5,
+    "gliner_version": __import__("gliner").__version__,
+    "cases": {},
+}
 for name, text in docs.items():
     ents = model.predict_entities(text, LABELS, threshold=0.5, flat_ner=True, multi_label=False)
-    out["cases"][name] = {"text": text, "entities": [
-        {"start": e["start"], "end": e["end"], "text": e["text"], "label": e["label"], "score": round(float(e["score"]), 4)}
-        for e in ents]}
+    out["cases"][name] = {
+        "text": text,
+        "entities": [
+            {
+                "start": e["start"],
+                "end": e["end"],
+                "text": e["text"],
+                "label": e["label"],
+                "score": round(float(e["score"]), 4),
+            }
+            for e in ents
+        ],
+    }
 json.dump(out, sys.stdout, ensure_ascii=False, indent=1)

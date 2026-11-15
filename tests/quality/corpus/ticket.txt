@@ -1,0 +1,10 @@
+Ticket: OPS-4471
+Reporter: Ines Duarte
+Assignee: Kofi Mensah
+Priority: P2
+Environment: staging-eu
+Component: billing-worker
+
+The billing-worker pods in staging-eu restart every 15 minutes with OOMKilled.
+Memory limit is 512Mi; usage peaks at 610Mi during the nightly export.
+Proposed fix: raise the limit to 1Gi and set GOMEMLIMIT=900MiB.
