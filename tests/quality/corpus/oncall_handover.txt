@@ -1,0 +1,11 @@
+On-call handover – week 49
+
+Outgoing: Sam Rivera
+Incoming: Priya Desai
+
+Open items:
+- INC-4412: disk usage on es-data-03 at 87%, ticket with the storage team
+- The certificate for vpn.acme.example.com expires on 20 December 2026
+- Kafka consumer lag on orders-events is around 40k messages since Tuesday
+
+Pager: +44 20 7946 0123

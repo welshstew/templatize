@@ -293,3 +293,43 @@ def test_title_after_a_phrase_person() -> None:
     found = people("You'll be reporting to Lena Brandt, Head of Data Platform.\n")
     assert found["manager_name"] == "Lena Brandt"
     assert found["manager_title"] == "Head of Data Platform"
+
+
+# --- corpus batch seven -----------------------------------------------------------
+
+
+def test_docker_run_values() -> None:
+    text = (
+        "#!/usr/bin/env bash\ndocker run -d --name grafana \\\n"
+        "  -e GF_SECURITY_ADMIN_PASSWORD=Gr4f4n4!2026 \\\n  grafana/grafana:11.3.1\n"
+    )
+    found = values(text)
+    assert found["grafana/grafana:11.3.1"] == "image"
+    assert found["Gr4f4n4!2026"] == "gf_security_admin_password"
+    assert "/usr/bin/env" not in found and "11.3.1" not in found
+
+
+def test_terraform_plan_attributes() -> None:
+    text = (
+        "Terraform will perform the following actions:\n\n"
+        '  + resource "aws_instance" "web" {\n'
+        '      + instance_type          = "t3.large"\n    }\n\n'
+        "Plan: 1 to add, 0 to change, 0 to destroy.\n"
+    )
+    found = values(text)
+    assert found["t3.large"] == "instance_type"
+    assert not any("to add" in v for v in found)
+
+
+def test_slashed_dates_and_timestamps() -> None:
+    found = values("2026/12/04 10:15:02 [error] connect() failed\nBackup on 2026/12/05.\n")
+    assert found["2026/12/04 10:15:02"] == "timestamp"
+    assert "2026/12/05" in found
+
+
+def test_version_after_a_lowercase_product() -> None:
+    assert values("Safari 18.1 on macOS 15.1\n")["15.1"] == "mac_os_version"
+
+
+def test_logfmt_value_with_underscore() -> None:
+    assert values("ERROR request_id=req_8Kq2Zt timeout=30s\n")["req_8Kq2Zt"] == "request_id"

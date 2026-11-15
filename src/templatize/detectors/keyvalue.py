@@ -37,6 +37,9 @@ _MD_BOLD_KEY = re.compile(
 _MD_RANGE = re.compile(
     r"\S*\d[\d.,]*\S*[ \t]*(?:-|\u2013|\u2014|to)[ \t]*\S*\d[\d.,]*\S*(?:[ \t]+\w+)?"
 )
+# `terraform plan` output: attribute lines carry a change marker (+, ~, -/+).
+_TF_PLAN = re.compile(r"Terraform will perform the following actions|^Plan: \d+ to add", re.M)
+_TF_PLAN_MARK = re.compile(r"^[ \t]*([+~])[ \t]+(?=[\w\"]+[ \t]*=)")
 _PROSE_END = re.compile(r"[.!?,]$")
 # Dockerfile instructions whose arguments are values.
 _DOCKER_FIRST = re.compile(
@@ -239,9 +242,15 @@ class KeyValueDetector:
         scopes = _Scopes(ctx.text)
         section: str | None = None  # INI [section]
         last_name: tuple[int, str, str] | None = None  # (indent, name value, candidate id)
+        tf_plan = bool(_TF_PLAN.search(ctx.text))
         for line_start, line in _lines(ctx.text):
             if not line.strip():
                 continue
+            if tf_plan and line.startswith("Plan: "):
+                continue  # the plan's summary ("1 to add, 0 to change")
+            if tf_plan and (pm := _TF_PLAN_MARK.match(line)):
+                # "+ instance_type = "t3.large"": the change marker blanked, offsets kept.
+                line = line[: pm.start(1)] + " " + line[pm.end(1) :]
             if sm_ := _INI_SECTION.match(line):
                 section = sm_.group(1)
                 continue

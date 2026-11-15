@@ -236,7 +236,7 @@ def _ports(text: str) -> list[Candidate]:
 
 # GOMEMLIMIT=900MiB in prose, env=production / request_id=req_9fA2kL in log lines.
 _INLINE_ASSIGN = re.compile(
-    r"(?<![\w$.-])([A-Za-z_][A-Za-z0-9_]{1,40}(?:\.[a-z_]+)?)=([A-Za-z0-9./:@~+-]*[A-Za-z0-9/])(?=[\s,;)\]'\"`.]|$)"
+    r"(?<![\w$.-])([A-Za-z_][A-Za-z0-9_]{1,40}(?:\.[a-z_]+)?)=([A-Za-z0-9./:@~+!%^*_-]*[A-Za-z0-9/_!])(?=[\s,;)\]'\"`.]|$)"
 )
 
 

@@ -440,3 +440,43 @@ helm_values.yaml:
   want: ["3", ghcr.io/acme/notifications, 2.7.1, nginx, notify.acme.example.com, notify-tls, 500m, 256Mi]
   reject: []
   occurrences: {notify.acme.example.com: 2}
+
+# Seventh batch: command output and operations text.
+
+docker_run.sh:
+  want: [grafana, "3000", Gr4f4n4!2026, https://grafana.acme.example.com, /srv/grafana, unless-stopped, "grafana/grafana:11.3.1"]
+  reject: [/usr/bin/env, 11.3.1]
+  names: {"grafana/grafana:11.3.1": image, Gr4f4n4!2026: gf_security_admin_password}
+
+tf_plan.txt:
+  want: [ami-0c55b159cbfafe1f0, t3.large, subnet-0a1b2c3d4e5f67890]
+  reject: ["1 to add, 0 to change, 0 to destroy."]
+  names: {t3.large: instance_type}
+
+github_issue.md:
+  want: [Safari, "18.1", 3.4.2, "15.1", "@mkowalski", https://app.acme.example.com/login, test-user@acme.example.com, "2026-12-04T10:12:44.118Z", req_8Kq2Zt, "auth-svc:7000", 30s]
+  reject: []
+  names: {"18.1": safari_version, req_8Kq2Zt: request_id}
+
+alert_rule.yaml:
+  want: [payments, CheckoutHighLatency, 10m, page, https://runbooks.acme.example.com/checkout-latency]
+  reject: []
+
+aws_cli.json:
+  want: [orders-prod, db.r6g.xlarge, postgres, "16.4", orders-prod.c9akciq32.eu-west-1.rds.amazonaws.com, "5432", "500"]
+  reject: []
+  names: {orders-prod.c9akciq32.eu-west-1.rds.amazonaws.com: endpoint_address}
+
+systemd_timer.timer:
+  want: [Nightly database backup, "*-*-* 02:30:00", 15min, timers.target]
+  reject: []
+
+nginx_error.log:
+  want: ["2026/12/04 10:15:02", 203.0.113.9, api.acme.example.com, "http://10.0.3.14:8080/v1/health"]
+  reject: ["10:15:02"]
+  names: {"2026/12/04 10:15:02": timestamp}
+  occurrences: {api.acme.example.com: 3}
+
+oncall_handover.txt:
+  want: [Sam Rivera, Priya Desai, INC-4412, vpn.acme.example.com, 20 December 2026, +44 20 7946 0123]
+  reject: []

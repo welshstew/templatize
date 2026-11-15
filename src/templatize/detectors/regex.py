@@ -384,6 +384,9 @@ PATTERNS: list[Pattern] = [
             r"(?<![\w./:@-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?"
             r"(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)+(?::[\w][\w.-]{0,127}|@sha256:[0-9a-f]{64})"
             r"(?![\w./:@-])"
+            # Docker Hub "grafana/grafana:11.3.1", "bitnami/kubectl:1.31" (a tag with a digit).
+            r"|(?<![\w./:@~-])[a-z0-9]+(?:[._-][a-z0-9]+)*/[a-z0-9]+(?:[._-][a-z0-9]+)*"
+            r":(?=[\w.-]*\d)[\w][\w.-]{0,127}(?![\w./:@-])"
         ),
         0.8,
         name="image",
@@ -402,7 +405,7 @@ PATTERNS: list[Pattern] = [
         "regex.datetime",
         VarType.DATETIME,
         re.compile(
-            r"(?<![\w-])\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
+            r"(?<![\w/-])\d{4}([-/])\d{2}\1\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
             r"(?:Z|[+-]\d{2}:?\d{2})?(?![\w:])"
         ),
         0.8,
@@ -422,7 +425,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         "regex.date_iso",
         VarType.DATE,
-        re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?![\w-])"),
+        re.compile(r"(?<![\w/-])\d{4}([-/])\d{2}\1\d{2}(?![\w/-])"),
         0.8,
         _valid_iso_date,
     ),
@@ -606,6 +609,10 @@ class RegexDetector:
                     )
                 )
         out.extend(_short_versions(text))
+        if text.startswith("#!"):
+            eol = text.find("\n")
+            first_line_end = len(text) if eol < 0 else eol
+            out = [c for c in out if c.spans[0].start >= first_line_end]  # #!/usr/bin/env bash
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
         out = [c for c in out if not (c.type is VarType.HOSTNAME and _is_key(text, c.spans[0]))]
         out = _drop_inner(_shared_hosts(text, _split_shared_datetimes(out)))
@@ -637,7 +644,7 @@ _AWS_ID_NAMES = {
 # "Elasticsearch 7.17", "PostgreSQL 14.11 to 16.6", "Python 3.12": a two-part version
 # after a product name (three-part ones are semver).
 _SHORT_VERSION = re.compile(
-    r"\b([A-Z][A-Za-z]*[a-z][A-Za-z]*|[A-Z]{2,}[a-z]*)[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w|[ \t]*%)"
+    r"\b([A-Z][A-Za-z]*[a-z][A-Za-z]*|[A-Z]{2,}[a-z]*|[a-z]{1,4}[A-Z][A-Za-z]*)[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w|[ \t]*%)"
     r"(?:[ \t]+(?:to|and|or|->|\u2192)[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w))?"
 )
 # "upgrade ... from 14.11 to 16.6": both ends of an upgrade.

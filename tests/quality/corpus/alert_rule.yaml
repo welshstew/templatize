@@ -1,0 +1,12 @@
+groups:
+  - name: payments
+    rules:
+      - alert: CheckoutHighLatency
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{service="checkout"}[5m])) by (le)) > 1.5
+        for: 10m
+        labels:
+          severity: page
+          team: payments
+        annotations:
+          summary: "Checkout p99 latency above 1.5s"
+          runbook_url: https://runbooks.acme.example.com/checkout-latency
