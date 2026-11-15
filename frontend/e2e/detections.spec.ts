@@ -191,3 +191,22 @@ test("confirming the document type applies its rules", async ({ page }) => {
   await expect(page.locator("mark", { hasText: "bastion" }).first()).toBeVisible();
   await expect(picker).toHaveValue("ssh-config");
 });
+
+test("a referenced schema is reported; a pasted one is applied", async ({ page }) => {
+  const doc = '{\n  "$schema": "https://schemas.acme.example.com/app.schema.json",\n  "version": 2,\n  "endpoint": "internal-api"\n}\n';
+  const schema =
+    '{"title": "App config", "properties": {"version": {"const": 2}, "endpoint": {"type": "string", "format": "uri"}}}';
+  await page.goto("/");
+  await page.getByLabel("Document text").fill(doc);
+  await analyze(page);
+  await expect(page.locator(".schema-info")).toContainText("not downloaded");
+  await page.getByRole("button", { name: "Edit text", exact: true }).click();
+  await page.getByRole("tab", { name: "Schema" }).click();
+  await page.getByLabel("JSON Schema text").fill(schema);
+  await expect(page.getByRole("tab", { name: "Schema ✓" })).toBeVisible();
+  const result = await analyze(page);
+  await expect(page.locator(".schema-info")).toContainText("Schema: App config");
+  const values = result.candidates.map((c) => c.value);
+  expect(values).toContain("internal-api");
+  expect(values).not.toContain("2");
+});

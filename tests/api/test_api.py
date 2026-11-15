@@ -317,3 +317,20 @@ def test_document_types_and_confirming_one(client: TestClient) -> None:
     assert "bastion" in {c["value"] for c in confirmed["candidates"]}
     bad = client.post("/suggest", json={"text": text, "document_type": "liquid"})
     assert bad.status_code == 422 and "unknown document type" in bad.json()["detail"]
+
+
+def test_suggest_with_a_schema(client: TestClient) -> None:
+    text = (
+        '{\n  "$schema": "https://x.example.com/s.json",\n  "version": 2,\n  "endpoint": "api"\n}\n'
+    )
+    schema = (
+        '{"properties": {"version": {"const": 2}, "endpoint": {"type": "string", "format": "uri"}}}'
+    )
+    res = client.post("/suggest", json={"text": text, "schema": schema}).json()
+    assert res["schema_info"]["provided"] and res["schema_info"]["reference"]["url"].endswith(
+        "/s.json"
+    )
+    values = {c["value"]: c["type"] for c in res["candidates"]}
+    assert "2" not in values and values["api"] == "url"
+    bad = client.post("/suggest", json={"text": text, "schema": "[1]"})
+    assert bad.status_code == 422 and "JSON Schema" in bad.json()["detail"]

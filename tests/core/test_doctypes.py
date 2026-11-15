@@ -129,7 +129,7 @@ EXPECTED = {
     "corpus/utility_bill.txt": "text",
     "corpus/values.yaml": "yaml",
     "corpus/variables.tf": "terraform",
-    "corpus/vault-policy.hcl": "terraform",
+    "corpus/vault-policy.hcl": "vault-policy",
     "corpus/vhost.conf": "apache",
     "corpus/web.config": "xml",
     "corpus/welcome_email.txt": "letter",
@@ -169,6 +169,9 @@ EXPECTED = {
     "sample:cloud-init": "cloud-init",
     "sample:haproxy": "haproxy",
     "sample:nginx-envsubst": "nginx",
+    "sample:vault-policy": "vault-policy",
+    "sample:vault-agent": "vault-agent",
+    "sample:terraform-vault": "terraform",
 }
 
 

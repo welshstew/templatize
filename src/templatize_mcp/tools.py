@@ -34,18 +34,24 @@ from templatize.k8s import DocumentProfile
 from templatize.loops import loop_values
 from templatize.roundtrip import RoundTripResult
 from templatize.suggest import SuggestResult, check_limits, suggest
+from templatize.userschema import SchemaInfo
 from templatize.validate import validate_template as core_validate
 
 Newline = Literal["\n", "\r\n", "\r"]
 
 
-def _suggest(text: str, variants: list[str], document_type: str | None = None) -> SuggestResult:
+def _suggest(
+    text: str,
+    variants: list[str],
+    document_type: str | None = None,
+    schema: str | None = None,
+) -> SuggestResult:
     """Heuristics, plus the optional NER service when TEMPLATIZE_NER_URL is set and up."""
     url = os.environ.get("TEMPLATIZE_NER_URL", "").strip()
     detectors: list[Detector] = default_detectors()
     if url and ner_detector.check_health(url):
         detectors.append(ner_detector.NerDetector(ner_detector.NerConfig(url=url)))
-    return suggest(text, variants, detectors=detectors, document_type=document_type)
+    return suggest(text, variants, detectors=detectors, document_type=document_type, schema=schema)
 
 
 RenderValue = str | list[str] | list[dict[str, str]]
@@ -89,6 +95,9 @@ class SuggestParametersResult(BaseModel):
     document_type: DocumentType | None = None
     """What kind of document this is: detected, or confirmed via `document_type`. If the
     detection looks wrong, ask the user and call again with the right type."""
+    schema_info: SchemaInfo | None = None
+    """A JSON Schema the document references (never downloaded: pass its text as
+    `json_schema` if you have it) and/or the one supplied."""
     next_step: str = NEXT_STEP
 
 
@@ -144,10 +153,11 @@ def suggest_parameters(
     variants: list[str] | None = None,
     min_confidence: float = 0.0,
     document_type: str | None = None,
+    schema: str | None = None,
 ) -> SuggestParametersResult:
     variants = variants or []
     try:
-        res = _suggest(text, variants, document_type)
+        res = _suggest(text, variants, document_type, schema)
     except ValueError as exc:
         raise ToolInputError(str(exc)) from None
     return SuggestParametersResult(
@@ -168,6 +178,7 @@ def suggest_parameters(
         notices=res.notices,
         profile=res.profile,
         document_type=res.document_type,
+        schema_info=res.schema_info,
         next_step=NEXT_STEP_HELM if res.profile.helm_suggested else NEXT_STEP,
     )
 
@@ -256,13 +267,14 @@ def generate_template(
     min_confidence: float = 0.5,
     engine: str = "jinja2",
     document_type: str | None = None,
+    schema: str | None = None,
 ) -> GenerateTemplateResult:
     variants = variants or []
     try:
         check_limits(text, variants)
         loops: list[LoopSpec] = []
         if variables is None:
-            res = _suggest(text, variants, document_type)
+            res = _suggest(text, variants, document_type, schema)
             cands = [c for c in res.candidates if c.confidence >= min_confidence]
             found = [lp for lp in res.loops if lp.auto_accept and lp.confidence >= min_confidence]
             specs, loops = accept_suggestions(cands, found)

@@ -103,6 +103,11 @@ _TOML = _rx(r'^[ \t]*[\w.-]+[ \t]*=[ \t]*(?:"|\[|\{|true\b|false\b|\d)')
 _TOML_STRING = _rx(r'^[ \t]*[\w.-]+[ \t]*=[ \t]*"')
 # HCL blocks with labels (packer "source", vault "path", nomad "job"...).
 _HCL_LABELLED = _rx(r'^[a-z_]+(?:[ \t]+"[^"\n]*")+[ \t]*\{')
+_VAULT_PATH = _rx(r'^path[ \t]+"[^"\n]+"[ \t]*\{')
+_VAULT_CAPABILITIES = _rx(r"^[ \t]+capabilities[ \t]*=")
+_VAULT_AUTO_AUTH = _rx(r"^auto_auth[ \t]*\{")
+_VAULT_BLOCK = _rx(r"^vault[ \t]*\{")
+_TEMPLATE_BLOCK = _rx(r"^template[ \t]*\{")
 _MAKE_RULE = _rx(r"^[\w./%-]+(?:[ \t]+[\w./%-]+)*[ \t]*:(?!=)[^\n]*$")
 _MAKE_RECIPE = _rx(r"^\t\S")
 _MAKE_ASSIGN = _rx(r"^[A-Z_][A-Z0-9_]*[ \t]*(?::=|\?=|\+=)")
@@ -276,6 +281,22 @@ TYPES: list[DocType] = [
         "Infrastructure as code",
         lambda t: (
             0.6 if _share(_TFVARS, t) > 0.6 and not _has(_INI_SECTION, t) and '"' in t else 0.0
+        ),
+    ),
+    DocType(
+        "vault-policy",
+        "HashiCorp Vault policy",
+        "Infrastructure as code",
+        lambda t: 0.95 if _has(_VAULT_PATH, t) and _has(_VAULT_CAPABILITIES, t) else 0.0,
+    ),
+    DocType(
+        "vault-agent",
+        "HashiCorp Vault Agent config",
+        "Infrastructure as code",
+        lambda t: (
+            0.9
+            if _has(_VAULT_AUTO_AUTH, t) or (_has(_VAULT_BLOCK, t) and _has(_TEMPLATE_BLOCK, t))
+            else 0.0
         ),
     ),
     DocType(

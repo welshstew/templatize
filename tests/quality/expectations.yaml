@@ -128,3 +128,23 @@ nginx-envsubst:
   loops: {proxy_set_headers: 2}
   want: ["80", shop.example.com, "http://storefront.internal.example.com:3000", "http://orders-api.internal.example.com:8080/", 30s]
   reject: [$host, $remote_addr, host, remote_addr]
+
+vault-policy:
+  # The paths are the values (named by mount); capabilities are permission keywords.
+  loops: {}
+  want: [secret/data/orders/production/*, database/creds/orders-readonly, transit/encrypt/orders-payments]
+  reject: [read, list, update, '["read", "list"]']
+  names: {secret/data/orders/production/*: secret_data_path, database/creds/orders-readonly: database_creds_path}
+
+vault-agent:
+  # Block labels (method "kubernetes", sink "file") and the heredoc marker are structure.
+  loops: {}
+  want: ["https://vault.acme.example.com:8200", /etc/vault/ca.pem, auth/kubernetes-prod, orders-api, /etc/orders/database.env]
+  reject: [<<EOT, kubernetes, file]
+  names: {orders-api: role}
+
+terraform-vault:
+  # Resource labels and references (data.vault_kv_secret_v2...) are not values.
+  loops: {}
+  want: ["https://vault.acme.example.com:8200", platform, secret, orders/production/database, orders-db, orders]
+  reject: [orders_db, vault_kv_secret_v2, kubernetes_secret, 'data.vault_kv_secret_v2.orders_db.data["username"]']

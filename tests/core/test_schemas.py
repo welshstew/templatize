@@ -119,3 +119,22 @@ def test_a_value_made_of_template_expressions_is_not_a_variable() -> None:
         "          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}\n"
     )
     assert not any("${{" in v for v in values(text))
+
+
+def test_hcl_labels_references_and_capabilities_are_structure() -> None:
+    policy = 'path "secret/data/app/*" {\n  capabilities = ["read", "list"]\n}\n'
+    found = values(policy)
+    assert found == {"secret/data/app/*": "secret_data_path"}
+    assert suggest(policy).loops == []
+    tf = (
+        'data "vault_kv_secret_v2" "db" {\n  mount = "secret"\n  name  = "app/db"\n}\n'
+        'resource "kubernetes_secret" "db" {\n  data = {\n'
+        '    password = data.vault_kv_secret_v2.db.data["password"]\n  }\n}\n'
+    )
+    found = values(tf)
+    assert "app/db" in found and "db" not in found
+    assert not any(v.startswith("data.") for v in found)
+    agent = 'auto_auth {\n  method "kubernetes" {\n    mount_path = "auth/k8s"\n  }\n}\n'
+    agent += "template {\n  contents = <<EOT\nx\nEOT\n}\n"
+    found = values(agent)
+    assert "kubernetes" not in found and "<<EOT" not in found and "auth/k8s" in found

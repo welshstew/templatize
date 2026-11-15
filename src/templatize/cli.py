@@ -35,6 +35,7 @@ from templatize.helm import ChartError
 from templatize.helm import build as build_helm_chart
 from templatize.ir import Candidate, IRValidationError
 from templatize.suggest import InputLimitError, SuggestResult, suggest
+from templatize.userschema import SchemaError
 
 
 def _read(path: str) -> str:
@@ -73,6 +74,14 @@ def _print_candidates(res: SuggestResult, min_conf: float) -> None:
     if d is not None:
         how = "confirmed" if d.confirmed else f"detected, {d.confidence:.2f}"
         print(f"document type: {d.label} ({d.id}, {how})")
+    si = res.schema_info
+    if si is not None:
+        if si.reference:
+            print(f"schema reference: {si.reference.url} (not downloaded)")
+        if si.provided:
+            print(f"schema: {si.title or 'supplied'}, {si.matched_fields} field(s) matched")
+        for note in si.notes:
+            print(f"note: {note}")
 
 
 def _select(res: SuggestResult, min_conf: float) -> list[Candidate]:
@@ -91,9 +100,13 @@ def _write_outputs(result: BuildResult, outdir: Path | None, zip_path: Path | No
 
 
 def _suggest(
-    text: str, variants: list[str], llm_url: str | None, document_type: str | None = None
+    text: str,
+    variants: list[str],
+    llm_url: str | None,
+    document_type: str | None = None,
+    schema: str | None = None,
 ) -> SuggestResult:
-    res = suggest(text, variants, document_type=document_type)
+    res = suggest(text, variants, document_type=document_type, schema=schema)
     if not llm_url:
         return res
     # The key comes from the environment, never a flag (shell history, `ps`).
@@ -120,9 +133,19 @@ TYPE_HELP = "confirm the document type (its format rules then apply): " + ", ".j
 )
 
 
+SCHEMA_HELP = (
+    "a JSON Schema (JSON or YAML) the document follows; a schema it references by URL "
+    "is never downloaded"
+)
+
+
 def cmd_suggest(args: argparse.Namespace) -> int:
     res = _suggest(
-        _read(args.file), [_read(v) for v in args.variant], args.llm_url, args.document_type
+        _read(args.file),
+        [_read(v) for v in args.variant],
+        args.llm_url,
+        args.document_type,
+        _read(args.schema) if args.schema else None,
     )
     if args.json:
         print(res.model_dump_json(indent=2))
@@ -138,7 +161,13 @@ def cmd_build(args: argparse.Namespace) -> int:
     if args.vars:
         specs = TypeAdapter(list[VariableSpec]).validate_json(Path(args.vars).read_bytes())
     else:
-        res = _suggest(text, [_read(v) for v in args.variant], args.llm_url, args.document_type)
+        res = _suggest(
+            text,
+            [_read(v) for v in args.variant],
+            args.llm_url,
+            args.document_type,
+            _read(args.schema) if args.schema else None,
+        )
         chosen = _select(res, args.min_confidence)
         if args.no_loops or args.loops:
             specs = specs_from_candidates(chosen)
@@ -251,6 +280,7 @@ def make_parser() -> argparse.ArgumentParser:
     s.add_argument("file", help="input file ('-' for stdin)")
     s.add_argument("--variant", action="append", default=[], help="another example of the document")
     s.add_argument("--type", dest="document_type", metavar="ID", help=TYPE_HELP)
+    s.add_argument("--schema", metavar="FILE", help=SCHEMA_HELP)
     s.add_argument("--json", action="store_true")
     s.add_argument("--min-confidence", type=float, default=0.0)
     s.add_argument("--llm-url", help="llama.cpp server URL for the optional LLM review")
@@ -260,6 +290,7 @@ def make_parser() -> argparse.ArgumentParser:
     b.add_argument("file", help="input file ('-' for stdin)")
     b.add_argument("--variant", action="append", default=[])
     b.add_argument("--type", dest="document_type", metavar="ID", help=TYPE_HELP)
+    b.add_argument("--schema", metavar="FILE", help=SCHEMA_HELP)
     sel = b.add_mutually_exclusive_group(required=True)
     sel.add_argument("--accept-all", action="store_true", help="accept every suggestion")
     sel.add_argument("--vars", help="JSON file with a list of variable specs")
@@ -408,6 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         UnicodeDecodeError,
         OSError,
         UnknownDocumentTypeError,
+        SchemaError,
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

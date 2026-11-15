@@ -86,6 +86,15 @@ export interface SuggestResult {
   profile?: DocumentProfile;
   loops?: LoopCandidate[];
   document_type?: DocumentType | null;
+  schema_info?: SchemaInfo | null;
+}
+
+export interface SchemaInfo {
+  reference: { url: string; source: string } | null;
+  provided: boolean;
+  title: string | null;
+  matched_fields: number;
+  notes: string[];
 }
 
 export interface LoopSpec {
@@ -333,10 +342,25 @@ export const api = {
     if (!resp.ok) throw await errorFrom(resp);
     return (await resp.json()) as Info;
   },
-  suggest: (text: string, variants: string[], documentType: string | null = null, signal?: AbortSignal) =>
-    post<SuggestResult>("/suggest", { text, variants, document_type: documentType }, signal),
-  suggestLlm: (text: string, variants: string[], signal?: AbortSignal, documentType: string | null = null) =>
-    post<LlmReviewResponse>("/suggest/llm", { text, variants, document_type: documentType }, signal),
+  suggest: (
+    text: string,
+    variants: string[],
+    documentType: string | null = null,
+    signal?: AbortSignal,
+    schema: string | null = null,
+  ) => post<SuggestResult>("/suggest", { text, variants, document_type: documentType, schema: schema || null }, signal),
+  suggestLlm: (
+    text: string,
+    variants: string[],
+    signal?: AbortSignal,
+    documentType: string | null = null,
+    schema: string | null = null,
+  ) =>
+    post<LlmReviewResponse>(
+      "/suggest/llm",
+      { text, variants, document_type: documentType, schema: schema || null },
+      signal,
+    ),
   documentTypes: async (): Promise<DocumentTypeInfo[]> => {
     const resp = await fetch("/document-types");
     if (!resp.ok) throw await errorFrom(resp);

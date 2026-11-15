@@ -17,6 +17,9 @@ from templatize.k8s import DocumentProfile, detect_profile, structural_spans
 from templatize.loops import detect_loops, explained_notices
 from templatize.merge import compose_candidates, merge_candidates
 from templatize.schemas import apply as apply_schema
+from templatize.schemas import structure_regions
+from templatize.userschema import SchemaInfo, find_reference, load_schema, without_reference
+from templatize.userschema import apply as apply_user_schema
 
 
 class InputLimitError(ValueError):
@@ -32,6 +35,9 @@ class SuggestResult(BaseModel):
     """Repeated blocks (list items, SQL rows, keyword lines) that can become loops."""
     document_type: DocumentType | None = None
     """What kind of document this is (detected, or confirmed by the caller)."""
+    schema_info: SchemaInfo | None = None
+    """The JSON Schema the document references (not downloaded) and/or the one the
+    caller supplied; None when there is neither."""
 
 
 def check_limits(text: str, variants: Sequence[str] = ()) -> None:
@@ -76,10 +82,12 @@ def suggest(
     variants: Sequence[str] = (),
     detectors: Sequence[Detector] | None = None,
     document_type: str | None = None,
+    schema: str | None = None,
 ) -> SuggestResult:
     """Suggest variables and loops. ``document_type`` (an id from
     :data:`templatize.doctypes.TYPES`) confirms the type: its format rules apply."""
     check_limits(text, variants)
+    user_schema = load_schema(schema) if schema else None  # SchemaError before any work
     doc_type = detect_type(text, confirmed=document_type)
     ctx = DetectionContext(text=text, variants=tuple(variants), doc_type=doc_type)
     raw: list[Candidate] = []
@@ -110,13 +118,37 @@ def suggest(
         ]
     raw = _outside_template_syntax(text, raw)
     raw = apply_schema(text, doc_type, raw)
+    reference = find_reference(text)
+    raw = without_reference(raw, reference)
+    schema_info = SchemaInfo(reference=reference) if reference else None
+    if user_schema is not None:
+        raw, schema_info = apply_user_schema(text, user_schema, raw)
+        schema_info.reference = reference
+    elif reference is not None:
+        schema_info = SchemaInfo(
+            reference=reference,
+            notes=[
+                "the document references a schema; it is not downloaded (offline). "
+                "Supply its text to use it."
+            ],
+        )
     candidates, composed = compose_candidates(text, merge_candidates(raw))
     notices.extend(composed)
     loops = detect_loops(text, variants, taken_names=[c.name for c in candidates])
+    if regions := structure_regions(text, doc_type):
+        # A list made only of structure (a policy's capabilities) is not a loop.
+        loops = [
+            lp
+            for lp in loops
+            if not all(
+                any(r.start <= s.start and s.end <= r.end for r in regions) for s in lp.items
+            )
+        ]
     return SuggestResult(
         candidates=candidates,
         notices=explained_notices(notices, loops),
         profile=profile,
         loops=loops,
         document_type=doc_type,
+        schema_info=schema_info,
     )

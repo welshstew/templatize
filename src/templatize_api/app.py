@@ -40,6 +40,7 @@ from templatize.helm import values as helm_values
 from templatize.helm.chart import CHART_NAME_RE, render_templates
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, IRValidationError
 from templatize.suggest import InputLimitError, SuggestResult, suggest
+from templatize.userschema import SchemaError
 from templatize_api.middleware import BodyLimitMiddleware, SecurityHeadersMiddleware
 from templatize_api.ratelimit import Rate, RateLimitMiddleware, parse_networks
 from templatize_api.schemas import (
@@ -220,7 +221,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     llm_slots = _LlmSlots(settings.llm_concurrency, settings.llm_queue)
 
     def run_suggest(
-        text: str, variants: list[str], document_type: str | None = None
+        text: str,
+        variants: list[str],
+        document_type: str | None = None,
+        schema: str | None = None,
     ) -> SuggestResult:
         """Heuristics, plus the NER service when it is up (it answers in milliseconds;
         if it fails mid-request the result just carries a notice)."""
@@ -236,8 +240,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             )
         try:
-            return suggest(text, variants, detectors=detectors, document_type=document_type)
-        except UnknownDocumentTypeError as exc:
+            return suggest(
+                text, variants, detectors=detectors, document_type=document_type, schema=schema
+            )
+        except (UnknownDocumentTypeError, SchemaError) as exc:
             raise ApiError(422, str(exc)) from None
 
     mcp_routes, mcp_lifespan = _mcp_http(settings)
@@ -311,7 +317,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         Spans are Unicode code-point offsets into ``text``."""
         try:
-            return run_suggest(req.text, req.variants, req.document_type)
+            return run_suggest(req.text, req.variants, req.document_type, req.json_schema)
         except InputLimitError as exc:
             raise ApiError(413, str(exc)) from None
 
@@ -325,7 +331,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.llm_url:
             return LlmReviewResponse(available=False, detail="no LLM configured")
         try:
-            heuristic = run_suggest(req.text, req.variants, req.document_type)
+            heuristic = run_suggest(req.text, req.variants, req.document_type, req.json_schema)
         except InputLimitError as exc:
             raise ApiError(413, str(exc)) from None
         config = LlmConfig(
