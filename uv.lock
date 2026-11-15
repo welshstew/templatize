@@ -1734,6 +1734,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -1768,6 +1769,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
     { name = "jinja2", specifier = ">=3.1.4" },
+    { name = "jsonschema", specifier = ">=4.20" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.3,<3" },
     { name = "numpy", marker = "extra == 'ner'", specifier = ">=2.0" },
     { name = "onnxruntime", marker = "extra == 'ner'", specifier = ">=1.20" },

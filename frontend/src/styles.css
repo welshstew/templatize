@@ -120,6 +120,11 @@ input[aria-invalid="true"] { border-color: var(--fail); }
 .pane-head .doc-type { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9em; color: var(--muted); }
 .pane-head .doc-type select { max-width: 22em; }
 .pane-head .schema-info { cursor: help; }
+.schema-check { margin: 8px 0 0; padding: 8px 10px; border-radius: var(--radius); border: 1px solid var(--border); font-size: 0.9em; }
+.schema-check.ok { color: var(--pass, inherit); }
+.schema-check.problems { color: var(--fail); border-color: var(--fail); background: var(--fail-bg); }
+.schema-check ul { margin: 6px 0 0; padding-left: 20px; }
+.schema-check p { margin: 0; }
 
 /* output panel: engine choice and notes */
 .output .engine { display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 0.9em; color: var(--muted, inherit); margin-bottom: 6px; }

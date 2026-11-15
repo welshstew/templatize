@@ -271,6 +271,15 @@ export interface RenderResponse {
   ok: boolean;
   output: string | null;
   error: string | null;
+  /** The output against its JSON Schema; null when no schema applies. */
+  schema_check?: SchemaCheck | null;
+}
+
+export interface SchemaCheck {
+  ok: boolean;
+  schemas: string[];
+  problems: { document: number; path: string; message: string }[];
+  note: string | null;
 }
 
 export interface DocumentTypeScore {
@@ -371,8 +380,23 @@ export const api = {
   },
   build: (text: string, variables: VariableSpec[], loops: LoopSpec[], engine: string, signal?: AbortSignal) =>
     post<BuildResponse>("/build", { text, variables, loops, engine }, signal),
-  render: (template: string, values: RenderValues, engine: string, signal?: AbortSignal) =>
-    post<RenderResponse>("/render", { template, values, engine }, signal),
+  render: (
+    template: string,
+    values: RenderValues,
+    engine: string,
+    signal?: AbortSignal,
+    check?: { schema: string | null; documentType: string | null },
+  ) =>
+    post<RenderResponse>(
+      "/render",
+      {
+        template,
+        values,
+        engine,
+        ...(check ? { check_schema: true, schema: check.schema || null, document_type: check.documentType } : {}),
+      },
+      signal,
+    ),
   chart: (
     text: string,
     variants: string[],

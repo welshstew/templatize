@@ -940,13 +940,44 @@ The header shows "Bundled schema: Kubernetes: Service, Deployment, 23 fields mat
 suggestion's reason ("runs_on: The type of machine to run the job on"; "replica_count:
 Number of desired pods"). It changes few suggestions on its own: on the 117-document
 corpus, only one (a cloud-init `owner` equal to its default). The heuristics and the
-schema rules already handle these formats. The full schemas are what checking rendered
-output against a schema would build on.
+schema rules already handle these formats. The full schemas are put to most use by
+checking rendered output (below).
 
 **Updating it:** `make schemas` verifies every stored file against `manifest.json`.
 `make schemas-update` re-downloads the pinned sources (commits and release tags) and
 refuses any whose SHA-256 changed. Sources and licences are listed in
 `src/templatize/catalog/LICENSES.md`.
+
+### Checking rendered output against the schema
+
+The **preview** checks its output against the document's schema on every edit, and
+shows either "✓ Valid against Kubernetes Deployment (apps/v1)" or each problem with its
+path. That way a bad value shows before the file is used. For example:
+- `replica_count: three` gives `spec.replicas`: 'three' is not of type 'integer'.
+- A misspelt key gives "Additional properties are not allowed ('containerport' was
+  unexpected)".
+- A workflow job without `runs-on` gives `jobs.deploy`: 'runs-on' is a required
+  property.
+
+**Which schema:** the one in the Schema tab, else the bundled one the output's
+`$schema` names, else the bundled one for the type the document was *analysed* as.
+That's why removing `runs-on` is still checked as a workflow. Each Kubernetes resource
+is checked against its own kind.
+
+**How it reads the output:** YAML 1.2 rules, so `on:` stays a key and dates stay
+strings, as the schemas expect. Broken YAML is reported as such. For `oneOf`/`anyOf`
+failures, the closest alternative's actual problem is shown. At most 20 problems are
+listed.
+
+**Where it's available:**
+- **API:** `check_schema`, `schema` and `document_type` on `POST /render`; the result
+  is in `schema_check`.
+- **MCP:** the same options on `render_template`, which now also takes `engine` and
+  nested list values.
+- **Library:** `templatize.schemacheck.check_output`.
+
+Validation uses the `jsonschema` library (now a core dependency, already in the
+lockfile) and never touches the network.
 
 ## Engines
 

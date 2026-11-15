@@ -14,6 +14,7 @@ from templatize.helm.chart import ChartRoundTrip, ChartTemplate, FilledValue
 from templatize.helm.coverage import CoverageReport
 from templatize.ir import MAX_INPUT_CHARS, MAX_LOOP_ITEMS, MAX_VARIANTS, Loop, Variable
 from templatize.roundtrip import RoundTripResult
+from templatize.schemacheck import SchemaCheck
 
 Document = Annotated[str, Field(max_length=MAX_INPUT_CHARS)]
 MAX_VARIABLES = 2_000
@@ -85,12 +86,22 @@ class RenderRequest(BaseModel):
     engine: str = "jinja2"
     newline: Literal["\n", "\r\n", "\r"] | None = None
     """Line ending for template newlines; detected from the template when omitted."""
+    check_schema: bool = False
+    """Check the output against its JSON Schema (supplied, or bundled for its type)."""
+    json_schema: str | None = Field(default=None, max_length=2_000_000, alias="schema")
+    """The schema to check against; omit to use the bundled one for the document."""
+    document_type: str | None = Field(default=None, max_length=64)
+    """The document's type (as analysed): picks the bundled schema."""
+
+    model_config = {"populate_by_name": True}
 
 
 class RenderResponse(BaseModel):
     ok: bool
     output: str | None = None
     error: str | None = None
+    schema_check: SchemaCheck | None = None
+    """With check_schema: problems of the output against its schema (None: no schema)."""
 
 
 class Limits(BaseModel):

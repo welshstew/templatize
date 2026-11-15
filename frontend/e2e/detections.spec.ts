@@ -217,3 +217,16 @@ test("a Kubernetes manifest gets its bundled schema", async ({ page }) => {
   await analyze(page);
   await expect(page.locator(".schema-info")).toContainText("Bundled schema: Kubernetes Deployment");
 });
+
+test("the preview checks the output against its schema", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("k8s");
+  await analyze(page);
+  await page.getByRole("button", { name: "Accept all", exact: true }).click();
+  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  const check = page.locator(".schema-check");
+  await expect(check).toContainText("Valid against Kubernetes Deployment");
+  await page.getByLabel("Preview value for replica_count").fill("three");
+  await expect(check).toContainText("1 schema problem");
+  await expect(check).toContainText("spec.replicas");
+});

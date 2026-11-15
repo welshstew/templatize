@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 
-import type { BuildResponse, RenderResponse } from "../api.ts";
+import type { BuildResponse, RenderResponse, SchemaCheck } from "../api.ts";
 import { AnsiblePanel, type RoleInput } from "./AnsiblePanel.tsx";
 
 type Tab = "preview" | "template" | "env" | "script" | "ansible";
@@ -42,6 +42,37 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? "Copied" : "Copy"}
     </button>
+  );
+}
+
+/** The preview's output against its JSON Schema: valid, or what is wrong where. */
+function SchemaCheckView({ check }: { check: SchemaCheck }) {
+  const against = check.schemas.join(", ");
+  if (check.ok)
+    return (
+      <p class="schema-check ok" role="status">
+        ✓ Valid against {against}
+        {check.note ? ` (${check.note})` : ""}
+      </p>
+    );
+  return (
+    <div class="schema-check problems" role="status">
+      <p>
+        {check.problems.length
+          ? `✗ ${check.problems.length} schema problem${check.problems.length === 1 ? "" : "s"}${against ? ` (${against})` : ""}`
+          : "✗ Not checked"}
+        {check.note ? `: ${check.note}` : ""}
+      </p>
+      {check.problems.length ? (
+        <ul>
+          {check.problems.map((p, i) => (
+            <li key={i}>
+              <code>{p.path}</code>: {p.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
@@ -94,6 +125,7 @@ export function OutputPanel({
             <CopyButton text={preview.output ?? ""} />
             <pre class="code">{preview.output}</pre>
           </div>
+          {preview.schema_check ? <SchemaCheckView check={preview.schema_check} /> : null}
         </>
       );
   } else {
