@@ -1,0 +1,13 @@
+Subject: [Resolved] Elevated error rates on the Payments API
+
+Between 09:40 and 10:15 UTC on 2 December 2026, the Payments API returned errors for
+roughly 12% of requests in the eu-central-1 region. The Checkout Service retried
+automatically, so most customers were not affected.
+
+Root cause: a configuration change to the Ledger Service connection pool reduced the
+maximum connections from 200 to 20. The change has been rolled back.
+
+Incident commander: Daniel Brooks
+Next update: none, this incident is closed.
+
+The Acme Platform team

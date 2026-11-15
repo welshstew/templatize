@@ -307,7 +307,9 @@ PATTERNS: list[Pattern] = [
         "regex.size",
         VarType.STRING,
         # Data sizes: "512Mi", "900MiB", "12G", "8GB" (Kubernetes, configs, prose).
-        re.compile(r"(?<![\w.-])\d+(?:\.\d+)?(?:[KMGTP]i?B?|[KMGT]|kB)(?![\w-])"),
+        re.compile(
+            r"(?<![\w.-])\d+(?:\.\d+)?(?:[KMGTP]i?B?|[KMGT]|kB|[ ](?:[KMGTP]i?B|kB))(?![\w-])"
+        ),
         0.6,
         name="size",
     ),
@@ -333,7 +335,10 @@ PATTERNS: list[Pattern] = [
         "regex.reference",
         VarType.STRING,
         # Ticket, order and document references: "INC-20931", "#A-778213", "PO-55821".
-        re.compile(r"(?<![\w-])#?([A-Z]{1,6}-\d{3,}(?:-\d+)*)(?![\w-])"),
+        re.compile(
+            r"(?<![\w-])#?(?!(?:SHA|MD|AES|RSA|ISO|UTF|TLS|SSL|RFC|ECDSA|ED|HS|RS|ES|PS)-\d)"
+            r"([A-Z]{1,6}-\d{3,}(?:-\d+)*)(?![\w-])"
+        ),
         0.75,
         group=1,
         name="reference",
@@ -361,10 +366,49 @@ PATTERNS: list[Pattern] = [
         name="amount",
     ),
     Pattern(
+        "regex.log_timestamp",
+        VarType.DATETIME,
+        # Apache/nginx access logs "[03/Dec/2026:14:22:09 +0000]" and syslog line starts
+        # "Dec  3 14:30:01".
+        re.compile(
+            r"(?<=\[)\d{2}/[A-Z][a-z]{2}/\d{4}:\d{2}:\d{2}:\d{2}(?: [+-]\d{4})?(?=\])"
+            r"|^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{2}:\d{2}:\d{2}(?!\S)",
+            re.MULTILINE,
+        ),
+        0.8,
+        name="timestamp",
+    ),
+    Pattern(
+        "regex.image",
+        VarType.STRING,
+        # Container images with a registry and a tag: "registry.acme.example.com/payments/
+        # checkout:2.14.0", "ghcr.io/acme/api:1.4" (kept whole, not a host and a version).
+        re.compile(
+            r"(?<![\w./:@-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d{2,5})?"
+            r"(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)+(?::[\w][\w.-]{0,127}|@sha256:[0-9a-f]{64})"
+            r"(?![\w./:@-])"
+            # Docker Hub "grafana/grafana:11.3.1", "bitnami/kubectl:1.31" (a tag with a digit).
+            r"|(?<![\w./:@~-])[a-z0-9]+(?:[._-][a-z0-9]+)*/[a-z0-9]+(?:[._-][a-z0-9]+)*"
+            r":(?=[\w.-]*\d)[\w][\w.-]{0,127}(?![\w./:@-])"
+        ),
+        0.8,
+        name="image",
+    ),
+    Pattern(
+        "regex.aws_id",
+        VarType.STRING,
+        # EC2/VPC resource IDs: "snap-0d4e8f1a2b3c4d5e6", "sg-0a1b2c3d", "i-0123456789abcdef0".
+        re.compile(
+            r"(?<![\w-])(ami|snap|vol|i|sg|subnet|vpc|eni|igw|nat|rtb|eipalloc|tgw|vpce|lt|acl)"
+            r"-(?=[0-9a-f]*\d)(?:[0-9a-f]{17}|[0-9a-f]{8})(?![\w-])"
+        ),
+        0.8,
+    ),
+    Pattern(
         "regex.datetime",
         VarType.DATETIME,
         re.compile(
-            r"(?<![\w-])\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
+            r"(?<![\w/-])\d{4}([-/])\d{2}\1\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
             r"(?:Z|[+-]\d{2}:?\d{2})?(?![\w:])"
         ),
         0.8,
@@ -384,7 +428,7 @@ PATTERNS: list[Pattern] = [
     Pattern(
         "regex.date_iso",
         VarType.DATE,
-        re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?![\w-])"),
+        re.compile(r"(?<![\w/-])\d{4}([-/])\d{2}\1\d{2}(?![\w/-])"),
         0.8,
         _valid_iso_date,
     ),
@@ -435,6 +479,50 @@ PATTERNS: list[Pattern] = [
         ),
         0.75,
         group=2,
+    ),
+    Pattern(
+        "regex.account_ending",
+        VarType.STRING,
+        # "your account ending 4471", "card ending in 0042": the last digits of a number.
+        re.compile(
+            r"\b(?:account|card|number)[ \t]+ending[ \t]+(?:in[ \t]+|with[ \t]+)?(\d{2,6})\b", re.I
+        ),
+        0.8,
+        group=1,
+    ),
+    Pattern(
+        "regex.company_number",
+        VarType.STRING,
+        # "registered in England and Wales under number 09876543", "Company No. 01234567".
+        re.compile(
+            r"\b(?:[Rr]egistered|[Cc]ompany|[Rr]egistration)\b[^.\n]{0,60}?\b(?:[Nn]umber|[Nn]o\.?)"
+            r"[ \t:]*\r?\n?[ \t]*([A-Z]{0,2}\d{6,10})\b"
+        ),
+        0.8,
+        group=1,
+        name="company_number",
+    ),
+    Pattern(
+        "regex.payment_reference",
+        VarType.STRING,
+        # "with the reference RENT DEC 26", "Reference: INV 2026 0412" (bank statements).
+        re.compile(
+            r"\bwith (?:the )?reference[ \t]+([A-Z0-9][A-Z0-9 /-]{0,30}[A-Z0-9])(?=[.,;]?[ \t]*(?:\r?\n|$))",
+            re.MULTILINE,
+        ),
+        0.75,
+        group=1,
+        name="payment_reference",
+    ),
+    Pattern(
+        "regex.checksum",
+        VarType.STRING,
+        # A hex digest on its own: MD5 (32), SHA-1 (40), SHA-256 (64), SHA-512 (128).
+        re.compile(
+            r"(?<![\w:/.-])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)(?:[0-9a-f]{128}|[0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32})(?![\w/.-])"
+        ),
+        0.7,
+        name="checksum",
     ),
     Pattern(
         "regex.semver",
@@ -515,6 +603,11 @@ class RegexDetector:
                     name = f"{unit.group(1)}s" if unit else "duration"
                 if pat.detector == "regex.access_code":
                     name = snake_case(m.group(1))
+                if pat.detector == "regex.account_ending":
+                    kind = m.group(0).split()[0].lower()
+                    name = f"{kind}_last_digits"
+                if pat.detector == "regex.aws_id":
+                    name = _AWS_ID_NAMES.get(m.group(1), f"{m.group(1)}_id")
                 out.append(
                     Candidate(
                         name=name,
@@ -528,11 +621,165 @@ class RegexDetector:
                         reason=f"looks like {pat.type.value}",
                     )
                 )
+        out.extend(_short_versions(text))
+        if text.startswith("#!"):
+            eol = text.find("\n")
+            first_line_end = len(text) if eol < 0 else eol
+            out = [c for c in out if c.spans[0].start >= first_line_end]  # #!/usr/bin/env bash
         out = [c for c in out if not (c.type is VarType.TIME and _port_mapping(text, c.spans[0]))]
         out = [c for c in out if not (c.type is VarType.HOSTNAME and _is_key(text, c.spans[0]))]
         out = _drop_inner(_shared_hosts(text, _split_shared_datetimes(out)))
-        out = _context_names(text, _line_labels(text, _name_ranges(text, out)))
+        out = _amount_ranges(
+            text, _context_names(text, _line_labels(text, _name_ranges(text, out)))
+        )
         return DetectorResult(candidates=out)
+
+
+_AWS_ID_NAMES = {
+    "ami": "ami_id",
+    "snap": "snapshot_id",
+    "vol": "volume_id",
+    "i": "instance_id",
+    "sg": "security_group_id",
+    "subnet": "subnet_id",
+    "vpc": "vpc_id",
+    "eni": "network_interface_id",
+    "igw": "internet_gateway_id",
+    "nat": "nat_gateway_id",
+    "rtb": "route_table_id",
+    "eipalloc": "eip_allocation_id",
+    "tgw": "transit_gateway_id",
+    "vpce": "vpc_endpoint_id",
+    "lt": "launch_template_id",
+    "acl": "network_acl_id",
+}
+
+# "Elasticsearch 7.17", "PostgreSQL 14.11 to 16.6", "Python 3.12": a two-part version
+# after a product name (three-part ones are semver).
+_SHORT_VERSION = re.compile(
+    r"\b([A-Z][A-Za-z]*[a-z][A-Za-z]*|[A-Z]{2,}[a-z]*|[a-z]{1,4}[A-Z][A-Za-z]*)[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w|[ \t]*%)"
+    r"(?:[ \t]+(?:to|and|or|->|\u2192)[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w))?"
+)
+# "upgrade ... from 14.11 to 16.6": both ends of an upgrade.
+_VERSION_RANGE = re.compile(
+    r"\bfrom[ \t]+v?(\d{1,4}\.\d{1,4})[ \t]+to[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w)"
+)
+_VERSION_CONTEXT = re.compile(r"\b(?:upgrad|migrat|version|releas|downgrad|bump|updat)", re.I)
+# Words that number things, not products: "Section 4.2", "Total 45.00", "Step 1.5".
+_NOT_PRODUCTS = frozenset(
+    [
+        "section",
+        "table",
+        "figure",
+        "fig",
+        "chapter",
+        "step",
+        "page",
+        "item",
+        "note",
+        "rule",
+        "article",
+        "clause",
+        "paragraph",
+        "appendix",
+        "level",
+        "phase",
+        "tier",
+        "grade",
+        "room",
+        "unit",
+        "floor",
+        "part",
+        "question",
+        "exercise",
+        "total",
+        "subtotal",
+        "vat",
+        "tax",
+        "price",
+        "amount",
+        "balance",
+        "score",
+        "rating",
+        "about",
+        "approximately",
+        "approx",
+        "around",
+        "over",
+        "under",
+        "only",
+        "just",
+        "from",
+        "to",
+        "and",
+        "or",
+        "the",
+        "by",
+        "at",
+        "of",
+        "in",
+        "is",
+        "was",
+        "be",
+        "usd",
+        "gbp",
+        "eur",
+        "chf",
+        "jpy",
+        "aud",
+        "cad",
+        "lines",
+        "line",
+        "row",
+        "col",
+        "column",
+    ]
+)
+
+
+def _version_candidate(text: str, start: int, end: int, name: str, why: str) -> Candidate:
+    return Candidate(
+        name=name,
+        name_origin="context",
+        type=VarType.STRING,
+        value=text[start:end],
+        spans=[Span(start=start, end=end)],
+        sources=[Source.REGEX],
+        detectors=["regex.version"],
+        confidence=0.6,
+        reason=why,
+    )
+
+
+def _short_versions(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    seen: set[int] = set()
+    for m in _SHORT_VERSION.finditer(text):
+        product = m.group(1)
+        if product.lower() in _NOT_PRODUCTS or text[m.start(2) - 1] in "$£€¥":
+            continue
+        low = product.lower()
+        # "Version 2.1", "Released 1.4", "Using 3.12": the word is not the product.
+        generic = low in ("version", "release", "ver") or low.endswith(("ed", "ing"))
+        name = "version" if generic else f"{snake_case(product)}_version"
+        if m.group(3):
+            for g, end_name in ((2, f"{name}_from"), (3, f"{name}_to")):
+                out.append(
+                    _version_candidate(text, m.start(g), m.end(g), end_name, f"{product} version")
+                )
+                seen.add(m.start(g))
+        else:
+            out.append(_version_candidate(text, m.start(2), m.end(2), name, f"{product} version"))
+            seen.add(m.start(2))
+    for m in _VERSION_RANGE.finditer(text):
+        if m.start(1) in seen:
+            continue
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        if not _VERSION_CONTEXT.search(text, line_start, m.start()):
+            continue
+        out.append(_version_candidate(text, m.start(1), m.end(1), "from_version", "upgraded from"))
+        out.append(_version_candidate(text, m.start(2), m.end(2), "to_version", "upgraded to"))
+    return out
 
 
 # "from 14:00 to 15:30", "9 July - 12 July", "between 9:00 and 10:00": the ends of a range
@@ -553,6 +800,8 @@ _WHOLE = frozenset(
         "regex.date_text",
         "regex.phone",
         "regex.arn",
+        "regex.log_timestamp",
+        "regex.image",
     }
 )
 
@@ -591,6 +840,7 @@ def _shared_hosts(text: str, found: list[Candidate]) -> list[Candidate]:
         for c in found
         if not (c.detectors[0] == "regex.host_port" and c.value.rpartition(":")[0] in shared)
     ]
+    taken = {(o.spans[0].start, o.spans[0].end) for o in out}
     for host in shared:
         for c in by_host[host]:
             s = c.spans[0]
@@ -598,7 +848,8 @@ def _shared_hosts(text: str, found: list[Candidate]) -> list[Candidate]:
             port_span = Span(start=host_span.end + 1, end=s.end)
             kind = VarType.IPV4 if host.replace(".", "").isdigit() else VarType.HOSTNAME
             for span, vtype in ((host_span, kind), (port_span, VarType.PORT)):
-                if not any(o.spans[0] == span for o in out):
+                if (span.start, span.end) not in taken:
+                    taken.add((span.start, span.end))
                     out.append(
                         Candidate(
                             name=type_name(vtype),
@@ -718,6 +969,35 @@ _CONTEXT_SKIP = frozenset(
         "re",
         "fw",
         "fwd",
+        "from",
+        "between",
+        "per",
+        "now",
+        "currently",
+        "only",
+        "still",
+        "than",
+        "larger",
+        "smaller",
+        "bigger",
+        "more",
+        "less",
+        "exceeds",
+        "exceeding",
+        "least",
+        "most",
+        "about",
+        "around",
+        "roughly",
+        "approximately",
+        "approx",
+        "up",
+        "over",
+        "under",
+        "nearly",
+        "almost",
+        "max",
+        "min",
     ]
 )
 _SIZE_WORDS = frozenset(
@@ -759,6 +1039,8 @@ def _context_names(text: str, found: list[Candidate]) -> list[Candidate]:
         s = c.spans[0]
         line_start = text.rfind("\n", 0, s.start) + 1
         before = text[line_start : s.start]
+        if kind in ("reference", "id") and "(" in before and ")" not in before[before.rfind("(") :]:
+            before = before[before.rfind("(") + 1 :]  # "(PAY-1183)": not the word before "("
         word = None
         for _ in range(4):
             m = _WORD_BEFORE.search(before)
@@ -797,6 +1079,31 @@ def _port_mapping(text: str, s: Span) -> bool:
     line_end = text.find("\n", s.end)
     rest = text[s.end : len(text) if line_end < 0 else line_end]
     return bool(_PORT_ITEM.match(text[line_start : s.start])) and rest.strip(" \t\"'\r") == ""
+
+
+def _amount_ranges(text: str, found: list[Candidate]) -> list[Candidate]:
+    """ "£75,000 to £90,000": the two ends of an amount range, ``salary_min`` and ``salary_max``."""
+    amounts = sorted(
+        (c for c in found if c.detectors[0] == "regex.amount"), key=lambda c: c.spans[0].start
+    )
+    names: dict[int, str] = {}
+    for a, b in itertools.pairwise(amounts):
+        gap = text[a.spans[0].end : b.spans[0].start]
+        if id(a) in names or not _RANGE_BETWEEN.match(gap.rstrip("$£€¥ ")):
+            continue
+        if gap.strip(" $£€¥") == "and" and not text[: a.spans[0].start].rstrip(
+            " $£€¥"
+        ).lower().endswith("between"):
+            continue  # "£580.00 and £116.00": two amounts, not a range
+        base = a.name if a.name_origin == "context" else "amount"
+        base = base.removesuffix("_amount") if base != "amount" else base
+        names[id(a)], names[id(b)] = f"{base}_min", f"{base}_max"
+    return [
+        c.model_copy(update={"name": names[id(c)], "name_origin": "context"})
+        if id(c) in names
+        else c
+        for c in found
+    ]
 
 
 def _name_ranges(text: str, found: list[Candidate]) -> list[Candidate]:

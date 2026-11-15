@@ -1,0 +1,12 @@
+Your electricity bill
+
+Account number: 8821 4470 19
+Bill date: 2 December 2026
+Billing period: 1 November 2026 to 30 November 2026
+
+Electricity used: 312 kWh
+Unit rate: 24.50p per kWh
+Standing charge: 60.10p per day
+
+Amount due: £94.53
+Payment will be taken by Direct Debit on 16 December 2026.

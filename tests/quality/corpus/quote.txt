@@ -1,0 +1,17 @@
+QUOTATION Q-2026-1187
+
+Prepared for: Harlow Dental Group
+Attn: Dr. Emma Clarke
+Valid until: 31 December 2026
+
+Item                              Qty    Unit price      Total
+Managed backup (per server)         8       £45.00     £360.00
+Firewall support (monthly)          1      £220.00     £220.00
+
+Subtotal: £580.00
+VAT (20%): £116.00
+Total: £696.00
+
+Kind regards,
+Oliver Grant
+Account Manager, Northgate IT Services

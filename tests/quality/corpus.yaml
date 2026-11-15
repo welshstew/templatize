@@ -335,3 +335,178 @@ haproxy_backend.cfg:
   want: [api_servers, leastconn]
   reject: [backend, check]
   loops: {servers: 3}
+
+# Fifth batch: logs, incident and change notes, meeting notes, a job posting, a quote.
+
+nginx_access.log:
+  want: [10.12.4.77, "03/Dec/2026:14:22:09 +0000", https://portal.example.com/login, 192.0.2.18, /api/v2/sessions]
+  reject: [Mozilla/5.0, Linux, x86_64, HTTP/2.0, "03", "14:22:09"]
+  names: {"03/Dec/2026:14:22:09 +0000": timestamp}
+
+syslog:
+  want: ["Dec  3 14:30:01", web-03, s3://acme-backups-prod, 198.51.100.23]
+  reject: ["Dec  3", "14:30:01"]
+  loops: {}
+  names: {"Dec  3 14:30:01": timestamp}
+
+status_update.txt:
+  want: [Payments API, Checkout Service, Ledger Service, eu-central-1, 2 December 2026, "09:40", "10:15", Daniel Brooks]
+  reject: []
+  names: {Ledger Service: ledger_service, "09:40": start_time, "10:15": end_time}
+  occurrences: {Payments API: 2}
+
+job_posting.md:
+  want: [Senior Site Reliability Engineer, "Manchester, UK", "75,000", "90,000", Platform Engineering, Brightwave, Grace Liu, europe-west2, 31 January 2027]
+  reject: ["Manchester, UK (hybrid, 2 days in the office)", "£75,000 – £90,000"]
+  names: {"Manchester, UK": location, "75,000": salary_min, "90,000": salary_max, Grace Liu: manager_name, Brightwave: company}
+
+meeting_notes.md:
+  want: [4 December 2026, Priya Nair, Tom, Okoro, Lena, Fischer, Search Service, "7.17", "2.18", 1.2 TB, 15 January 2027, "4,000"]
+  reject: ["Priya Nair, Tom Okoro, Lena Fischer"]
+  occurrences: {Tom: 3, Lena: 3}
+  names: {"7.17": elasticsearch_version, 1.2 TB: index_size, Tom: attendee_2_first_name, Priya Nair: attendee_1_name}
+
+change_request.txt:
+  want: [CHG-30871, Marcus Webb, marcus.webb@acme.example.com, Customer Portal, production, "2026-12-06 22:00", "2026-12-07 01:00", db-portal-01.prod.acme.internal, "14.11", "16.6", snap-0d4e8f1a2b3c4d5e6, Sofia Martins]
+  reject: []
+  names: {"14.11": from_version, "16.6": to_version, snap-0d4e8f1a2b3c4d5e6: snapshot_id}
+
+k8s_events.txt:
+  want: [registry.acme.example.com/payments/checkout:2.14.0, 3f1e2d4c-aaaa-bbbb-cccc-111122223333]
+  reject: [Warning, Normal, registry.acme.example.com, 2.14.0]
+  names: {registry.acme.example.com/payments/checkout:2.14.0: image}
+
+quote.txt:
+  want: [Q-2026-1187, Harlow Dental Group, Dr. Emma Clarke, 31 December 2026, £580.00, £696.00, Oliver Grant, Account Manager, Northgate IT Services]
+  reject: ["Account Manager, Northgate IT Services"]
+  names: {Account Manager: sender_title, Northgate IT Services: sender_company}
+
+slack_message.txt:
+  want: [billing-service, "21:00", "21:15", Hannah Kim, "#billing-eng"]
+  reject: []
+  names: {Hannah Kim: contact_name}
+
+docker_compose_override.yml:
+  want: [registry.acme.example.com/shop/api:5.3.0, debug, "new-checkout,fast-search"]
+  reject: [registry.acme.example.com, 5.3.0]
+
+# Sixth batch: GitLab CI, a booking, a postmortem, Kafka, a contract, Ansible vars,
+# a server CSV, .npmrc, a bank notice, Helm values.
+
+gitlab-ci.yml:
+  want: [registry.gitlab.example.com/acme/storefront, storefront-prod, "docker:27.3", "bitnami/kubectl:1.31", production, https://shop.acme.example.com]
+  reject: [CI_COMMIT_SHORT_SHA, $CI_COMMIT_SHORT_SHA]
+
+booking_confirmation.txt:
+  want: [QX7R2M, Daniel, Okafor, BA 2491, London Gatwick, Lisbon, Friday 12 February 2027, "07:15", "10:05", 14C, £184.60]
+  reject: []
+  names: {Daniel: recipient_first_name, Okafor: recipient_last_name}
+
+postmortem.md:
+  want: [18 November 2026, Ines, Carvalho, Raj, Malhotra, SEV-2, "13:02", "13:47", checkout-api, payments, v4.18.0, 2 GiB, "#payments-oncall", CheckoutErrorRate, v4.17.3, PAY-1182, PAY-1183, 512 MiB]
+  reject: ["Ines Carvalho, Raj Malhotra"]
+  occurrences: {Raj: 3, Ines: 2}
+  names: {Raj: author_2_first_name, Malhotra: author_2_last_name, PAY-1183: reference, CheckoutErrorRate: alert}
+
+kafka.properties:
+  want: ["kafka-1.internal:9092", "kafka-2.internal:9092", "kafka-3.internal:9092", SASL_SSL, SCRAM-SHA-512, orders-consumers, earliest, "500"]
+  reject: []
+
+contract_excerpt.txt:
+  want: [1 March 2027, Halden Robotics Ltd, "09876543", "22 Mill Lane, Cambridge CB2 1RX", Quayside Software Ltd, "5 Dock Street, Leeds LS10 1JF", "12,000", Amelia Ward, Chief Operating Officer, Jonas Berg, Managing Director]
+  reject: [Agreement, Client, Supplier]
+  occurrences: {Halden Robotics Ltd: 2, Quayside Software Ltd: 2}
+  names: {Halden Robotics Ltd: client_company, Quayside Software Ltd: supplier_company, "22 Mill Lane, Cambridge CB2 1RX": client_address, "5 Dock Street, Leeds LS10 1JF": supplier_address, "09876543": company_number, Amelia Ward: signatory_name}
+
+ansible_vars.yml:
+  want: [deploy, www-data, /srv/storefront, "8000", "16", storefront, shop.acme.example.com, www.shop.acme.example.com, ops@acme.example.com]
+  reject: ["{{ vault_postgres_password }}", vault_postgres_password]
+
+servers.csv:
+  want: [10.10.1.11, 10.10.1.12, 10.10.2.21]
+  reject: []
+  loops: {rows: 3}
+
+npmrc:
+  want: [https://npm.acme.example.com/, npm_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8]
+  reject: []
+
+bank_notice.txt:
+  want: [Hughes, "1,250.00", "4471", 3 December 2026, KESTREL HOMES LTD, RENT DEC 26, "3,812.44", 0345 600 1234]
+  reject: []
+  names: {"4471": account_last_digits, KESTREL HOMES LTD: payer_name, RENT DEC 26: payment_reference, "3,812.44": balance}
+
+helm_values.yaml:
+  want: ["3", ghcr.io/acme/notifications, 2.7.1, nginx, notify.acme.example.com, notify-tls, 500m, 256Mi]
+  reject: []
+  occurrences: {notify.acme.example.com: 2}
+
+# Seventh batch: command output and operations text.
+
+docker_run.sh:
+  want: [grafana, "3000", Gr4f4n4!2026, https://grafana.acme.example.com, /srv/grafana, unless-stopped, "grafana/grafana:11.3.1"]
+  reject: [/usr/bin/env, 11.3.1]
+  names: {"grafana/grafana:11.3.1": image, Gr4f4n4!2026: gf_security_admin_password}
+
+tf_plan.txt:
+  want: [ami-0c55b159cbfafe1f0, t3.large, subnet-0a1b2c3d4e5f67890]
+  reject: ["1 to add, 0 to change, 0 to destroy."]
+  names: {t3.large: instance_type}
+
+github_issue.md:
+  want: [Safari, "18.1", 3.4.2, "15.1", "@mkowalski", https://app.acme.example.com/login, test-user@acme.example.com, "2026-12-04T10:12:44.118Z", req_8Kq2Zt, "auth-svc:7000", 30s]
+  reject: []
+  names: {"18.1": safari_version, req_8Kq2Zt: request_id}
+
+alert_rule.yaml:
+  want: [payments, CheckoutHighLatency, 10m, page, https://runbooks.acme.example.com/checkout-latency]
+  reject: []
+
+aws_cli.json:
+  want: [orders-prod, db.r6g.xlarge, postgres, "16.4", orders-prod.c9akciq32.eu-west-1.rds.amazonaws.com, "5432", "500"]
+  reject: []
+  names: {orders-prod.c9akciq32.eu-west-1.rds.amazonaws.com: endpoint_address}
+
+systemd_timer.timer:
+  want: [Nightly database backup, "*-*-* 02:30:00", 15min, timers.target]
+  reject: []
+
+nginx_error.log:
+  want: ["2026/12/04 10:15:02", 203.0.113.9, api.acme.example.com, "http://10.0.3.14:8080/v1/health"]
+  reject: ["10:15:02"]
+  names: {"2026/12/04 10:15:02": timestamp}
+  occurrences: {api.acme.example.com: 3}
+
+oncall_handover.txt:
+  want: [Sam Rivera, Priya Desai, INC-4412, vpn.acme.example.com, 20 December 2026, +44 20 7946 0123]
+  reject: []
+
+# Eighth batch: everyday letters and notices, a device config, a release note.
+
+appointment.txt:
+  want: [Patel, Hannah Moore, Tuesday 19 January 2027 at 09:20, 0161 496 0321, 943 476 5919]
+  reject: []
+  names: {Hannah Moore: doctor_name, 943 476 5919: nhs_number}
+
+utility_bill.txt:
+  want: [8821 4470 19, 2 December 2026, 1 November 2026, 30 November 2026, 312 kWh, £94.53, 16 December 2026]
+  reject: []
+  names: {1 November 2026: start_date, 30 November 2026: end_date}
+
+school_letter.txt:
+  want: [Thursday 4 February 2027, 8:45am, 3:30pm, "18", 22 January 2027, J. Thompson, Headteacher, Oakfield Primary School]
+  reject: ["Parents and Carers,", will need a packed lunch and a waterproof coat.]
+  names: {J. Thompson: sender_name, Oakfield Primary School: sender_company}
+
+mqtt_device.conf:
+  want: [gw-lon-0042, mqtt.iot.acme.example.com, "8883", sites/london/floor-3/temperature, 30s, /etc/gateway/ca.pem]
+  reject: []
+
+release_tag.txt:
+  want: [v2.9.0, staging, "1.23", "22.11", https://github.com/acme/acme-cli/releases/tag/v2.9.0, 4e1b9a2c7d0f3e6b8a5c2d9f1e0b7a4c6d3f8e2b1a9c0d7e5f4b3a2c1d0e9f8a]
+  reject: [SHA-256]
+  names: {4e1b9a2c7d0f3e6b8a5c2d9f1e0b7a4c6d3f8e2b1a9c0d7e5f4b3a2c1d0e9f8a: checksum}
+
+known_hosts_note.md:
+  want: [~/.ssh/config, buildbox, 10.20.0.15, ci, "2201"]
+  reject: [run `ssh buildbox` and check the fingerprint is]

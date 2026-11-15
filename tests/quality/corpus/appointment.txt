@@ -1,0 +1,11 @@
+Appointment reminder
+
+Dear Mr Patel,
+
+This is a reminder of your appointment with Dr. Hannah Moore at Riverside Medical
+Centre on Tuesday 19 January 2027 at 09:20.
+
+Please arrive 10 minutes early. If you need to cancel, call 0161 496 0321 at least
+24 hours before.
+
+NHS number: 943 476 5919

@@ -1,0 +1,4 @@
+hostname,ip,role,datacenter
+web-01,10.10.1.11,web,lon1
+web-02,10.10.1.12,web,lon1
+db-01,10.10.2.21,database,lon1

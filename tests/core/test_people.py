@@ -163,7 +163,11 @@ def test_no_greeting_or_no_name_no_recipient() -> None:
 @pytest.mark.parametrize("date", ["3 March 2026", "March 3, 2026", "2026-03-03", "03/03/2026"])
 def test_letter_date(date: str) -> None:
     text = f"Northwind Ltd\n\n{date}\n\nDear Sarah,\n\nSee you on 9 July 2026.\n"
-    assert people(text) == {"letter_date": date, "recipient_first_name": "Sarah"}
+    assert people(text) == {
+        "letter_date": date,
+        "recipient_first_name": "Sarah",
+        "sender_company": "Northwind Ltd",  # the letterhead
+    }
 
 
 def test_no_letter_date_without_a_greeting_or_in_prose() -> None:
