@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -24,3 +26,17 @@ def variants_for(path: Path) -> list[str]:
 def fixture_path(request: pytest.FixtureRequest) -> Path:
     path: Path = request.param
     return path
+
+
+# External tools some tests run for real (helm template, ansible-playbook, kompose).
+# Locally they are optional and those tests skip; CI sets TEMPLATIZE_REQUIRE_TOOLS=1 so
+# a missing tool fails the run instead of quietly skipping the tests.
+REQUIRED_TOOLS = ("helm", "ansible-playbook", "kompose")
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    if os.environ.get("TEMPLATIZE_REQUIRE_TOOLS") != "1":
+        return
+    missing = [t for t in REQUIRED_TOOLS if shutil.which(t) is None]
+    if missing:
+        raise pytest.UsageError(f"TEMPLATIZE_REQUIRE_TOOLS=1 but not on PATH: {', '.join(missing)}")
