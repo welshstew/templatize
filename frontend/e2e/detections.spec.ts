@@ -210,3 +210,10 @@ test("a referenced schema is reported; a pasted one is applied", async ({ page }
   expect(values).toContain("internal-api");
   expect(values).not.toContain("2");
 });
+
+test("a Kubernetes manifest gets its bundled schema", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("k8s");
+  await analyze(page);
+  await expect(page.locator(".schema-info")).toContainText("Bundled schema: Kubernetes Deployment");
+});

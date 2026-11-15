@@ -152,6 +152,8 @@ class Field:
     list_size: int = 0
     """Items in the nearest enclosing list (0: not in a list). A list of several items
     is offered as a loop, so ``suggest`` rules on list items only add a one-item list."""
+    doc: int = 0
+    """Index of the YAML document (``---``) the field is in."""
 
 
 def _value_span(node: ScalarNode) -> Span | None:
@@ -166,6 +168,8 @@ def fields(text: str) -> list[Field]:
     values are spanned without their quotes; block scalars (``|``) are left out."""
     out: list[Field] = []
 
+    doc = 0
+
     def walk(node: Node, path: tuple[str, ...], size: int) -> None:
         if isinstance(node, MappingNode):
             for k, v in node.value:
@@ -177,14 +181,15 @@ def fields(text: str) -> list[Field]:
         elif isinstance(node, ScalarNode) and node.style not in ("|", ">"):
             span = _value_span(node)
             if span is not None and text[span.start : span.end] == node.value:
-                out.append(Field(path, span, node.value, size))
+                out.append(Field(path, span, node.value, size, doc))
 
     if len(text) > MAX_CHARS:
         return []
     try:
-        for doc in yaml.compose_all(text, Loader=yaml.SafeLoader):
-            if doc is not None:
-                walk(doc, (), 0)
+        for i, root in enumerate(yaml.compose_all(text, Loader=yaml.SafeLoader)):
+            doc = i
+            if root is not None:
+                walk(root, (), 0)
     except (yaml.YAMLError, ValueError, RecursionError):
         return []
     return out

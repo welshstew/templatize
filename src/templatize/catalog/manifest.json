@@ -1,0 +1,477 @@
+{
+  "about": "Bundled JSON Schemas, pinned; made with scripts/fetch-schemas.py --update. Never fetched at runtime.",
+  "schemas": [
+    {
+      "id": "github-workflow",
+      "title": "GitHub Actions workflow",
+      "doc_type": "github-actions",
+      "names": [
+        "github-workflow"
+      ],
+      "source": "https://raw.githubusercontent.com/SchemaStore/schemastore/e2606e03284e60792672dc9e7e930f3c496c5c3d/src/schemas/json/github-workflow.json",
+      "license": "Apache-2.0 (SchemaStore)",
+      "file": "github-workflow.json.gz",
+      "sha256": "0528a890c1a6f4209444c421dbb752888a934a540f2a677146d78ed7f2321cbf",
+      "file_sha256": "84625a0138a962bf10dba21cb9976702e797836c679ffe9392a4897eb81eb844"
+    },
+    {
+      "id": "github-action",
+      "title": "GitHub Action metadata (action.yml)",
+      "names": [
+        "github-action"
+      ],
+      "source": "https://raw.githubusercontent.com/SchemaStore/schemastore/e2606e03284e60792672dc9e7e930f3c496c5c3d/src/schemas/json/github-action.json",
+      "license": "Apache-2.0 (SchemaStore)",
+      "file": "github-action.json.gz",
+      "sha256": "224326cc5a334bdb97b56b6fc320cd4381ba7d61b477b425ed506e6a420b52ba",
+      "file_sha256": "7899fd24cbed63e39ca07bcdbe3d87fd6da7eadefd160d5a3fd1a00db91a51c7"
+    },
+    {
+      "id": "gitlab-ci",
+      "title": "GitLab CI pipeline",
+      "doc_type": "gitlab-ci",
+      "names": [
+        "gitlab-ci",
+        "ci"
+      ],
+      "source": "https://gitlab.com/gitlab-org/gitlab/-/raw/v18.11.14-ee/app/assets/javascripts/editor/schema/ci.json",
+      "license": "MIT (GitLab)",
+      "file": "gitlab-ci.json.gz",
+      "sha256": "fe7dcbabd9e0b441b59395a335d5cd480a770b90d9707f2511969a1564066a53",
+      "file_sha256": "76141df11b787e5071204b40d7b5ecbb71fcd65d304d924c1aeb9f1244a97658"
+    },
+    {
+      "id": "compose-spec",
+      "title": "Compose specification",
+      "doc_type": "docker-compose",
+      "names": [
+        "compose-spec",
+        "docker-compose"
+      ],
+      "source": "https://raw.githubusercontent.com/compose-spec/compose-spec/3a4a6995e4a971f6173dff9130cb3e38e6738651/schema/compose-spec.json",
+      "license": "Apache-2.0 (compose-spec)",
+      "file": "compose-spec.json.gz",
+      "sha256": "d549057ebc2925f39f62799eab0db7b9e2c18b35b6c00595199116da3ed10e64",
+      "file_sha256": "9c4b18592b95155e39557ef383f5fbee480c1878077f346a4b48286f2d90a50a"
+    },
+    {
+      "id": "cloud-init",
+      "title": "cloud-init cloud-config",
+      "doc_type": "cloud-init",
+      "names": [
+        "schema-cloud-config-v1",
+        "cloud-init",
+        "cloud-config"
+      ],
+      "source": "https://raw.githubusercontent.com/canonical/cloud-init/26.2/cloudinit/config/schemas/schema-cloud-config-v1.json",
+      "license": "Apache-2.0 / GPL-3.0 (cloud-init, dual)",
+      "file": "cloud-init.json.gz",
+      "sha256": "a2923d8886201b5478683cf9c6118a00d5603f36d69f8ad899c5b7909c807d63",
+      "file_sha256": "824bd01bc59dc2aa5c82bb279ca1eefa288b60c7779655d3dec092a31df06bdd"
+    },
+    {
+      "id": "helm-chart",
+      "title": "Helm Chart.yaml",
+      "doc_type": "helm-chart",
+      "names": [
+        "chart"
+      ],
+      "source": "https://raw.githubusercontent.com/SchemaStore/schemastore/e2606e03284e60792672dc9e7e930f3c496c5c3d/src/schemas/json/chart.json",
+      "license": "Apache-2.0 (SchemaStore)",
+      "file": "helm-chart.json.gz",
+      "sha256": "632ece859517b2d133950300c43c6180503a5a83a21fb5389fccc1dfb757f826",
+      "file_sha256": "a146681ef2beff5f1c30a1b3a66d4a3e0f0a71bdd15b6d4d476d14656666792e"
+    },
+    {
+      "id": "prometheus",
+      "title": "Prometheus configuration",
+      "doc_type": "prometheus",
+      "names": [
+        "prometheus"
+      ],
+      "source": "https://raw.githubusercontent.com/SchemaStore/schemastore/e2606e03284e60792672dc9e7e930f3c496c5c3d/src/schemas/json/prometheus.json",
+      "license": "Apache-2.0 (SchemaStore)",
+      "file": "prometheus.json.gz",
+      "sha256": "83972dab8cab38f5a213fd978b4c6dc5382a6532700e9894fd8b6971d15488e7",
+      "file_sha256": "7e969311049b8d73075b1a851e619634d75379f064c0cef873fe7c7c35d2691b"
+    },
+    {
+      "id": "prometheus-rules",
+      "title": "Prometheus rules",
+      "doc_type": "prometheus-rules",
+      "names": [
+        "prometheus.rules"
+      ],
+      "source": "https://raw.githubusercontent.com/SchemaStore/schemastore/e2606e03284e60792672dc9e7e930f3c496c5c3d/src/schemas/json/prometheus.rules.json",
+      "license": "Apache-2.0 (SchemaStore)",
+      "file": "prometheus-rules.json.gz",
+      "sha256": "d7e9960f4e42671af969c17616c63a1fdcec2c9f74abd1216fc3568e7ab7ef6a",
+      "file_sha256": "0040fbe5269b224da3fa3d8b1e8c38a845bc096313d84ed80dc0d87848c06960"
+    },
+    {
+      "id": "dependabot",
+      "title": "Dependabot configuration",
+      "names": [
+        "dependabot-2.0",
+        "dependabot"
+      ],
+      "source": "https://raw.githubusercontent.com/SchemaStore/schemastore/e2606e03284e60792672dc9e7e930f3c496c5c3d/src/schemas/json/dependabot-2.0.json",
+      "license": "Apache-2.0 (SchemaStore)",
+      "file": "dependabot.json.gz",
+      "sha256": "f310bfb4960eea6a5fb7d75de54ab49ba36f947757c8f4d5de88d3ea8ac51d3f",
+      "file_sha256": "d80553cc747bcf59c769d018bdc5eeabf16f1b7b18afc8ada39cb0fb515eb829"
+    },
+    {
+      "id": "package-json",
+      "title": "package.json",
+      "names": [
+        "package"
+      ],
+      "source": "https://raw.githubusercontent.com/SchemaStore/schemastore/e2606e03284e60792672dc9e7e930f3c496c5c3d/src/schemas/json/package.json",
+      "license": "Apache-2.0 (SchemaStore)",
+      "file": "package-json.json.gz",
+      "sha256": "76767b4e0b941f048f20d6de3eef2b8dd5f2b09816913a26b4bbf1afbd31fd79",
+      "file_sha256": "98b75300010aad10b75ed2af633ae6662677e43b456924faa592793c77463400"
+    },
+    {
+      "id": "k8s-deployment-apps-v1",
+      "title": "Kubernetes Deployment (apps/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment"
+      },
+      "names": [
+        "deployment-apps-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/deployment-apps-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-deployment-apps-v1.json.gz",
+      "sha256": "92b7a333a49124f5300095d3e7786ca2038b7d6e602c309f73e90631377e4b0a",
+      "file_sha256": "669dc52d7a772f4062ead9fe9ffb725243c930ad7b95f7faa023a10b94f4fb43"
+    },
+    {
+      "id": "k8s-statefulset-apps-v1",
+      "title": "Kubernetes StatefulSet (apps/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "apps/v1",
+        "kind": "StatefulSet"
+      },
+      "names": [
+        "statefulset-apps-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/statefulset-apps-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-statefulset-apps-v1.json.gz",
+      "sha256": "e095a9d88776fbb2e9c9312baac322c992a9f5188f81ae690bb7dc00fc3915fa",
+      "file_sha256": "48b138658f0b1a013fa5b81ee4796335d0f710a72abd18febf12613f711647f4"
+    },
+    {
+      "id": "k8s-daemonset-apps-v1",
+      "title": "Kubernetes DaemonSet (apps/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "apps/v1",
+        "kind": "DaemonSet"
+      },
+      "names": [
+        "daemonset-apps-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/daemonset-apps-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-daemonset-apps-v1.json.gz",
+      "sha256": "7cd418f81561c60d06fabe9b6d1145f2aeff8ed192c0c9dc2fb2802a51f78c21",
+      "file_sha256": "279b9863a2415a32e3d58b59747d8e4772bc7c76be0e2293b93317c64ac71aca"
+    },
+    {
+      "id": "k8s-service-v1",
+      "title": "Kubernetes Service (v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "v1",
+        "kind": "Service"
+      },
+      "names": [
+        "service-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/service-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-service-v1.json.gz",
+      "sha256": "8bf019854daed511e7c174896a898173fa65d88ec5937c687a37303d4cc9351b",
+      "file_sha256": "b7ba214f485869234e6623c2be48bb9c4e457be7beb55f410fd9c941642a37b6"
+    },
+    {
+      "id": "k8s-configmap-v1",
+      "title": "Kubernetes ConfigMap (v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "v1",
+        "kind": "ConfigMap"
+      },
+      "names": [
+        "configmap-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/configmap-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-configmap-v1.json.gz",
+      "sha256": "e0eaddebd677c08aa092b2da2264d86ac4fc34eed112b9fac2945b3f00c1e9b1",
+      "file_sha256": "f8655923993ab13c3fb74715cf2ef4af2e861e7f3b9af95daf34654e0fb809bd"
+    },
+    {
+      "id": "k8s-secret-v1",
+      "title": "Kubernetes Secret (v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "v1",
+        "kind": "Secret"
+      },
+      "names": [
+        "secret-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/secret-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-secret-v1.json.gz",
+      "sha256": "de761ccb06bd1d2c641fb57397f61b68e7ff53a384f0817ce40e5ded8cee86f3",
+      "file_sha256": "2b4e425d7f89d7a5350cf29f97d3fb7f3e8f5700f6957002121ad2ab411b2a99"
+    },
+    {
+      "id": "k8s-persistentvolumeclaim-v1",
+      "title": "Kubernetes PersistentVolumeClaim (v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "v1",
+        "kind": "PersistentVolumeClaim"
+      },
+      "names": [
+        "persistentvolumeclaim-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/persistentvolumeclaim-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-persistentvolumeclaim-v1.json.gz",
+      "sha256": "5ec592cb5f004c0e24fa080dd84f48b9339cd0c82248a78d37b6a3e1b4d7ab34",
+      "file_sha256": "252ccb299b35166b6122754c3cdefb6ae4b9735c2d59dbf1dd63b4e2dcafd17e"
+    },
+    {
+      "id": "k8s-serviceaccount-v1",
+      "title": "Kubernetes ServiceAccount (v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "v1",
+        "kind": "ServiceAccount"
+      },
+      "names": [
+        "serviceaccount-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/serviceaccount-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-serviceaccount-v1.json.gz",
+      "sha256": "8193d6c3561475c6d3d5c44e1faedb1df53905373d904bc17015694326d659cf",
+      "file_sha256": "9a8bff6927280f204079fbd2c355858204fc621c86ba68bcf3f7a644a4be3335"
+    },
+    {
+      "id": "k8s-pod-v1",
+      "title": "Kubernetes Pod (v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "v1",
+        "kind": "Pod"
+      },
+      "names": [
+        "pod-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/pod-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-pod-v1.json.gz",
+      "sha256": "6527f19e223c564c2364920c7d0bfac7ec7145fc39dd317dc738482f2c16a3a2",
+      "file_sha256": "13872cfd86fdd5168f0dabbe1f065fdbd7f4be94bb45acabc1f0063ee67072ec"
+    },
+    {
+      "id": "k8s-namespace-v1",
+      "title": "Kubernetes Namespace (v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "v1",
+        "kind": "Namespace"
+      },
+      "names": [
+        "namespace-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/namespace-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-namespace-v1.json.gz",
+      "sha256": "324fae677b98d1a6d54340db0c334d053e8ffbafceb3f73326e41de2610d5843",
+      "file_sha256": "3349fc9fa45c1524ce6e6a95e9c84bf84328952f81fe4284ca1783400c113ab2"
+    },
+    {
+      "id": "k8s-ingress-networking-v1",
+      "title": "Kubernetes Ingress (networking.k8s.io/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "Ingress"
+      },
+      "names": [
+        "ingress-networking-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/ingress-networking-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-ingress-networking-v1.json.gz",
+      "sha256": "4e0f63ad84c2bf22565e489d1f4b885ddaa9f6bf7cff1ddd562553760afe4d79",
+      "file_sha256": "5fe9ce6810c2e96150454e9f02fb49abbc5b0525737a3457bca7f1880dd3dc28"
+    },
+    {
+      "id": "k8s-networkpolicy-networking-v1",
+      "title": "Kubernetes NetworkPolicy (networking.k8s.io/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy"
+      },
+      "names": [
+        "networkpolicy-networking-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/networkpolicy-networking-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-networkpolicy-networking-v1.json.gz",
+      "sha256": "f6324cc464f62228b0418f438d167208e4f86c7e3677ba30f608e79a8b26ba79",
+      "file_sha256": "43621ace4c18fed50e036f19c8b15edccac720a08fea546018e112e8c22191db"
+    },
+    {
+      "id": "k8s-job-batch-v1",
+      "title": "Kubernetes Job (batch/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "batch/v1",
+        "kind": "Job"
+      },
+      "names": [
+        "job-batch-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/job-batch-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-job-batch-v1.json.gz",
+      "sha256": "967234ab9eb5477fd8e5538c83c85817a560aecc1aaf886fafbe8a4ac0972023",
+      "file_sha256": "e515f8f7e498154370625837c10803e06093fafec09afb856291f70d28aebbb0"
+    },
+    {
+      "id": "k8s-cronjob-batch-v1",
+      "title": "Kubernetes CronJob (batch/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "batch/v1",
+        "kind": "CronJob"
+      },
+      "names": [
+        "cronjob-batch-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/cronjob-batch-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-cronjob-batch-v1.json.gz",
+      "sha256": "fb921edacc3ded080ca322233197727f8c110254ba3514e6faade5fa06513ae4",
+      "file_sha256": "7971f1cd4e8c06df9a598dcc6db1fefebd29c03ca664638f7f1f4a1dedf64a0c"
+    },
+    {
+      "id": "k8s-horizontalpodautoscaler-autoscaling-v2",
+      "title": "Kubernetes HorizontalPodAutoscaler (autoscaling/v2)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "autoscaling/v2",
+        "kind": "HorizontalPodAutoscaler"
+      },
+      "names": [
+        "horizontalpodautoscaler-autoscaling-v2"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/horizontalpodautoscaler-autoscaling-v2.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-horizontalpodautoscaler-autoscaling-v2.json.gz",
+      "sha256": "613e60f54bc1d70776eb3e75fbdbc2f1250b5c1a92c88f54846c5fabd02f6f3e",
+      "file_sha256": "69bc867be77998b09cc97b21c714abe3576032a2c0f4900be811b2a1628ba559"
+    },
+    {
+      "id": "k8s-poddisruptionbudget-policy-v1",
+      "title": "Kubernetes PodDisruptionBudget (policy/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "policy/v1",
+        "kind": "PodDisruptionBudget"
+      },
+      "names": [
+        "poddisruptionbudget-policy-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/poddisruptionbudget-policy-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-poddisruptionbudget-policy-v1.json.gz",
+      "sha256": "da73f50ad0264d73f668eecaa9959da65afe2846602a7a5c8fd51f7799d6a258",
+      "file_sha256": "963209af2e6350d998ffb93c79637eae26bc8a2c508fdbbbdee00e8828488a55"
+    },
+    {
+      "id": "k8s-role-rbac-v1",
+      "title": "Kubernetes Role (rbac.authorization.k8s.io/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "Role"
+      },
+      "names": [
+        "role-rbac-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/role-rbac-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-role-rbac-v1.json.gz",
+      "sha256": "dfe8fb03b1642f985b57b12edd1727b6867c13ed4b6761ef81bdd51b1d236711",
+      "file_sha256": "abfe5d52e631e35f52605a1e73b76488fc163667da3a46ea61d3ee59415a2039"
+    },
+    {
+      "id": "k8s-rolebinding-rbac-v1",
+      "title": "Kubernetes RoleBinding (rbac.authorization.k8s.io/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "RoleBinding"
+      },
+      "names": [
+        "rolebinding-rbac-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/rolebinding-rbac-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-rolebinding-rbac-v1.json.gz",
+      "sha256": "87ab620d0adddcd2803b92357fce2854af752326df8c5408a7588aae98b3031d",
+      "file_sha256": "5e4a9eb2d5815b468e67b87dc2dc60f99aa7a366b4e0251ab22f000ab01e58ee"
+    },
+    {
+      "id": "k8s-clusterrole-rbac-v1",
+      "title": "Kubernetes ClusterRole (rbac.authorization.k8s.io/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "ClusterRole"
+      },
+      "names": [
+        "clusterrole-rbac-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/clusterrole-rbac-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-clusterrole-rbac-v1.json.gz",
+      "sha256": "0777f91c4fa08bd3989b6db8c59dad0429a63dec8f59e883ff55c947a14d0d5f",
+      "file_sha256": "3ba1047284ef9444ca43f3aa4ed0164b845521311754f2b8483adb5ac823303e"
+    },
+    {
+      "id": "k8s-clusterrolebinding-rbac-v1",
+      "title": "Kubernetes ClusterRoleBinding (rbac.authorization.k8s.io/v1)",
+      "doc_type": "kubernetes",
+      "k8s": {
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "kind": "ClusterRoleBinding"
+      },
+      "names": [
+        "clusterrolebinding-rbac-v1"
+      ],
+      "source": "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/6ea44f54bb5cdedb2f61fba42c9b342e97959262/v1.34.12-standalone-strict/clusterrolebinding-rbac-v1.json",
+      "license": "Apache-2.0 (Kubernetes OpenAPI, via yannh/kubernetes-json-schema)",
+      "file": "k8s-clusterrolebinding-rbac-v1.json.gz",
+      "sha256": "e2d0471b444cf7ea4fd69d7eba1b16e06215503bfbc650450c2b6ad9b40f863c",
+      "file_sha256": "d01f8bbedeab32a70df77639e6d04707a0608efc294cefd96e14c81a617030ae"
+    }
+  ]
+}

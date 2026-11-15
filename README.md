@@ -914,6 +914,40 @@ The schema URL itself is never suggested as a value.
 The analysis reports `schema_info`: the reference, whether a schema was supplied, its
 title, and how many fields it matched.
 
+### Bundled schema catalogue
+
+templatize ships 30 pinned JSON Schemas (`src/templatize/catalog/`, 576 KB gzipped), so
+common formats get their schema without pasting it and without a download:
+- **Kubernetes:** 20 resource kinds for 1.34: Deployment, StatefulSet, DaemonSet,
+  Service, ConfigMap, Secret, Ingress, Job, CronJob, HPA, PVC, NetworkPolicy, RBAC and
+  more. Each resource in a multi-document file gets its own kind's schema.
+- **Containers and CI:** Compose, GitHub Actions workflows and actions, GitLab CI,
+  Dependabot.
+- **Other formats:** cloud-init, Helm `Chart.yaml`, Prometheus config and rules,
+  `package.json`.
+
+**Which schema applies:**
+1. A schema you supply.
+2. Otherwise, the bundled schema the document's `$schema` URL names, matched on its
+   file name, so `json.schemastore.org/github-workflow.json` and raw GitHub copies all
+   match.
+3. Otherwise, the bundled schema of the document's type, when the type is confirmed or
+   detected with confidence ≥ 0.9.
+
+The header shows "Bundled schema: Kubernetes: Service, Deployment, 23 fields matched".
+
+**What it adds today.** Mostly explanations: a field's description becomes part of its
+suggestion's reason ("runs_on: The type of machine to run the job on"; "replica_count:
+Number of desired pods"). It changes few suggestions on its own: on the 117-document
+corpus, only one (a cloud-init `owner` equal to its default). The heuristics and the
+schema rules already handle these formats. The full schemas are what checking rendered
+output against a schema would build on.
+
+**Updating it:** `make schemas` verifies every stored file against `manifest.json`.
+`make schemas-update` re-downloads the pinned sources (commits and release tags) and
+refuses any whose SHA-256 changed. Sources and licences are listed in
+`src/templatize/catalog/LICENSES.md`.
+
 ## Engines
 
 | Engine | Template | Values | Renders with | Loops |
