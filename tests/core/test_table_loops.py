@@ -105,8 +105,8 @@ def test_helm_printf_pads_like_the_template(tmp_path: Path) -> None:
         (root / p).parent.mkdir(parents=True, exist_ok=True)
         (root / p).write_text(c, encoding="utf-8", newline="")
     values = yaml.safe_load(files["values.yaml"])
-    assert list(values["rows"][0]) == ["value", "ip_address", "number"]
-    values["rows"].append({"value": "queue-primary", "ip_address": "10.0.0.9", "number": "5672"})
+    assert list(values["rows"][0]) == ["name", "ip_address", "number"]
+    values["rows"].append({"name": "queue-primary", "ip_address": "10.0.0.9", "number": "5672"})
     (tmp_path / "more.yaml").write_text(yaml.safe_dump({"rows": values["rows"]}))
     helm = shutil.which("helm")
     assert helm

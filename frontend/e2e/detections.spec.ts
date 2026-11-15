@@ -131,3 +131,31 @@ test("the terraform engine keeps lists as loops", async ({ page }) => {
   await page.getByRole("tab", { name: "Preview", exact: true }).click();
   await expect(page.getByLabel("Generated output").locator("pre.code")).not.toContainText("Render error");
 });
+
+test("the cloud-init sample opens in Terraform and keeps nested lists as loops", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("cloud-init");
+  await analyze(page);
+  await expect(page.getByLabel("Template engine")).toHaveValue("terraform");
+  await page.getByRole("button", { name: "Accept list packages", exact: true }).click();
+  await page.getByRole("button", { name: "Accept list users", exact: true }).click();
+  await page.getByRole("button", { name: "Accept all", exact: true }).click();
+  await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+  await page.getByRole("tab", { name: "template.tftpl", exact: true }).click();
+  const code = page.getByLabel("Generated output").locator("pre.code");
+  await expect(code).toContainText("%{ for user_index, user in users }");
+  await expect(code).toContainText("in user.ssh_authorized_keys }");
+});
+
+test("the nginx envsubst sample leaves nginx's own variables alone", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("nginx-envsubst");
+  await analyze(page);
+  await expect(page.getByLabel("Template engine")).toHaveValue("envsubst");
+  await page.getByRole("button", { name: "Accept all", exact: true }).click();
+  await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+  await page.getByRole("tab", { name: "template.tmpl", exact: true }).click();
+  const code = page.getByLabel("Generated output").locator("pre.code");
+  await expect(code).toContainText("server_name ${SERVER_NAME};");
+  await expect(code).toContainText("proxy_set_header Host $host;");
+});

@@ -467,6 +467,7 @@ export function App() {
             onText={setText}
             onVariants={setVariants}
             onAnalyze={analyze}
+            onEngine={setEngine}
           />
           <section class="intro">
             <h2>How it works</h2>

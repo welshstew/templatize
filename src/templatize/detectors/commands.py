@@ -63,6 +63,7 @@ _SWITCHES = frozenset(
         "devel",
         "prune",
         "overwrite",
+        "now",
     ]
 )
 _CLIENT = re.compile(
@@ -85,7 +86,8 @@ for _alias, _base in (
     _CLIENT_FLAGS[_alias] = _CLIENT_FLAGS[_base]
 _SHORT_FLAG = re.compile(r"(?<![\w-])-([A-Za-z])(?:[ \t]+|(?=[A-Za-z0-9]))([A-Za-z0-9_.][\w.:@-]*)")
 _SSH = re.compile(
-    r"\b(?:ssh|scp|rsync|sftp)\b[^\n]*?(?<![\w.@-])([a-z_][\w.-]{0,31})@"
+    # The command, then a space: not "ssh-ed25519 AAAA... deploy@laptop" (a key's comment).
+    r"\b(?:ssh|scp|rsync|sftp)(?=[ \t])[^\n]*?(?<![\w.@-])([a-z_][\w.-]{0,31})@"
     r"([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*)"
 )
 _CODE_SPAN = re.compile(r"(?<!`)`([^`\s]+)`(?!`)")

@@ -1,7 +1,8 @@
 // Built-in sample documents for the "Samples" picker. All data is fictional:
 // example.* domains, RFC 5737 / RFC 1918 addresses, 555 phone numbers.
 // Samples with `variants` show the multi-example diff; the rest show what the
-// heuristics (and NER/LLM, if enabled) find in a single document.
+// heuristics (and NER/LLM, if enabled) find in a single document. A sample with an
+// `engine` selects that template engine when loaded (default: jinja2).
 
 export interface Sample {
   id: string;
@@ -9,6 +10,7 @@ export interface Sample {
   group: "Config & infrastructure" | "Documents & messages" | "Data & code";
   text: string;
   variants?: string[];
+  engine?: "jinja2" | "envsubst" | "terraform";
 }
 
 const nginx = (host: string, ip: string, env: string) => `server {
@@ -612,6 +614,87 @@ KAFKA_BROKERS = ["10.8.0.11:9092", "10.8.0.12:9092", "10.8.0.13:9092"]
 INVOICE_TOPIC = "billing.invoices.v2"
 RETRY_LIMIT = 5
 ALERT_EMAIL = "billing-oncall@example.com"
+`,
+  },
+  {
+    id: "csv",
+    label: "CSV of user accounts (rows as a loop)",
+    group: "Data & code",
+    text: `username,email,team,role
+akhan,aisha.khan@example.com,platform,admin
+bnovak,bruno.novak@example.com,payments,developer
+cmendes,carla.mendes@example.com,support,viewer
+`,
+  },
+  // Other engines: these load with their engine selected in the output panel.
+  {
+    id: "cloud-init",
+    label: "cloud-init user-data (Terraform templatefile, nested loops)",
+    group: "Config & infrastructure",
+    engine: "terraform",
+    text: `#cloud-config
+hostname: app-01
+timezone: Europe/London
+
+packages:
+  - nginx
+  - postgresql-client
+  - fail2ban
+
+users:
+  - name: deploy
+    groups: sudo
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK1x deploy@laptop
+  - name: monitor
+    groups: adm
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM2y monitor@ops
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN3z monitor@backup
+
+runcmd:
+  - systemctl enable --now nginx
+`,
+  },
+  {
+    id: "haproxy",
+    label: "HAProxy backend pool (Terraform templatefile, server loop)",
+    group: "Config & infrastructure",
+    engine: "terraform",
+    text: `frontend www
+    bind *:443 ssl crt /etc/haproxy/certs/shop.example.com.pem
+    default_backend shop
+
+backend shop
+    balance roundrobin
+    option httpchk GET /healthz
+    server web-01 10.0.1.11:8080 check
+    server web-02 10.0.1.12:8080 check
+    server web-03 10.0.1.13:8080 check
+`,
+  },
+  {
+    id: "nginx-envsubst",
+    label: "nginx Docker image template (envsubst; $host stays nginx's)",
+    group: "Config & infrastructure",
+    engine: "envsubst",
+    text: `server {
+    listen 80;
+    server_name shop.example.com;
+
+    location / {
+        proxy_pass http://storefront.internal.example.com:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /api/ {
+        proxy_pass http://orders-api.internal.example.com:8080/;
+        proxy_read_timeout 30s;
+    }
+}
 `,
   },
 ];

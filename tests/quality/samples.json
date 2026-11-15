@@ -114,5 +114,25 @@
     "id": "python",
     "text": "\"\"\"Settings for the billing worker.\"\"\"\n\nSERVICE_NAME = \"billing-worker\"\nENVIRONMENT = \"production\"\n\nDATABASE = {\n    \"host\": \"pg-billing.internal.example.com\",\n    \"port\": 5432,\n    \"name\": \"billing\",\n    \"user\": \"billing_rw\",\n}\n\nKAFKA_BROKERS = [\"10.8.0.11:9092\", \"10.8.0.12:9092\", \"10.8.0.13:9092\"]\nINVOICE_TOPIC = \"billing.invoices.v2\"\nRETRY_LIMIT = 5\nALERT_EMAIL = \"billing-oncall@example.com\"\n",
     "variants": []
+  },
+  {
+    "id": "csv",
+    "text": "username,email,team,role\nakhan,aisha.khan@example.com,platform,admin\nbnovak,bruno.novak@example.com,payments,developer\ncmendes,carla.mendes@example.com,support,viewer\n",
+    "variants": []
+  },
+  {
+    "id": "cloud-init",
+    "text": "#cloud-config\nhostname: app-01\ntimezone: Europe/London\n\npackages:\n  - nginx\n  - postgresql-client\n  - fail2ban\n\nusers:\n  - name: deploy\n    groups: sudo\n    shell: /bin/bash\n    ssh_authorized_keys:\n      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK1x deploy@laptop\n  - name: monitor\n    groups: adm\n    shell: /bin/bash\n    ssh_authorized_keys:\n      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM2y monitor@ops\n      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN3z monitor@backup\n\nruncmd:\n  - systemctl enable --now nginx\n",
+    "variants": []
+  },
+  {
+    "id": "haproxy",
+    "text": "frontend www\n    bind *:443 ssl crt /etc/haproxy/certs/shop.example.com.pem\n    default_backend shop\n\nbackend shop\n    balance roundrobin\n    option httpchk GET /healthz\n    server web-01 10.0.1.11:8080 check\n    server web-02 10.0.1.12:8080 check\n    server web-03 10.0.1.13:8080 check\n",
+    "variants": []
+  },
+  {
+    "id": "nginx-envsubst",
+    "text": "server {\n    listen 80;\n    server_name shop.example.com;\n\n    location / {\n        proxy_pass http://storefront.internal.example.com:3000;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n    }\n\n    location /api/ {\n        proxy_pass http://orders-api.internal.example.com:8080/;\n        proxy_read_timeout 30s;\n    }\n}\n",
+    "variants": []
   }
 ]

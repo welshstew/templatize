@@ -50,8 +50,11 @@ def test_keyword_lines() -> None:
     assert loops(text) == {
         "servers": (
             False,
-            ["value", "weight"],
-            [{"value": "10.0.0.1:8080", "weight": "5"}, {"value": "10.0.0.2:8080", "weight": "3"}],
+            ["endpoint", "weight"],
+            [
+                {"endpoint": "10.0.0.1:8080", "weight": "5"},
+                {"endpoint": "10.0.0.2:8080", "weight": "3"},
+            ],
         )
     }
 

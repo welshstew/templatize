@@ -167,7 +167,8 @@ _STOPWORDS = frozenset(
 )
 
 # Well-known constants that repeat in logs and listings without being parameters:
-# user-agent parts, CPU architectures, operating systems, log levels and event types.
+# user-agent parts, CPU architectures, operating systems, log levels, event types and
+# SSH key types.
 _CONSTANTS = frozenset(
     w.lower()
     for w in [
@@ -198,6 +199,12 @@ _CONSTANTS = frozenset(
         "Warn",
         "Alert",
         "Emergency",
+        "ssh-ed25519",
+        "ssh-rsa",
+        "ssh-dss",
+        "ecdsa-sha2-nistp256",
+        "ecdsa-sha2-nistp384",
+        "ecdsa-sha2-nistp521",
     ]
 )
 

@@ -225,8 +225,9 @@ def build_ir(ir: TemplateIR, engine: str = "jinja2") -> BuildResult:
         n = len([lp for lp in ir.loops if lp.parent is None])
         ir = ir.model_copy(update={"loops": []})
         notes.append(
-            f"{engine} templates have no loops: the {n} accepted loop{'' if n == 1 else 's'} "
-            "stay literal text (use jinja2 to keep them as loops)"
+            f"{engine} templates have no loops: "
+            + ("the accepted list stays" if n == 1 else f"the {n} accepted lists stay")
+            + " literal text (jinja2 and terraform keep lists as loops)"
         )
     notes += emitter.notes(ir)
     template = emitter.emit(ir)

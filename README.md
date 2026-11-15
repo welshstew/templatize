@@ -66,7 +66,18 @@ make frontend-dev   # Vite dev server with hot reload (run `make serve` alongsid
 4. Rename variables and set their types in the sidebar. Editing a variable's *value*
    drives the **live preview**.
 5. The **round-trip badge** in the header shows PASS/FAIL for the current variable set.
-   **Download .zip** gives you `template.j2`, `.env`, `render.py` and a README.
+   **Download .zip** gives you `template.j2`, `.env`, `render.py` and a README; the
+   **template engine** choice in the output panel switches to envsubst or Terraform
+   `templatefile()` (see [Engines](#engines)).
+
+**Load sample…** has a document for each kind of input. Some open with another engine
+selected, to show it off:
+- **cloud-init `user-data`** (Terraform): packages, and users with their SSH keys, as
+  nested loops.
+- **HAProxy backend pool** (Terraform): one `server` line per backend, as a loop.
+- **nginx Docker image template** (envsubst): nginx's own `$host` stays untouched.
+
+Accept a sample's lists ("Accept list …") to see them as loops.
 
 The frontend is Preact + TypeScript, built with Vite, with no other runtime dependencies
 (about 37 KB of JS, 14 KB gzipped) and system fonts only. `npm run build` type-checks,
