@@ -847,7 +847,9 @@ literal text, and the build says so in `notes` (API, MCP, CLI and UI).
   `envsubst` for every document.
 - **Real Terraform:** when Terraform or OpenTofu is installed, the tests run the
   generated `main.tf` for every document and every awkward-literal and value case
-  (checked with Terraform 1.17.2).
+  (checked with Terraform 1.17.2). CI fetches that version with
+  `scripts/fetch-terraform.py`, which is pinned and checksum-verified, so these tests
+  always run there.
 
 ## Adding an engine emitter
 

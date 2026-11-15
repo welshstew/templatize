@@ -29,10 +29,10 @@ def fixture_path(request: pytest.FixtureRequest) -> Path:
 
 
 # External tools some tests run for real (helm template, ansible-playbook, kompose,
-# envsubst).
+# envsubst, terraform).
 # Locally they are optional and those tests skip; CI sets TEMPLATIZE_REQUIRE_TOOLS=1 so
 # a missing tool fails the run instead of quietly skipping the tests.
-REQUIRED_TOOLS = ("helm", "ansible-playbook", "kompose", "envsubst")
+REQUIRED_TOOLS = ("helm", "ansible-playbook", "kompose", "envsubst", "terraform")
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
