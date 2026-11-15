@@ -268,6 +268,16 @@ def _choices(schemas: list[dict[str, Any]]) -> list[str] | None:
     return None
 
 
+def _common(lists: list[list[str] | None]) -> list[str] | None:
+    """What every one of ``lists`` allows, in the first one's order; ``None`` if any
+    is unknown or nothing is common to all."""
+    if not lists or any(x is None for x in lists):
+        return None
+    first, *rest = lists
+    out = [v for v in first or [] if all(v in (r or []) for r in rest)]
+    return out or None
+
+
 _JSON_TYPES = ("integer", "number", "boolean", "string")
 
 
@@ -396,10 +406,12 @@ def apply(
                 notes.append("the schema's default")
             if fact.enum:
                 notes.append("one of: " + ", ".join(map(str, fact.enum[:8])))
-            if fact.choices and c.value in fact.choices:
-                update["choices"] = fact.choices
-            if fact.accepts:
-                update["accepts"] = fact.accepts
+            # One variable fills every field it occurs in: what all of them allow.
+            choices = _common([f.choices for f, _ in here])
+            if choices and c.value in choices:
+                update["choices"] = choices
+            if accepts := _common([f.accepts for f, _ in here]):
+                update["accepts"] = accepts
             if notes:
                 update["reason"] = "; ".join([*(filter(None, [c.reason])), *notes])
         out.append(c.model_copy(update=update) if update else c)

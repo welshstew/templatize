@@ -392,3 +392,32 @@ def test_argument_specs_are_written_as_yaml_reads_them() -> None:
     text = _block(spec, "")
     assert yaml.safe_load(text) == spec
     assert yaml.safe_load(yaml.dump(spec, sort_keys=False)) == yaml.safe_load(text)
+
+
+def test_a_value_in_several_fields_gets_what_all_of_them_allow() -> None:
+    """8080 is a containerPort (integer only) and a targetPort (integer or a name): the
+    one variable may only be an integer, or "http" would break the containerPort."""
+    text = (
+        "apiVersion: v1\nkind: Pod\nmetadata:\n  name: p\nspec:\n  containers:\n"
+        "    - name: c\n      image: nginx\n      ports:\n        - containerPort: 8080\n---\n"
+        "apiVersion: v1\nkind: Service\nmetadata:\n  name: s\nspec:\n  ports:\n"
+        "    - port: 80\n      targetPort: 8080\n"
+    )
+    (port,) = [c for c in suggest(text).candidates if c.value == "8080"]
+    assert len(port.spans) == 2 and port.accepts == ["integer"]
+
+    from templatize.userschema import _common
+
+    assert _common([["integer", "string"], ["integer"]]) == ["integer"]
+    assert _common([["a", "b"], None]) is None
+    assert _common([["a"], ["b"]]) is None
+
+
+def test_many_keys_with_examples_stay_linear() -> None:
+    import time
+
+    tree = {f"k{i}": "x" for i in range(80_000)}
+    start = time.perf_counter()
+    argument_options([tree, dict(tree), dict(tree), dict(tree)], {})
+    values_schema([tree, dict(tree), dict(tree), dict(tree)], {}, "V")
+    assert time.perf_counter() - start < 5  # was minutes: a list scan per key

@@ -59,8 +59,10 @@ def _combine(group: list[Candidate]) -> Candidate:
     typed = [c for c in group if c.type is not VarType.STRING]
     vtype = max(typed, key=lambda c: c.confidence).type if typed else VarType.STRING
     variant_values = next((c.variant_values for c in group if c.variant_values), None)
-    choices = next((c.choices for c in group if c.choices), None)
-    accepts = next((c.accepts for c in group if c.accepts), None)
+    # From the schema: a merged variable fills each candidate's fields, so it gets
+    # only what all the schema-informed candidates allow.
+    choices = _intersect([c.choices for c in group if c.choices])
+    accepts = _intersect([c.accepts for c in group if c.accepts])
     pathed = [c for c in group if c.values_path]
     values_path = (
         max(pathed, key=lambda c: (NAME_ORIGIN_RANK[c.name_origin], c.confidence)).values_path
@@ -84,6 +86,13 @@ def _combine(group: list[Candidate]) -> Candidate:
         choices=choices,
         accepts=accepts,
     )
+
+
+def _intersect(lists: list[list[str]]) -> list[str] | None:
+    if not lists:
+        return None
+    out = [v for v in lists[0] if all(v in other for other in lists[1:])]
+    return out or None
 
 
 def _score(c: Candidate) -> float:

@@ -124,6 +124,14 @@ PATTERNS = {
 }
 
 
+def _keys(maps: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Every key of ``maps``, in first-seen order (a dict: linear, not a list scan)."""
+    seen: dict[str, None] = {}
+    for m in maps:
+        seen.update(dict.fromkeys(m))
+    return list(seen)
+
+
 def _json_type(v: Any) -> str | None:
     if isinstance(v, bool):
         return "boolean"
@@ -142,9 +150,7 @@ def _schema(path: Path, observed: list[Any], hints: Mapping[Path, Hint]) -> dict
     vals = [v for v in observed if v is not None]
     if vals and all(isinstance(v, Mapping) for v in vals):
         out["type"] = "object"
-        keys: list[str] = []
-        for v in vals:
-            keys += [k for k in v if k not in keys]
+        keys = _keys(vals)
         if keys:
             out["properties"] = {
                 k: _schema((*path, k), [v[k] for v in vals if k in v], hints) for k in keys
@@ -253,9 +259,7 @@ def _option(path: Path, observed: list[Any], hints: Mapping[Path, Hint]) -> dict
         items = [i for v in vals for i in v]
         if items and all(isinstance(i, Mapping) for i in items):
             out["elements"] = "dict"
-            keys: list[str] = []
-            for i in items:
-                keys += [k for k in i if k not in keys]
+            keys = _keys(items)
             out["options"] = {
                 k: _option((*path, ITEM, k), [i[k] for i in items if k in i], hints) for k in keys
             }
@@ -294,7 +298,5 @@ def argument_options(
 ) -> dict[str, Any]:
     """``options`` of an Ansible argument spec that every one of ``observed`` (the
     role's variables as Ansible reads them) satisfies."""
-    names: list[str] = []
-    for o in observed:
-        names += [k for k in o if k not in names]
+    names = _keys(observed)
     return {n: _option((n,), [o[n] for o in observed if n in o], hints) for n in names}
