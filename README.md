@@ -868,6 +868,44 @@ removed noise (`restart:`, `imagePullPolicy:`) and improved names.
 - **A Service's `type`** (ClusterIP, LoadBalancer) stays a value, as in Helm charts.
 - **A workflow's trigger branch** stays fixed.
 
+### JSON Schemas
+
+**References.** A schema the document references is recognised and reported: JSON
+`"$schema": "https://…"`, YAML `$schema:`, or the YAML language server's
+`# yaml-language-server: $schema=…`. It is **never downloaded**, for three reasons:
+- **Offline:** the tool runs offline.
+- **Privacy:** a fetch would tell a third party what was pasted.
+- **Security:** a server that fetches user-supplied URLs can be pointed at internal
+  addresses (SSRF).
+
+The schema URL itself is never suggested as a value.
+
+**Supplying a schema.** To use a schema, supply its text, as JSON or YAML:
+- **UI:** the **Schema** tab next to the document.
+- **API:** `schema` on `/suggest` and `/suggest/llm`.
+- **MCP:** `json_schema`, as an object or text.
+- **CLI:** `--schema FILE`.
+
+**How it's applied.** The schema is walked along the document's fields (`properties`,
+`patternProperties`, `additionalProperties`, `items`/`prefixItems`, local `$ref`,
+`allOf`/`anyOf`/`oneOf`):
+
+| Keyword | Effect |
+|---|---|
+| `const` | the field is structure, never a value |
+| `format` (uri, email, hostname, ipv4/ipv6, date, date-time), integer with `maximum: 65535` | the value's type, and a suggestion even if no detector found it |
+| value equals `default` | a weaker candidate (confidence × 0.6): nobody changed it |
+| short `title` | the name, when no key named the value |
+| `enum` | stays a value (log levels are enums too); the choices are given in the reason |
+
+**What it doesn't do:**
+- **External `$ref`s** are not followed; a note says which.
+- **Size and cycles:** schemas are limited to 2 MB, and `$ref` cycles and deep nesting
+  are cut off.
+
+The analysis reports `schema_info`: the reference, whether a schema was supplied, its
+title, and how many fields it matched.
+
 ## Engines
 
 | Engine | Template | Values | Renders with | Loops |

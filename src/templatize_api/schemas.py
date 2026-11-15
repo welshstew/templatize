@@ -37,6 +37,12 @@ class SuggestRequest(BaseModel):
     document_type: Annotated[str, Field(max_length=64)] | None = None
     """Confirm the document's type (an id from GET /document-types): its format rules
     then apply. Omit to let it be detected."""
+    json_schema: str | None = Field(default=None, max_length=2_000_000, alias="schema")
+    """A JSON Schema (JSON or YAML text) the document follows: its formats, consts,
+    defaults and titles feed the suggestions. A schema the document references by URL
+    is never downloaded; pass its text here."""
+
+    model_config = {"populate_by_name": True}
 
 
 class DocumentTypeInfo(BaseModel):

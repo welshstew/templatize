@@ -9,6 +9,7 @@ import {
   type DocumentProfile,
   type DocumentType,
   type DocumentTypeInfo,
+  type SchemaInfo,
   type Info,
   type Notice,
   type RenderResponse,
@@ -84,6 +85,8 @@ export function App() {
   const [info, setInfo] = useState<Info | null>(null);
   const [docTypes, setDocTypes] = useState<DocumentTypeInfo[]>([]);
   const [docType, setDocType] = useState<DocumentType | null>(null);
+  const [schemaText, setSchemaText] = useState("");
+  const [schemaInfo, setSchemaInfo] = useState<SchemaInfo | null>(null);
   const [mode, setMode] = useState<"edit" | "review">("edit");
   const [text, setText] = useState("");
   const [variants, setVariants] = useState<string[]>([]);
@@ -131,8 +134,9 @@ export function App() {
     setError(null);
     try {
       const docVariants = variants.filter((v) => v.length > 0);
-      const res = await api.suggest(text, docVariants, documentType);
+      const res = await api.suggest(text, docVariants, documentType, undefined, schemaText);
       setDocType(res.document_type ?? null);
+      setSchemaInfo(res.schema_info ?? null);
       setItems(itemsFromCandidates(res.candidates));
       setLoops(loopsFromCandidates(res.loops ?? [], new OffsetMap(text)));
       setNotices(res.notices);
@@ -169,7 +173,7 @@ export function App() {
     const ctrl = new AbortController();
     llmAbort.current = ctrl;
     setLlm({ state: "running" });
-    api.suggestLlm(docText, docVariants, ctrl.signal, documentType).then(
+    api.suggestLlm(docText, docVariants, ctrl.signal, documentType, schemaText).then(
       (res) => {
         if (ctrl.signal.aborted) return;
         if (!res.available || !res.review) {
@@ -476,6 +480,8 @@ export function App() {
             onVariants={setVariants}
             onAnalyze={() => void analyze(null)}
             onEngine={setEngine}
+            schema={schemaText}
+            onSchema={setSchemaText}
           />
           <section class="intro">
             <h2>How it works</h2>
@@ -508,6 +514,16 @@ export function App() {
                     void analyze(id);
                   }}
                 />
+              ) : null}
+              {schemaInfo && !folded ? (
+                <span
+                  class="schema-info muted small"
+                  title={[schemaInfo.reference?.url, ...schemaInfo.notes].filter(Boolean).join("\n")}
+                >
+                  {schemaInfo.provided
+                    ? `Schema: ${schemaInfo.title ?? "supplied"}, ${schemaInfo.matched_fields} field${schemaInfo.matched_fields === 1 ? "" : "s"} matched`
+                    : "References a schema (not downloaded: paste it in the Schema tab to use it)"}
+                </span>
               ) : null}
               {folded ? (
                 <span class="muted small">Show it to select text and add a variable to the chart.</span>

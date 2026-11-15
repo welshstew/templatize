@@ -326,3 +326,16 @@ def test_document_type_detected_and_confirmed() -> None:
             assert bad.is_error
 
     run(main)
+
+
+def test_suggest_with_a_schema() -> None:
+    async def main() -> None:
+        async with Client(create_server()) as c:
+            text = '{"$schema": "https://x.example.com/s.json", "endpoint": "api"}\n'
+            schema = '{"properties": {"endpoint": {"type": "string", "format": "uri"}}}'
+            res = await c.call_tool("suggest_parameters", {"text": text, "json_schema": schema})
+            out = res.structured_content
+            assert not res.is_error and out["schema_info"]["provided"]
+            assert "api" in {cand["value"] for cand in out["candidates"]}
+
+    run(main)

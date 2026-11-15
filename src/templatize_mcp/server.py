@@ -11,11 +11,12 @@ tool arguments.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -78,6 +79,16 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHin
 DEFAULT_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
 
 
+def _schema_text(schema: str | dict[str, Any] | None) -> str | None:
+    """A schema passed as an object (MCP clients parse JSON arguments) or as text."""
+    return json.dumps(schema) if isinstance(schema, dict) else schema
+
+
+SCHEMA_HELP = (
+    "A JSON Schema (an object, or JSON/YAML text) the document follows: its formats, consts, "
+    "defaults and titles sharpen the suggestions. A schema the document references by "
+    "URL is never downloaded; if you have its text, pass it here."
+)
 DOCUMENT_TYPE_HELP = (
     "Confirm what kind of document this is, so its format rules apply (omit to detect it; "
     "the result's document_type says what was detected). One of: "
@@ -110,12 +121,15 @@ def create_server() -> MCPServer:
             str | None,
             Field(description=DOCUMENT_TYPE_HELP, max_length=64),
         ] = None,
+        json_schema: Annotated[str | dict[str, Any] | None, Field(description=SCHEMA_HELP)] = None,
     ) -> tools.SuggestParametersResult:
         """Find parts of a document that should become template variables (IPs, hostnames,
         dates, emails, key/value pairs, repeated tokens, and regions that differ between
         example variants). Returns scored candidates; spans are Unicode code-point offsets."""
         with _tool_errors("suggest_parameters"):
-            return tools.suggest_parameters(text, variants, min_confidence, document_type)
+            return tools.suggest_parameters(
+                text, variants, min_confidence, document_type, _schema_text(json_schema)
+            )
 
     @server.tool(annotations=READ_ONLY)
     def generate_template(
@@ -147,7 +161,7 @@ def create_server() -> MCPServer:
                 description=(
                     "jinja2 (template.j2 + .env + render.py), envsubst (${KEY} placeholders + "
                     "values.env + render.sh) or terraform (templatefile() .tftpl + "
-                    "terraform.tfvars + main.tf). envsubst and terraform have no loops."
+                    "terraform.tfvars + main.tf). envsubst has no loops: lists stay text."
                 )
             ),
         ] = "jinja2",
@@ -155,13 +169,20 @@ def create_server() -> MCPServer:
             str | None,
             Field(description=DOCUMENT_TYPE_HELP, max_length=64),
         ] = None,
+        json_schema: Annotated[str | dict[str, Any] | None, Field(description=SCHEMA_HELP)] = None,
     ) -> tools.GenerateTemplateResult:
         """Build a template, its values file and a script that renders it, from a document,
         and verify the round trip (template + values must reproduce the input byte for
         byte). Tell the user any `notes`."""
         with _tool_errors("generate_template"):
             return tools.generate_template(
-                text, variables, variants, min_confidence, engine, document_type
+                text,
+                variables,
+                variants,
+                min_confidence,
+                engine,
+                document_type,
+                _schema_text(json_schema),
             )
 
     @server.tool(annotations=READ_ONLY)

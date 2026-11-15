@@ -15,7 +15,12 @@ interface Props {
   onAnalyze: () => void;
   /** A sample selects its template engine (jinja2 unless it says otherwise). */
   onEngine?: (engine: string) => void;
+  /** An optional JSON Schema (text) the document follows. */
+  schema?: string;
+  onSchema?: (schema: string) => void;
 }
+
+const SCHEMA_TAB = -1;
 
 export function Editor({
   text,
@@ -27,11 +32,14 @@ export function Editor({
   onVariants,
   onAnalyze,
   onEngine,
+  schema = "",
+  onSchema,
 }: Props) {
-  const [tab, setTab] = useState(0); // 0 = document, n = variant n-1
-  const current = tab === 0 ? text : (variants[tab - 1] ?? "");
+  const [tab, setTab] = useState(0); // 0 = document, n = variant n-1, SCHEMA_TAB = schema
+  const current = tab === SCHEMA_TAB ? schema : tab === 0 ? text : (variants[tab - 1] ?? "");
   const setCurrent = (v: string) => {
-    if (tab === 0) onText(v);
+    if (tab === SCHEMA_TAB) onSchema?.(v);
+    else if (tab === 0) onText(v);
     else onVariants(variants.map((x, i) => (i === tab - 1 ? v : x)));
   };
   const tooLong = [text, ...variants].some((t) => t.length > maxChars);
@@ -72,6 +80,17 @@ export function Editor({
             + Add example
           </button>
         ) : null}
+        {onSchema ? (
+          <button
+            role="tab"
+            aria-selected={tab === SCHEMA_TAB}
+            class={tab === SCHEMA_TAB ? "active" : ""}
+            title="Optional: the JSON Schema this document follows (used offline, never fetched)"
+            onClick={() => setTab(SCHEMA_TAB)}
+          >
+            Schema{schema.trim() ? " ✓" : ""}
+          </button>
+        ) : null}
         <span class="spacer" />
         <select
           class="sample-picker"
@@ -88,6 +107,7 @@ export function Editor({
             onText(sample.text);
             onVariants((sample.variants ?? []).slice(0, maxVariants));
             onEngine?.(sample.engine ?? "jinja2");
+            onSchema?.("");
             setTab(0);
           }}
         >
@@ -110,11 +130,13 @@ export function Editor({
         value={current}
         spellcheck={false}
         placeholder={
-          tab === 0
-            ? "Paste a config file, email, manifest… then press Analyze."
-            : "Paste another version of the same document. Regions that differ become high-confidence variables."
+          tab === SCHEMA_TAB
+            ? "Optional: paste the JSON Schema this document follows (JSON or YAML). Its formats, consts, defaults and titles sharpen the suggestions. It is used offline: a schema the document links to is never downloaded."
+            : tab === 0
+              ? "Paste a config file, email, manifest… then press Analyze."
+              : "Paste another version of the same document. Regions that differ become high-confidence variables."
         }
-        aria-label={tab === 0 ? "Document text" : `Example ${tab + 1} text`}
+        aria-label={tab === SCHEMA_TAB ? "JSON Schema text" : tab === 0 ? "Document text" : `Example ${tab + 1} text`}
         onInput={(e) => setCurrent((e.target as HTMLTextAreaElement).value)}
       />
       <div class="row editor-actions">
