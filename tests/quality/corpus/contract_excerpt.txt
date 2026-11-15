@@ -1,0 +1,14 @@
+SERVICES AGREEMENT
+
+This Services Agreement (the "Agreement") is made on 1 March 2027 between
+Halden Robotics Ltd, a company registered in England and Wales under number
+09876543, whose registered office is at 22 Mill Lane, Cambridge CB2 1RX
+("the Client"), and Quayside Software Ltd, whose registered office is at
+5 Dock Street, Leeds LS10 1JF ("the Supplier").
+
+1. Term. This Agreement starts on 1 March 2027 and continues for 24 months.
+2. Fees. The Client will pay the Supplier £12,000 per month, invoiced monthly.
+3. Notice. Either party may end this Agreement with 90 days' written notice.
+
+Signed for Halden Robotics Ltd: Amelia Ward, Chief Operating Officer
+Signed for Quayside Software Ltd: Jonas Berg, Managing Director

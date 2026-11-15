@@ -215,6 +215,16 @@ def _non_trivial(tok: str) -> bool:
     return tok[0].isupper() and len(tok) >= 4
 
 
+# A contract's defined terms: (the "Agreement"), ("the Client"), (together, the "Parties").
+_DEFINED_TERM = re.compile(
+    r"\((?:[^()\n]{0,30}?\b)?(?:the[ \t]+)?[\"\u201c](?:the[ \t]+)?([A-Z][A-Za-z]*(?:[ \t][A-Z][A-Za-z]*){0,3})[\"\u201d]\)"
+)
+
+
+def _defined_terms(text: str) -> set[str]:
+    return {m.group(1) for m in _DEFINED_TERM.finditer(text)}
+
+
 class RepetitionDetector:
     name = "repetition"
 
@@ -232,10 +242,13 @@ class RepetitionDetector:
             for sp in spans:
                 for i in range(sp.start, sp.end):
                     in_phrase[i] = True
+        defined = _defined_terms(text)
         for m in _TOKEN.finditer(text):
             tok = m.group(0)
-            if not _non_trivial(tok) or in_phrase[m.start()]:
+            if not _non_trivial(tok) or in_phrase[m.start()] or tok in defined:
                 continue
+            if text[max(0, m.start() - 2) : m.start()].endswith(("$", "${", "%")):
+                continue  # $CI_COMMIT_SHA, ${HOME}, %APPDATA%: a variable reference
             if tok.isdigit() and len(tok) == 4 and m.start() and text[m.start() - 1] in "+-":
                 continue  # a time zone offset (+0000)
             if _PROTOCOL.match(tok):
@@ -253,7 +266,8 @@ class RepetitionDetector:
         # format's keyword, not data.
         keywords = {t for t, sp in occurrences.items() if len(sp) >= 2 and t not in mid_line}
         for phrase, spans in phrases.items():
-            occurrences[phrase] = spans
+            if phrase not in defined:
+                occurrences[phrase] = spans
 
         out: list[Candidate] = []
         for tok, spans in occurrences.items():

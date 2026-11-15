@@ -1,0 +1,17 @@
+Booking confirmed – reference QX7R2M
+
+Hello Daniel,
+
+Your flight is booked.
+
+Flight: BA 2491
+From: London Gatwick (LGW)
+To: Lisbon (LIS)
+Departs: Friday 12 February 2027 at 07:15
+Arrives: Friday 12 February 2027 at 10:05
+Seat: 14C
+Passenger: Mr Daniel Okafor
+
+Total paid: £184.60
+
+Manage your booking at https://www.example-air.com/manage?ref=QX7R2M

@@ -1,0 +1,23 @@
+variables:
+  DOCKER_REGISTRY: registry.gitlab.example.com/acme/storefront
+  KUBE_NAMESPACE: storefront-prod
+
+stages: [build, deploy]
+
+build:
+  stage: build
+  image: docker:27.3
+  script:
+    - docker build -t $DOCKER_REGISTRY:$CI_COMMIT_SHORT_SHA .
+    - docker push $DOCKER_REGISTRY:$CI_COMMIT_SHORT_SHA
+
+deploy:
+  stage: deploy
+  image: bitnami/kubectl:1.31
+  environment:
+    name: production
+    url: https://shop.acme.example.com
+  script:
+    - kubectl -n $KUBE_NAMESPACE set image deployment/storefront web=$DOCKER_REGISTRY:$CI_COMMIT_SHORT_SHA
+  only:
+    - main

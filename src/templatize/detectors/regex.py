@@ -475,6 +475,40 @@ PATTERNS: list[Pattern] = [
         group=2,
     ),
     Pattern(
+        "regex.account_ending",
+        VarType.STRING,
+        # "your account ending 4471", "card ending in 0042": the last digits of a number.
+        re.compile(
+            r"\b(?:account|card|number)[ \t]+ending[ \t]+(?:in[ \t]+|with[ \t]+)?(\d{2,6})\b", re.I
+        ),
+        0.8,
+        group=1,
+    ),
+    Pattern(
+        "regex.company_number",
+        VarType.STRING,
+        # "registered in England and Wales under number 09876543", "Company No. 01234567".
+        re.compile(
+            r"\b(?:[Rr]egistered|[Cc]ompany|[Rr]egistration)\b[^.\n]{0,60}?\b(?:[Nn]umber|[Nn]o\.?)"
+            r"[ \t:]*\r?\n?[ \t]*([A-Z]{0,2}\d{6,10})\b"
+        ),
+        0.8,
+        group=1,
+        name="company_number",
+    ),
+    Pattern(
+        "regex.payment_reference",
+        VarType.STRING,
+        # "with the reference RENT DEC 26", "Reference: INV 2026 0412" (bank statements).
+        re.compile(
+            r"\bwith (?:the )?reference[ \t]+([A-Z0-9][A-Z0-9 /-]{0,30}[A-Z0-9])(?=[.,;]?[ \t]*(?:\r?\n|$))",
+            re.MULTILINE,
+        ),
+        0.75,
+        group=1,
+        name="payment_reference",
+    ),
+    Pattern(
         "regex.semver",
         VarType.SEMVER,
         re.compile(
@@ -553,6 +587,9 @@ class RegexDetector:
                     name = f"{unit.group(1)}s" if unit else "duration"
                 if pat.detector == "regex.access_code":
                     name = snake_case(m.group(1))
+                if pat.detector == "regex.account_ending":
+                    kind = m.group(0).split()[0].lower()
+                    name = f"{kind}_last_digits"
                 if pat.detector == "regex.aws_id":
                     name = _AWS_ID_NAMES.get(m.group(1), f"{m.group(1)}_id")
                 out.append(
@@ -915,6 +952,10 @@ _CONTEXT_SKIP = frozenset(
         "from",
         "between",
         "per",
+        "now",
+        "currently",
+        "only",
+        "still",
         "than",
         "larger",
         "smaller",
@@ -978,6 +1019,8 @@ def _context_names(text: str, found: list[Candidate]) -> list[Candidate]:
         s = c.spans[0]
         line_start = text.rfind("\n", 0, s.start) + 1
         before = text[line_start : s.start]
+        if kind in ("reference", "id") and "(" in before and ")" not in before[before.rfind("(") :]:
+            before = before[before.rfind("(") + 1 :]  # "(PAY-1183)": not the word before "("
         word = None
         for _ in range(4):
             m = _WORD_BEFORE.search(before)

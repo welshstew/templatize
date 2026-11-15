@@ -125,9 +125,27 @@ _CODE_NOUNS = frozenset(
         "org",
         "organization",
         "channel",
+        "alert",
+        "index",
+        "metric",
+        "dashboard",
+        "workflow",
+        "pipeline",
+        "container",
+        "cronjob",
+        "schedule",
     ]
 )
 _WORD = re.compile(r"[A-Za-z]+")
+
+
+def _noun(word: str) -> str | None:
+    """The code noun a word names, singular: "pods" -> "pod", "indexes" -> "index"."""
+    w = word.lower()
+    for cand in (w, w[:-1] if w.endswith("s") else "", w[:-2] if w.endswith("es") else ""):
+        if cand in _CODE_NOUNS:
+            return cand
+    return None
 
 
 def _name(word: str) -> str:
@@ -285,9 +303,7 @@ def _code_spans(text: str) -> list[Candidate]:
             continue  # a flag, or an ALL_CAPS name
         before = _WORD.findall(text[max(0, m.start() - 40) : m.start()])
         after = _WORD.findall(text[m.end() : m.end() + 40])
-        noun = next(
-            (w.lower() for w in (before[-1:] + after[:1]) if w.lower() in _CODE_NOUNS), None
-        )
+        noun = next((n for w in (before[-1:] + after[:1]) if (n := _noun(w))), None)
         if noun:
             out.append(
                 _candidate(text, m.start(1), m.end(1), _name(noun), "cmd.code", 0.65, f"the {noun}")

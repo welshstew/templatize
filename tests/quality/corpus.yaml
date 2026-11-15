@@ -389,3 +389,54 @@ slack_message.txt:
 docker_compose_override.yml:
   want: [registry.acme.example.com/shop/api:5.3.0, debug, "new-checkout,fast-search"]
   reject: [registry.acme.example.com, 5.3.0]
+
+# Sixth batch: GitLab CI, a booking, a postmortem, Kafka, a contract, Ansible vars,
+# a server CSV, .npmrc, a bank notice, Helm values.
+
+gitlab-ci.yml:
+  want: [registry.gitlab.example.com/acme/storefront, storefront-prod, "docker:27.3", "bitnami/kubectl:1.31", production, https://shop.acme.example.com]
+  reject: [CI_COMMIT_SHORT_SHA, $CI_COMMIT_SHORT_SHA]
+
+booking_confirmation.txt:
+  want: [QX7R2M, Daniel, Okafor, BA 2491, London Gatwick, Lisbon, Friday 12 February 2027, "07:15", "10:05", 14C, £184.60]
+  reject: []
+  names: {Daniel: recipient_first_name, Okafor: recipient_last_name}
+
+postmortem.md:
+  want: [18 November 2026, Ines, Carvalho, Raj, Malhotra, SEV-2, "13:02", "13:47", checkout-api, payments, v4.18.0, 2 GiB, "#payments-oncall", CheckoutErrorRate, v4.17.3, PAY-1182, PAY-1183, 512 MiB]
+  reject: ["Ines Carvalho, Raj Malhotra"]
+  occurrences: {Raj: 3, Ines: 2}
+  names: {Raj: author_2_first_name, Malhotra: author_2_last_name, PAY-1183: reference, CheckoutErrorRate: alert}
+
+kafka.properties:
+  want: ["kafka-1.internal:9092", "kafka-2.internal:9092", "kafka-3.internal:9092", SASL_SSL, SCRAM-SHA-512, orders-consumers, earliest, "500"]
+  reject: []
+
+contract_excerpt.txt:
+  want: [1 March 2027, Halden Robotics Ltd, "09876543", "22 Mill Lane, Cambridge CB2 1RX", Quayside Software Ltd, "5 Dock Street, Leeds LS10 1JF", "12,000", Amelia Ward, Chief Operating Officer, Jonas Berg, Managing Director]
+  reject: [Agreement, Client, Supplier]
+  occurrences: {Halden Robotics Ltd: 2, Quayside Software Ltd: 2}
+  names: {Halden Robotics Ltd: client_company, Quayside Software Ltd: supplier_company, "22 Mill Lane, Cambridge CB2 1RX": client_address, "5 Dock Street, Leeds LS10 1JF": supplier_address, "09876543": company_number, Amelia Ward: signatory_name}
+
+ansible_vars.yml:
+  want: [deploy, www-data, /srv/storefront, "8000", "16", storefront, shop.acme.example.com, www.shop.acme.example.com, ops@acme.example.com]
+  reject: ["{{ vault_postgres_password }}", vault_postgres_password]
+
+servers.csv:
+  want: [10.10.1.11, 10.10.1.12, 10.10.2.21]
+  reject: []
+  loops: {rows: 3}
+
+npmrc:
+  want: [https://npm.acme.example.com/, npm_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8]
+  reject: []
+
+bank_notice.txt:
+  want: [Hughes, "1,250.00", "4471", 3 December 2026, KESTREL HOMES LTD, RENT DEC 26, "3,812.44", 0345 600 1234]
+  reject: []
+  names: {"4471": account_last_digits, KESTREL HOMES LTD: payer_name, RENT DEC 26: payment_reference, "3,812.44": balance}
+
+helm_values.yaml:
+  want: ["3", ghcr.io/acme/notifications, 2.7.1, nginx, notify.acme.example.com, notify-tls, 500m, 256Mi]
+  reject: []
+  occurrences: {notify.acme.example.com: 2}

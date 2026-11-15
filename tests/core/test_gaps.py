@@ -210,3 +210,86 @@ def test_well_known_constants_do_not_repeat_into_variables() -> None:
     )
     found = {c.value for c in RepetitionDetector().detect(DetectionContext(text=text)).candidates}
     assert not found & {"Mozilla/5.0", "Linux", "x86_64", "Warning"}
+
+
+# --- corpus batch six -------------------------------------------------------------
+
+
+def test_variable_references_are_not_repeated_values() -> None:
+    text = "- docker build -t $REG:$CI_COMMIT_SHA .\n- docker push $REG:$CI_COMMIT_SHA\n${HOME} ${HOME}\n"
+    found = {c.value for c in RepetitionDetector().detect(DetectionContext(text=text)).candidates}
+    assert not found & {"CI_COMMIT_SHA", "HOME", "REG"}
+
+
+def test_contract_defined_terms_and_parties() -> None:
+    text = (
+        'This Agreement (the "Agreement") is made between Halden Robotics Ltd, a company '
+        "registered under number\n09876543, whose office is at 22 Mill Lane, Cambridge CB2 1RX\n"
+        '("the Client"), and Quayside Software Ltd, whose office is at\n'
+        '5 Dock Street, Leeds LS10 1JF ("the Supplier").\n'
+        "The Client pays the Supplier monthly under the Agreement.\n"
+        "Signed for Halden Robotics Ltd: Amelia Ward, Chief Operating Officer\n"
+    )
+    found = values(text)
+    assert found["Halden Robotics Ltd"] == "client_company"
+    assert found["Quayside Software Ltd"] == "supplier_company"
+    assert found["22 Mill Lane, Cambridge CB2 1RX"] == "client_address"
+    assert found["5 Dock Street, Leeds LS10 1JF"] == "supplier_address"
+    assert found["09876543"] == "company_number"
+    assert found["Amelia Ward"] == "signatory_name"
+    assert found["Chief Operating Officer"] == "signatory_title"
+    assert not {"Agreement", "Client", "Supplier"} & set(found)
+
+
+def test_address_followed_by_a_parenthesis() -> None:
+    found = values('at\n5 Dock Street, Leeds LS10 1JF ("the Supplier").\n')
+    assert "5 Dock Street, Leeds LS10 1JF" in found
+
+
+def test_author_list_beats_the_whole_value() -> None:
+    text = "**Authors:** Ines Carvalho, Raj Malhotra\n\n- Raj rolled back.\n"
+    found = values(text)
+    assert found["Ines Carvalho"] == "author_1_name"  # first name not used alone
+    assert found["Raj"] == "author_2_first_name"
+    assert found["Malhotra"] == "author_2_last_name"
+    assert "Ines Carvalho, Raj Malhotra" not in found
+
+
+def test_reference_in_parentheses_is_not_named_after_a_unit() -> None:
+    assert values("- Raj: lower the cache to 512 MiB (PAY-1183)\n")["PAY-1183"] == "reference"
+
+
+def test_code_span_with_a_plural_noun() -> None:
+    found = values("The `checkout-api` pods ran out of memory; alert `CheckoutErrorRate` fired.\n")
+    assert found["checkout-api"] == "pod"
+    assert found["CheckoutErrorRate"] == "alert"
+
+
+def test_bank_notice_values() -> None:
+    text = (
+        "We received a payment of £1,250.00 into your account ending 4471.\n"
+        "The payment was from KESTREL HOMES LTD with the reference RENT DEC 26.\n"
+        "Your available balance is now £3,812.44.\n"
+    )
+    found = values(text)
+    assert found["4471"] == "account_last_digits"
+    assert found["KESTREL HOMES LTD"] == "payer_name"
+    assert found["RENT DEC 26"] == "payment_reference"
+    assert found["3,812.44"] == "balance"
+
+
+def test_company_name_broken_over_lines_is_not_cut() -> None:
+    text = "the position of Engineer at Orbit\nAnalytics GmbH, reporting to Lena Brandt.\n"
+    assert "Analytics GmbH" not in values(text)
+
+
+def test_greeting_name_gives_the_last_name_of_the_full_mention() -> None:
+    found = people("Hello Daniel,\n\nPassenger: Mr Daniel Okafor\n")
+    assert found["recipient_first_name"] == "Daniel"
+    assert found["recipient_last_name"] == "Okafor"
+
+
+def test_title_after_a_phrase_person() -> None:
+    found = people("You'll be reporting to Lena Brandt, Head of Data Platform.\n")
+    assert found["manager_name"] == "Lena Brandt"
+    assert found["manager_title"] == "Head of Data Platform"
