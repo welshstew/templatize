@@ -762,7 +762,7 @@ def _products(text: str) -> list[Candidate]:
 
 # A contract's parties: "Halden Robotics Ltd, a company registered ... ("the Client")".
 _PARTY = re.compile(
-    r"([A-Z][\w&'.-]*(?:[ ][A-Z&][\w&'.-]*){0,5}[ ](?:Ltd|Limited|plc|PLC|Inc|LLC|LLP|GmbH|AG|SA|BV|"
+    r"(?<![\w&'.-])([A-Z][\w&'.-]{0,40}(?:[ ][A-Z&][\w&'.-]{0,40}){0,5}[ ](?:Ltd|Limited|plc|PLC|Inc|LLC|LLP|GmbH|AG|SA|BV|"
     r"Corp|Corporation|Pty Ltd)\.?)(?=[,\s(])[^()]{0,300}?\([ \t]*(?:the[ \t]+)?[\"\u201c](?:the[ \t]+)?"
     r"([A-Z][a-z]+)[\"\u201d][ \t]*\)"
 )

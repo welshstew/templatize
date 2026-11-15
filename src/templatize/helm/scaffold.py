@@ -99,7 +99,10 @@ def scaffold_comments() -> dict[str, list[str]]:
 
 
 def _load(text: str, r: Resource) -> dict[str, Any]:
-    data = yaml.safe_load(text[r.chunk.start : r.chunk.end])
+    try:
+        data = yaml.safe_load(text[r.chunk.start : r.chunk.end])
+    except (yaml.YAMLError, ValueError, RecursionError):
+        return {}  # not parseable: treated as a resource without fields
     return data if isinstance(data, dict) else {}
 
 

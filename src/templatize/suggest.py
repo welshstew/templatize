@@ -41,13 +41,12 @@ def check_limits(text: str, variants: Sequence[str] = ()) -> None:
 
 # Template syntax already in the document (GitHub Actions ${{ github.sha }}, Jinja,
 # Helm): what is inside it is an expression, not a value to extract.
-_TEMPLATE_EXPR = re.compile(r"\$?\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
+# Bounded, so an unclosed "{{" does not scan to the end of the text from every "{{".
+_TEMPLATE_EXPR = re.compile(r"\$?\{\{.{0,496}?\}\}|\{%.{0,496}?%\}", re.DOTALL)
 
 
 def _outside_template_syntax(text: str, raw: list[Candidate]) -> list[Candidate]:
-    exprs = [
-        (m.start(), m.end()) for m in _TEMPLATE_EXPR.finditer(text) if m.end() - m.start() < 500
-    ]
+    exprs = [(m.start(), m.end()) for m in _TEMPLATE_EXPR.finditer(text)]
     if not exprs:
         return raw
     starts = [a for a, _ in exprs]  # disjoint and sorted: finditer does not overlap
