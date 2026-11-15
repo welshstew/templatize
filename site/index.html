@@ -149,11 +149,13 @@ ENVIRONMENT="production"</code></pre>
         <li><strong>Web UI</strong>: highlight, accept or reject, select any text, live preview, one-click zip</li>
         <li><strong>CLI</strong>: <code>templatize suggest</code> / <code>templatize build</code></li>
         <li><strong>HTTP API</strong> and an <strong>MCP server</strong> (stdio and streamable HTTP)</li>
-        <li><strong>Detectors</strong>: patterns, key/value, repetition, multi-example diff</li>
+        <li><strong>Detectors</strong>: patterns (IPs, hosts, endpoints, dates, versions, IDs, amounts, tokens), key/value for dozens of config formats, postal addresses, names in letters and contracts, shell commands, SQL, repetition, multi-example diff</li>
+        <li><strong>Loops</strong>: repeated blocks such as list items, table rows, CSV records and SQL rows become <code>{% for %}</code> loops</li>
         <li><strong>Optional NER</strong>: names, organisations, addresses, money (GLiNER, CPU, no PyTorch)</li>
         <li><strong>Optional local LLM</strong>: better names and missed values (llama.cpp; CPU, NVIDIA or AMD via Vulkan)</li>
         <li><strong>Containers</strong>: non-root, read-only, and verified offline by an automated test</li>
-        <li><strong>Pluggable engines</strong>: Jinja2 today; Helm, Liquid and others can be added</li>
+        <li><strong>Helm charts</strong> from Kubernetes manifests or a Compose file, and <strong>Ansible roles</strong>, both checked by the same round trip</li>
+        <li><strong>Pluggable engines</strong>: Jinja2 today; Handlebars, Liquid and others can be added</li>
       </ul>
     </section>
 

@@ -130,7 +130,7 @@ class _NoAliasLoader(yaml.SafeLoader):
 def load(text: str, label: str = "values.yaml") -> Tree:
     try:
         data = yaml.load(text, Loader=_NoAliasLoader)  # SafeLoader subclass
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
         raise ValuesError(f"{label}: {exc}") from None
     if data is None:
         return {}

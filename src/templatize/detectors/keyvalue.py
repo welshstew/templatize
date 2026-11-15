@@ -117,6 +117,20 @@ _VCAL_NAMES = {
 _ADR_PARTS = (None, None, "street", "city", "region", "postcode", "country")
 _NGINX = re.compile(r"^[ \t]*([a-z_][a-z0-9_]*)[ \t]+([^;{}#\r\n]+?)[ \t]*;[ \t]*(?:#.*)?$")
 
+# nginx directives whose first argument names the second: a header, a variable, a param.
+_NAMED_DIRECTIVES = frozenset(
+    {
+        "proxy_set_header",
+        "add_header",
+        "more_set_headers",
+        "fastcgi_param",
+        "uwsgi_param",
+        "set",
+        "env",
+    }
+)
+_NAMED_ARG = re.compile(r"(\$?[A-Za-z_][\w-]*)[ \t]+(\S.*)$")
+
 _GENERIC_KEYS = frozenset(
     [
         "host",
@@ -485,11 +499,23 @@ class KeyValueDetector:
             nm = _NGINX.match(line)
             if nm:
                 value = nm.group(2)
-                value, s = _unquote(value, nm.start(2))
+                key = nm.group(1)
+                vstart = nm.start(2)
+                named = _NAMED_ARG.match(value) if key in _NAMED_DIRECTIVES else None
+                if named:
+                    # proxy_set_header X-Env production: the value is named after the header.
+                    key, vstart, value = (
+                        named.group(1).lstrip("$"),
+                        vstart + named.start(2),
+                        named.group(2),
+                    )
+                if value.startswith("$"):
+                    continue  # proxy_set_header Host $host: an nginx variable
+                value, s = _unquote(value, vstart)
                 self._add(
                     out,
                     ctx.text,
-                    nm.group(1),
+                    key,
                     None,
                     line_start + s,
                     line_start + s + len(value),
