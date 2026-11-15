@@ -13,7 +13,17 @@ interface Props {
   original: string;
   /** What the Ansible role tab packages (the accepted variables and loops). */
   role: RoleInput;
+  /** Template engine of the template/values/script tabs, and the engines to choose from. */
+  engine: string;
+  engines: string[];
+  onEngine: (engine: string) => void;
 }
+
+const ENGINE_LABELS: Record<string, string> = {
+  jinja2: "Jinja2",
+  envsubst: "envsubst",
+  terraform: "Terraform templatefile",
+};
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -35,7 +45,17 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function OutputPanel({ build, buildError, preview, previewChanged, original, role }: Props) {
+export function OutputPanel({
+  build,
+  buildError,
+  preview,
+  previewChanged,
+  original,
+  role,
+  engine,
+  engines,
+  onEngine,
+}: Props) {
   const [tab, setTab] = useState<Tab>("preview");
   const files: Record<Exclude<Tab, "preview" | "ansible">, { label: string; content: string } | null> = {
     template: build ? { label: build.template.path, content: build.template.content } : null,
@@ -46,7 +66,7 @@ export function OutputPanel({ build, buildError, preview, previewChanged, origin
     ["preview", "Preview"],
     ["template", files.template?.label ?? "template"],
     ["env", files.env?.label ?? ".env"],
-    ["script", "render.py"],
+    ["script", files.script?.label ?? "render.py"],
     ["ansible", "Ansible role"],
   ];
 
@@ -88,6 +108,18 @@ export function OutputPanel({ build, buildError, preview, previewChanged, origin
 
   return (
     <section class="output" aria-label="Generated output">
+      {engines.length > 1 && tab !== "ansible" ? (
+        <label class="engine">
+          Template engine{" "}
+          <select value={engine} onChange={(e) => onEngine((e.target as HTMLSelectElement).value)}>
+            {engines.map((e) => (
+              <option key={e} value={e}>
+                {ENGINE_LABELS[e] ?? e}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <div class="tabs" role="tablist">
         {tabs.map(([id, label]) => (
           <button
@@ -101,7 +133,16 @@ export function OutputPanel({ build, buildError, preview, previewChanged, origin
           </button>
         ))}
       </div>
-      <div class="tab-body">{body}</div>
+      <div class="tab-body">
+        {tab !== "ansible" && build?.notes?.length ? (
+          <ul class="notes" aria-label="Notes">
+            {build.notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        ) : null}
+        {body}
+      </div>
     </section>
   );
 }

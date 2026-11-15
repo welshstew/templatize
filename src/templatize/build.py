@@ -9,7 +9,6 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from templatize.emitters import EmittedFile, get_emitter
-from templatize.envfile import serialize_env
 from templatize.ir import (
     Candidate,
     IRValidationError,
@@ -28,7 +27,6 @@ from templatize.loops import compatible_candidates, singular
 from templatize.naming import infer_type
 from templatize.roundtrip import RoundTripResult, check_roundtrip
 from templatize.suggest import check_limits
-from templatize.valuesfile import serialize_values
 
 
 class VariableSpec(BaseModel):
@@ -130,6 +128,8 @@ class BuildResult(BaseModel):
     env: EmittedFile
     runner: list[EmittedFile]
     roundtrip: RoundTripResult
+    notes: list[str] = []
+    """What the user should know: loops an engine cannot express, name conflicts."""
 
     @property
     def files(self) -> list[EmittedFile]:
@@ -220,18 +220,24 @@ def accept_suggestions(
 
 def build_ir(ir: TemplateIR, engine: str = "jinja2") -> BuildResult:
     emitter = get_emitter(engine)
+    notes: list[str] = []
+    if ir.loops and not emitter.supports_loops:
+        n = len([lp for lp in ir.loops if lp.parent is None])
+        ir = ir.model_copy(update={"loops": []})
+        notes.append(
+            f"{engine} templates have no loops: the {n} accepted loop{'' if n == 1 else 's'} "
+            "stay literal text (use jinja2 to keep them as loops)"
+        )
+    notes += emitter.notes(ir)
     template = emitter.emit(ir)
     return BuildResult(
         engine=engine,
         ir=ir,
         template=EmittedFile(path=emitter.template_filename, content=template),
-        env=(
-            EmittedFile(path="values.yaml", content=serialize_values(ir))
-            if ir.loops
-            else EmittedFile(path=".env", content=serialize_env(ir))
-        ),
+        env=emitter.values_file(ir),
         runner=emitter.runner_files(ir),
         roundtrip=check_roundtrip(ir, emitter, template),
+        notes=notes,
     )
 
 

@@ -137,6 +137,8 @@ export interface BuildResponse {
   variables: { name: string; type: string; value: string; spans: Span[] }[];
   loops?: { name: string; item: string }[];
   roundtrip: RoundTrip;
+  /** What the user should know: loops the engine cannot express, renamed variables. */
+  notes?: string[];
 }
 
 export interface ChartRoundTrip {
@@ -316,10 +318,10 @@ export const api = {
     post<SuggestResult>("/suggest", { text, variants }, signal),
   suggestLlm: (text: string, variants: string[], signal?: AbortSignal) =>
     post<LlmReviewResponse>("/suggest/llm", { text, variants }, signal),
-  build: (text: string, variables: VariableSpec[], loops: LoopSpec[], signal?: AbortSignal) =>
-    post<BuildResponse>("/build", { text, variables, loops }, signal),
-  render: (template: string, values: RenderValues, signal?: AbortSignal) =>
-    post<RenderResponse>("/render", { template, values }, signal),
+  build: (text: string, variables: VariableSpec[], loops: LoopSpec[], engine: string, signal?: AbortSignal) =>
+    post<BuildResponse>("/build", { text, variables, loops, engine }, signal),
+  render: (template: string, values: RenderValues, engine: string, signal?: AbortSignal) =>
+    post<RenderResponse>("/render", { template, values, engine }, signal),
   chart: (
     text: string,
     variants: string[],
@@ -413,11 +415,16 @@ export const api = {
     if (!resp.ok) throw await errorFrom(resp);
     return await resp.blob();
   },
-  download: async (text: string, variables: VariableSpec[], loops: LoopSpec[] = []): Promise<Blob> => {
+  download: async (
+    text: string,
+    variables: VariableSpec[],
+    loops: LoopSpec[] = [],
+    engine = "jinja2",
+  ): Promise<Blob> => {
     const resp = await fetch("/download", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ text, variables, loops }),
+      body: JSON.stringify({ text, variables, loops, engine }),
     });
     if (!resp.ok) throw await errorFrom(resp);
     return await resp.blob();

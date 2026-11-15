@@ -98,6 +98,7 @@ export function App() {
   const llmAbort = useRef<AbortController | null>(null);
   const [profile, setProfile] = useState<DocumentProfile | null>(null);
   const [output, setOutput] = useState<"jinja" | "helm">("jinja");
+  const [engine, setEngine] = useState("jinja2");
   const [helmDismissed, setHelmDismissed] = useState(false);
   /** In Helm mode the document folds away below the chart until asked for. */
   const [docOpen, setDocOpen] = useState(false);
@@ -218,7 +219,7 @@ export function App() {
         return;
       }
       setBuildPending(true);
-      api.build(text, specs, loopSpecs, signal).then(
+      api.build(text, specs, loopSpecs, engine, signal).then(
         (b) => {
           setBuild(b);
           setBuildError(null);
@@ -231,7 +232,7 @@ export function App() {
         },
       );
     },
-    [mode, output, text, specsKey],
+    [mode, output, text, specsKey, engine],
     250,
   );
 
@@ -270,11 +271,13 @@ export function App() {
   useDebouncedEffect(
     (signal) => {
       if (mode !== "review" || !build) return;
-      api.render(build.template.content, previewValues(items, loops), signal).then(setPreview, (e) => {
+      // An engine without loops built them as literal text: send only the plain values.
+      const values = previewValues(items, build.loops?.length ? loops : []);
+      api.render(build.template.content, values, build.engine, signal).then(setPreview, (e) => {
         if (!isAbort(e)) setPreview({ ok: false, output: null, error: String(e) });
       });
     },
-    [mode, build?.template.content, valuesKey],
+    [mode, build?.template.content, build?.engine, valuesKey],
     200,
   );
 
@@ -324,7 +327,7 @@ export function App() {
             { chartName: chartName || null, style: chartStyle },
             chartStyle === "exact" ? loopSpecs : [],
           )
-        : await api.download(text, specs, loopSpecs);
+        : await api.download(text, specs, loopSpecs, engine);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -554,6 +557,9 @@ export function App() {
               previewChanged={previewChanged(items, loops)}
               original={reviewedText.current}
               role={{ text, variants: reviewedVariants.current, variables: specs, loops: loopSpecs }}
+              engine={engine}
+              engines={info?.engines ?? ["jinja2"]}
+              onEngine={setEngine}
             />
           )}
         </main>

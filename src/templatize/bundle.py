@@ -21,16 +21,18 @@ Files:
 - `{values_file}`: the extracted values ({count})
 - {runners}
 
-Render it (needs [uv](https://docs.astral.sh/uv/), which installs the dependencies):
+Render it (needs {requirements}):
 
     {command}
+{alternative}
+Edit `{values_file}` to change values{lists}. Round-trip check when generated: {verdict}.
+{notes}"""
 
+_JINJA_PIP = """
 Or with pip:
 
     pip install jinja2 {loader_pip}
     python render.py -o output.txt
-
-Edit `{values_file}` to change values{lists}. Round-trip check when generated: {verdict}.
 """
 
 
@@ -42,12 +44,18 @@ def _count(result: BuildResult) -> str:
 
 def bundle_readme(result: BuildResult) -> str:
     emitter = get_emitter(result.engine)
+    alternative = (
+        _JINJA_PIP.format(loader_pip="pyyaml" if result.ir.loops else "python-dotenv")
+        if result.engine == "jinja2"
+        else ""
+    )
     return README.format(
         template=result.template.path,
         engine=result.engine,
         values_file=result.env.path,
         count=_count(result),
-        loader_pip="pyyaml" if result.ir.loops else "python-dotenv",
+        requirements=emitter.requirements(),
+        alternative=alternative,
         lists=(
             ": the lists are loops, so adding an item adds a block to the output"
             if result.ir.loops
@@ -59,6 +67,7 @@ def bundle_readme(result: BuildResult) -> str:
         or "no runner script",
         command=emitter.run_command(),
         verdict="PASS" if result.roundtrip.ok else "FAIL",
+        notes="".join(f"\nNote: {n}\n" for n in result.notes),
     )
 
 
@@ -68,7 +77,7 @@ def make_zip(result: BuildResult) -> bytes:
         for f in [*result.files]:
             info = zipfile.ZipInfo(f.path, date_time=_FIXED_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
-            info.external_attr = (0o755 if f.path.endswith(".py") else 0o644) << 16
+            info.external_attr = (0o755 if f.path.endswith((".py", ".sh")) else 0o644) << 16
             zf.writestr(info, f.content.encode("utf-8", "surrogatepass"))
         info = zipfile.ZipInfo("README.md", date_time=_FIXED_TIME)
         info.compress_type = zipfile.ZIP_DEFLATED

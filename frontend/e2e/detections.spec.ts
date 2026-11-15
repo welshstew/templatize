@@ -95,3 +95,23 @@ test("a multi-line address keeps its line break when edited", async ({ page }) =
   await page.getByRole("tab", { name: "Preview", exact: true }).click();
   await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText("2 Quay Street\nBristol BS1 4XY");
 });
+
+for (const [engine, template, placeholder] of [
+  ["envsubst", "template.tmpl", "${SERVER_NAME}"],
+  ["terraform", "template.tftpl", "${server_name}"],
+] as const) {
+  test(`the ${engine} engine builds, round-trips and previews edits`, async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel("Load a sample document").selectOption("nginx");
+    await analyze(page);
+    await page.getByRole("button", { name: "Accept all", exact: true }).click();
+    await page.getByLabel("Template engine").selectOption(engine);
+    await expect(page.getByRole("tab", { name: template, exact: true })).toBeVisible();
+    await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+    await page.getByRole("tab", { name: template, exact: true }).click();
+    await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText(placeholder);
+    await page.getByLabel("Preview value for server_name").fill("shop.example.org");
+    await page.getByRole("tab", { name: "Preview", exact: true }).click();
+    await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText("server_name shop.example.org;");
+  });
+}

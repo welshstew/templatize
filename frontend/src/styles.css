@@ -116,6 +116,11 @@ input[aria-invalid="true"] { border-color: var(--fail); }
 .banner.error { background: var(--fail-bg); color: var(--fail); border: 1px solid var(--fail); }
 .error-box { background: var(--fail-bg); color: var(--fail); border: 1px solid var(--fail); border-radius: var(--radius); padding: 10px; white-space: pre-wrap; }
 
+/* output panel: engine choice and notes */
+.output .engine { display: flex; align-items: center; justify-content: flex-end; gap: 6px; font-size: 0.9em; color: var(--muted, inherit); margin-bottom: 6px; }
+.output .notes { margin: 0 0 8px; padding: 8px 10px 8px 28px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.9em; }
+.output .notes li + li { margin-top: 4px; }
+
 /* tabs */
 .tabs { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 8px; }
 .tabs > button, .tab-with-close > button:first-child { border-color: transparent; background: none; }

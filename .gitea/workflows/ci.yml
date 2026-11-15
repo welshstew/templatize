@@ -23,9 +23,10 @@ jobs:
       - run: make frontend frontend-test
       # GLiNER model (~190 MB, pinned + verified) so the NER parity tests run in CI
       - run: make ner-model
-      # helm, kompose (pinned + verified, as in the app image) and ansible-core, so the
-      # tests that render real charts and run real playbooks don't skip
+      # helm, kompose (pinned + verified, as in the app image), ansible-core and envsubst,
+      # so the tests that render real charts, playbooks and render.sh scripts don't skip
       - run: |
+          command -v envsubst || { apt-get update -qq && apt-get install -y -qq gettext-base; }
           python3 scripts/fetch-helm.py "$HOME/.tools"
           python3 scripts/fetch-kompose.py "$HOME/.tools"
           uv tool install ansible-core==2.20.7

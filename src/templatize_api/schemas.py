@@ -54,6 +54,8 @@ class BuildResponse(BaseModel):
     variables: list[Variable]
     loops: list[Loop] = []
     roundtrip: RoundTripResult
+    notes: list[str] = []
+    """What the user should know: loops an engine cannot express, renamed variables."""
 
 
 class RenderRequest(BaseModel):

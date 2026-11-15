@@ -285,3 +285,26 @@ def test_tools_generate_ansible_role() -> None:
     assert {"kafka/templates/settings.py.j2", "kafka/defaults/main.yml", "playbook.yml"} <= paths
     defaults = next(f.content for f in res.files if f.path == "kafka/defaults/main.yml")
     assert "kafka_brokers:\n- 10.0.0.1:9092\n" in defaults
+
+
+@pytest.mark.parametrize(
+    ("engine", "placeholder", "values_file"),
+    [("envsubst", "${DB_HOST}", "values.env"), ("terraform", "${db_host}", "terraform.tfvars")],
+)
+def test_generate_with_other_engines(engine: str, placeholder: str, values_file: str) -> None:
+    async def main() -> None:
+        async with Client(create_server()) as c:
+            gen = await c.call_tool(
+                "generate_template",
+                {
+                    "text": TEXT,
+                    "variables": [{"name": "db_host", "value": "db01.example.com"}],
+                    "engine": engine,
+                },
+            )
+            out = gen.structured_content
+            assert not gen.is_error and out["roundtrip"]["ok"]
+            assert out["engine"] == engine and out["values_filename"] == values_file
+            assert out["template"].count(placeholder) == 2
+
+    run(main)
