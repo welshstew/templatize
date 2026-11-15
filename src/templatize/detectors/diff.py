@@ -94,7 +94,9 @@ def _char_segments(a: str, b: str) -> list[Segment]:
     a_off = _offsets(a_lines)
     b_off = _offsets(b_lines)
     raw: list[Segment] = []
-    lm = SequenceMatcher(None, a_lines, b_lines, autojunk=False)
+    # In a long document, lines that occur everywhere ("}", "---") make the line
+    # matcher quadratic; past AUTOJUNK_LINES difflib may ignore them as anchors.
+    lm = SequenceMatcher(None, a_lines, b_lines, autojunk=len(b_lines) > AUTOJUNK_LINES)
     for tag, i1, i2, j1, j2 in lm.get_opcodes():
         ca1, ca2, cb1, cb2 = a_off[i1], a_off[i2], b_off[j1], b_off[j2]
         if tag == "equal":
@@ -135,8 +137,40 @@ def _offsets(lines: list[str]) -> list[int]:
     return out
 
 
+# Token-level matching is quadratic; past this size a replaced block is one change.
+MAX_BLOCK_TOKENS = 1000
+AUTOJUNK_LINES = 2000
+# A changed region longer than this is not one value (a certificate block still fits).
+MAX_REGION_CHARS = 10_000
+# An example sharing fewer of the document's words than this is not a version of it.
+MIN_SHARED_WORDS = 0.2
+_WORD = re.compile(r"[A-Za-z_]{3,}")
+
+
+def _shared_words(a: str, b: str) -> float:
+    """The share of ``a``'s words (keys, structure, prose) that also occur in ``b``, in
+    O(n). A version of the document keeps them even when every value changes."""
+    a_words = _WORD.findall(a)
+    if len(a_words) < 20:
+        return 1.0
+    b_words = set(_WORD.findall(b))
+    return sum(w in b_words for w in a_words) / len(a_words)
+
+
 def _token_segments(a: str, b: str, a_base: int, b_base: int) -> list[Segment]:
     at, bt = _tokens(a), _tokens(b)
+    if len(at) + len(bt) > MAX_BLOCK_TOKENS:
+        # Too big to match token by token. Lines changed in place (the same number on
+        # both sides) are compared pair by pair; anything else is one change.
+        a_lines, b_lines = a.splitlines(keepends=True), b.splitlines(keepends=True)
+        if len(a_lines) != len(b_lines) or len(a_lines) < 2:
+            return [Segment(a_base, a_base + len(a), b_base, b_base + len(b), False)]
+        out: list[Segment] = []
+        ai, bi = a_base, b_base
+        for al, bl in zip(a_lines, b_lines, strict=True):
+            out.extend(_token_segments(al, bl, ai, bi))
+            ai, bi = ai + len(al), bi + len(bl)
+        return out
     ao, bo = _offsets(at), _offsets(bt)
     tm = SequenceMatcher(None, at, bt, autojunk=False)
     return [
@@ -318,13 +352,39 @@ class DiffDetector:
         per_variant: list[list[Segment]] = []
         spans: list[tuple[int, int]] = []
         notices: list[Notice] = []
+        skipped: set[int] = set()  # examples too different to compare: they change nothing
         for k, b in enumerate(ctx.variants):
+            if _shared_words(a, b) < MIN_SHARED_WORDS:
+                notices.append(
+                    Notice(
+                        kind="info",
+                        message=(
+                            f"variant {k + 1} shares almost no words with the document, so "
+                            "it looks like a different document; it was not compared"
+                        ),
+                    )
+                )
+                per_variant.append([])
+                skipped.add(k)
+                continue
             segs = _widen(a, b, _char_segments(a, b))
             per_variant.append(segs)
             for s in segs:
                 if s.equal:
                     continue
                 av, bv = a[s.a1 : s.a2], b[s.b1 : s.b2]
+                if s.a2 - s.a1 > MAX_REGION_CHARS:
+                    notices.append(
+                        Notice(
+                            kind="structural_difference",
+                            message=(
+                                f"variant {k + 1} differs over {s.a2 - s.a1} characters here, "
+                                "too much to be one value; not templated"
+                            ),
+                            span=Span(start=s.a1, end=s.a2),
+                        )
+                    )
+                    continue
                 structural = (
                     s.a1 == s.a2
                     or not av.strip()
@@ -364,7 +424,9 @@ class DiffDetector:
                 (
                     a[s1:s2],
                     *(
-                        _same_edges(
+                        a[s1:s2]
+                        if k in skipped
+                        else _same_edges(
                             a[s1:s2], ctx.variants[k][_map_start(segs, s1) : _map_end(segs, s2)]
                         )
                         for k, segs in enumerate(per_variant)
