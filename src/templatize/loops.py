@@ -37,7 +37,7 @@ from templatize.ir import (
     Span,
     VarType,
 )
-from templatize.naming import dedupe_names, infer_type, snake_case
+from templatize.naming import dedupe_names, infer_type, snake_case, type_name
 
 try:
     _Loader: type = yaml.CSafeLoader
@@ -74,6 +74,19 @@ class Found:
 
 
 # --- field inference -------------------------------------------------------------
+
+_ENDPOINT = re.compile(r"[\w.-]+:\d{1,5}")
+
+
+def _shape_name(value: str, *, first_plain: bool) -> str:
+    """A field with no key to name it, named by what it looks like: ``server web-01
+    10.0.1.11:8080`` gives ``name`` and ``endpoint`` rather than ``value``, ``value_2``."""
+    vtype = infer_type(value)
+    if vtype is not VarType.STRING:
+        return type_name(vtype)
+    if _ENDPOINT.fullmatch(value):
+        return "endpoint"
+    return "name" if first_plain and re.fullmatch(r"[A-Za-z][\w.-]*", value) else "value"
 
 
 def infer_fields(text: str, items: Sequence[Span]) -> list[list[Span]] | None:
@@ -809,6 +822,8 @@ def _candidate(text: str, found: Found) -> LoopCandidate | None:
             name = snake_case(named)
         else:
             name, _, _ = _name_for(text, first.start, value)
+            if name == "value":
+                name = _shape_name(value, first_plain=not any(n == "name" for n in names))
         names.append(name)
         types.append(infer_type(value))
     names = dedupe_names(names)

@@ -149,6 +149,8 @@ def cmd_build(args: argparse.Namespace) -> int:
         if not result.template.content.endswith("\n"):
             sys.stdout.write("\n")
 
+    for note in result.notes:
+        print(f"note: {note}", file=sys.stderr)
     rt = result.roundtrip
     verdict = "PASS" if rt.ok else "FAIL"
     print(

@@ -108,6 +108,8 @@ class GenerateTemplateResult(BaseModel):
     """render.py: `uv run render.py > output.txt` renders template + .env."""
     variables: list[GeneratedVariable]
     roundtrip: RoundTripResult
+    notes: list[str] = []
+    """What to tell the user: loops the engine cannot express, renamed variables."""
     """ok=true means rendering the template with the .env values reproduces the input byte for byte."""
     used_suggestions: bool
     """True when no variables were given and suggestions were accepted automatically."""
@@ -276,6 +278,7 @@ def generate_template(
         ],
         roundtrip=result.roundtrip,
         used_suggestions=variables is None,
+        notes=result.notes,
     )
 
 

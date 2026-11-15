@@ -28,7 +28,7 @@ def specs(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def test_healthz_and_info(client: TestClient) -> None:
     assert client.get("/healthz").json() == {"status": "ok"}
     info = client.get("/info").json()
-    assert info["engines"] == ["jinja2"]
+    assert info["engines"] == ["envsubst", "jinja2", "terraform"]
     assert info["limits"]["max_variants"] == 3
     assert info["optional_detectors"] == {"ner": False, "llm": False}
 
@@ -239,3 +239,60 @@ def test_role_and_download(client: TestClient) -> None:
         assert "db/tasks/main.yml" in zf.namelist()
     bad = client.post("/role", json={**body, "role_name": "Bad-Name"})
     assert bad.status_code == 422 and "invalid role name" in bad.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("engine", "files"),
+    [
+        ("envsubst", {"template.tmpl", "values.env", "render.sh", "README.md"}),
+        ("terraform", {"template.tftpl", "terraform.tfvars", "main.tf", "README.md"}),
+    ],
+)
+def test_build_render_and_download_with_other_engines(
+    client: TestClient, engine: str, files: set[str]
+) -> None:
+    text = read_fixture(Path(__file__).parents[1] / "fixtures" / "nginx.conf")
+    cands = client.post("/suggest", json={"text": text}).json()["candidates"]
+    body = {"text": text, "variables": specs(cands), "engine": engine}
+    built = client.post("/build", json=body).json()
+    assert built["engine"] == engine
+    assert built["roundtrip"]["ok"], built["roundtrip"]
+    values = {v["name"]: v["value"] for v in built["variables"]}
+    rendered = client.post(
+        "/render",
+        json={"template": built["template"]["content"], "values": values, "engine": engine},
+    ).json()
+    assert rendered == {"ok": True, "output": text, "error": None}
+    dl = client.post("/download", json=body)
+    names = set(zipfile.ZipFile(io.BytesIO(dl.content)).namelist())
+    assert names == files
+    readme = zipfile.ZipFile(io.BytesIO(dl.content)).read("README.md").decode()
+    assert "pip install" not in readme
+
+
+def test_unknown_engine_is_a_client_error(client: TestClient) -> None:
+    res = client.post("/build", json={"text": "a\n", "variables": [], "engine": "liquid"})
+    assert res.status_code in (400, 422)
+
+
+@pytest.mark.parametrize("engine", ["jinja2", "terraform"])
+def test_render_accepts_nested_lists_and_map_loops(client: TestClient, engine: str) -> None:
+    """The live preview sends a nested list inside each row, and a map loop as an object."""
+    templates = {
+        "jinja2": (
+            "{% for u in users %}{{ u.name }}:{% for k in u.ssh_keys %} {{ k }}{% endfor %};{% endfor %}"
+            "{% for key, value in env.items() %} {{ key }}={{ value }}{% endfor %}"
+        ),
+        "terraform": (
+            "%{ for u_index, u in users }${u.name}:%{ for k_index, k in u.ssh_keys } ${k}%{ endfor };"
+            "%{ endfor }%{ for e_index, e in env } ${e.key}=${e.value}%{ endfor }"
+        ),
+    }
+    values = {
+        "users": [{"name": "a", "ssh_keys": ["x", "y"]}, {"name": "b", "ssh_keys": []}],
+        "env": {"B": "2", "A": "1"},
+    }
+    res = client.post(
+        "/render", json={"template": templates[engine], "values": values, "engine": engine}
+    )
+    assert res.json() == {"ok": True, "output": "a: x y;b:; B=2 A=1", "error": None}

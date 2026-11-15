@@ -20,13 +20,17 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Any
 
+import yaml
 from jinja2 import Environment, StrictUndefined, TemplateError, meta
 from jinja2.exceptions import SecurityError
 from jinja2.runtime import Context
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 
 from templatize.emitters.base import EmittedFile, TemplateRenderError
+from templatize.envfile import parse_env, serialize_env
 from templatize.ir import Loop, Span, TemplateIR, Variable
+from templatize.valuesfile import HEADER as VALUES_HEADER
+from templatize.valuesfile import parse_values, serialize_values
 
 NEWLINES = ("\n", "\r\n", "\r")
 _NL = re.compile(r"\r\n|\r|\n")
@@ -112,6 +116,27 @@ class _Builder:
 class Jinja2Emitter:
     engine = "jinja2"
     template_filename = "template.j2"
+    supports_loops = True
+
+    def values_file(self, ir: TemplateIR) -> EmittedFile:
+        """``.env``, or ``values.yaml`` when there are loops (lists need YAML)."""
+        if ir.loops:
+            return EmittedFile(path="values.yaml", content=serialize_values(ir))
+        return EmittedFile(path=".env", content=serialize_env(ir))
+
+    def parse_values_file(self, content: str) -> dict[str, Any]:
+        try:
+            if content.startswith(VALUES_HEADER):
+                return parse_values(content)
+            return {k.lower(): v for k, v in parse_env(content).items()}
+        except yaml.YAMLError as exc:
+            raise ValueError(str(exc)) from exc
+
+    def notes(self, ir: TemplateIR) -> list[str]:
+        return []
+
+    def requirements(self) -> str:
+        return "Python and [uv](https://docs.astral.sh/uv/) (or `pip install jinja2 python-dotenv pyyaml`)"
 
     def literal_chunks(self, ir: TemplateIR) -> list[str]:
         holes = sorted(

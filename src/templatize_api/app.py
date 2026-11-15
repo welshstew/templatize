@@ -343,6 +343,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             variables=result.ir.variables,
             loops=result.ir.loops,
             roundtrip=result.roundtrip,
+            notes=result.notes,
         )
 
     @app.post("/render", tags=["templating"], responses=ERRORS)

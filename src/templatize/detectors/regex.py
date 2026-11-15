@@ -328,9 +328,11 @@ PATTERNS: list[Pattern] = [
     Pattern(
         "regex.channel",
         VarType.STRING,
-        # Chat channels: "#team-platform" (not "#912", "#ffcc00", "# heading").
+        # Chat channels: "#team-platform" (not "#912", "#ffcc00", "# heading", and not at
+        # the start of a line: "#cloud-config", "#include" are comments and directives).
         re.compile(
-            r"(?<![\w#&/])#(?![0-9a-fA-F]{3}\b|[0-9a-fA-F]{6}\b)[a-z][a-z0-9_-]{1,79}(?![\w-])"
+            r"(?<![\w#&/])(?<!^)(?<![\n\r])#(?![0-9a-fA-F]{3}\b|[0-9a-fA-F]{6}\b)[a-z][a-z0-9_-]{1,79}(?![\w-])",
+            re.MULTILINE,
         ),
         0.6,
         name="channel",

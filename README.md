@@ -8,6 +8,10 @@ produces:
 2. a `.env` file with the extracted values,
 3. a `render.py` script (jinja2 + python-dotenv) that renders the template with the values.
 
+Or, with `--engine` (or the engine choice in the UI), an **envsubst** template
+(`${KEY}`, `values.env`, `render.sh`) or a **Terraform `templatefile()`** template
+(`template.tftpl`, `terraform.tfvars`, `main.tf`); see [Engines](#engines).
+
 Every build is verified by a **round-trip check**: rendering the template with the
 extracted values must reproduce the input **byte for byte**.
 
@@ -34,7 +38,7 @@ cd out && uv run render.py > rendered.conf      # identical to the input
 ```text
 templatize suggest FILE [--variant FILE]... [--json] [--min-confidence X]
 templatize build   FILE [--variant FILE]... (--accept-all | --vars vars.json)
-                   [--min-confidence X] [-o DIR] [--zip bundle.zip]
+                   [--engine jinja2|envsubst|terraform] [--min-confidence X] [-o DIR] [--zip bundle.zip]
                    [--print template|env|script] [--json]
 ```
 
@@ -42,6 +46,7 @@ templatize build   FILE [--variant FILE]... (--accept-all | --vars vars.json)
   that differ between examples become very-high-confidence suggestions.
 - `--vars` takes a JSON list of variable specs:
   `[{"name": "db_host", "spans": [{"start": 10, "end": 18}]}]`.
+- `--engine` picks the template engine (see [Engines](#engines)); its notes go to stderr.
 - `build` exits with code 2 if the round-trip check fails.
 
 ### Web UI
@@ -61,7 +66,18 @@ make frontend-dev   # Vite dev server with hot reload (run `make serve` alongsid
 4. Rename variables and set their types in the sidebar. Editing a variable's *value*
    drives the **live preview**.
 5. The **round-trip badge** in the header shows PASS/FAIL for the current variable set.
-   **Download .zip** gives you `template.j2`, `.env`, `render.py` and a README.
+   **Download .zip** gives you `template.j2`, `.env`, `render.py` and a README; the
+   **template engine** choice in the output panel switches to envsubst or Terraform
+   `templatefile()` (see [Engines](#engines)).
+
+**Load sample…** has a document for each kind of input. Some open with another engine
+selected, to show it off:
+- **cloud-init `user-data`** (Terraform): packages, and users with their SSH keys, as
+  nested loops.
+- **HAProxy backend pool** (Terraform): one `server` line per backend, as a loop.
+- **nginx Docker image template** (envsubst): nginx's own `$host` stays untouched.
+
+Accept a sample's lists ("Accept list …") to see them as loops.
 
 The frontend is Preact + TypeScript, built with Vite, with no other runtime dependencies
 (about 37 KB of JS, 14 KB gzipped) and system fonts only. `npm run build` type-checks,
@@ -482,7 +498,7 @@ with five read-only tools:
 | Tool | What it does |
 |---|---|
 | `suggest_parameters(text, variants?, min_confidence?)` | Scored candidate variables (spans are code points) |
-| `generate_template(text, variables?, variants?, min_confidence?)` | Template, `.env`, `render.py` and the round-trip verdict. Give variables **by value**, e.g. `[{"name": "db_host", "value": "db01.example.com", "occurrences": "all"}]`, so the model never has to count characters (spans also work). Omit `variables` to accept suggestions automatically |
+| `generate_template(text, variables?, variants?, min_confidence?, engine?)` | Template, values file, runner script and the round-trip verdict (`engine`: `jinja2`, `envsubst` or `terraform`), plus `notes` to pass on. Give variables **by value**, e.g. `[{"name": "db_host", "value": "db01.example.com", "occurrences": "all"}]`, so the model never has to count characters (spans also work). Omit `variables` to accept suggestions automatically |
 | `generate_helm_chart(text, variables?, variants?, chart_name?, variant_labels?, min_confidence?, style?)` | Helm chart from Kubernetes manifests: Chart.yaml, nested values.yaml, templates, and a values file per variant. `style="exact"` checks a byte-for-byte round trip per document; `style="scaffold"` fills in the `helm create` chart and returns a coverage report. Variables take an optional `values_path` |
 | `generate_ansible_role(text, variables?, variants?, role_name?, filename?, dest?, variant_labels?, min_confidence?)` | The template packaged as an Ansible role (defaults, tasks, template, meta, README, a vars file per variant) plus `playbook.yml`, with the round-trip verdict |
 | `render_template(template, values?, newline?)` | Sandboxed render. Errors come back in `error`, not as an exception |
@@ -803,17 +819,71 @@ Register new detectors in `detectors/__init__.py`.
 - `.env` values are double-quoted with `\\ \" \n \r \t \v \f \a \b` escapes and read with
   `interpolate=False`, so `${HOME}`, `#`, quotes and CR/LF survive.
 
+## Engines
+
+| Engine | Template | Values | Renders with | Loops |
+|---|---|---|---|---|
+| `jinja2` (default) | `template.j2`, `{{ name }}` | `.env` (`values.yaml` with loops) | `uv run render.py` | yes |
+| `envsubst` | `template.tmpl`, `${KEY}` | `values.env` (single-quoted, sourced) | `sh render.sh` (GNU gettext `envsubst`) | no |
+| `terraform` | `template.tftpl`, `${name}` | `terraform.tfvars` | `main.tf`: `templatefile()`; `terraform apply`, `terraform output -raw rendered` | yes |
+
+**envsubst.**
+- **No escape syntax, and none needed:** `render.sh` runs `envsubst '${HOST} ${PORT}'`
+  with the template's own variables, so every other `$name` / `${name}` in the text
+  stays as it is.
+- **Renamed variables:** a variable whose key the text already uses (`$REGISTRY` in a
+  CI file) gets `_VALUE` appended, as does one the shell treats specially (`UID`,
+  `SECONDS`, `IFS`, `PATH`, `LD_*`, `LC_*`, `BASH_*`, …). The build's notes list every
+  rename.
+- **Values file:** `values.env` holds `KEY='value'` lines, with `'` written as `'\''`.
+- **Safe to source:** `render.sh` finds `envsubst` before sourcing the values, so a
+  value can't hide it.
+
+**Terraform.**
+- **Escapes:** a literal `${` / `%{` is written `$${` / `%%{`. A `$` followed by
+  another `$`, or just before a placeholder (`$4,000`), is written `${"$"}`, so nothing
+  can be read two ways.
+- **Lone carriage returns:** a lone CR (an old Mac line ending) is written `${"\r"}`.
+  After a raw one, Terraform stops interpolating for the rest of the file.
+- **Loops:** `%{ for user_index, user in users }…%{ endfor }`, with the separator
+  inside `%{ if user_index > 0 }…%{ endif }`. There are no `~` strip markers, so
+  whitespace is exactly the text's.
+  - **Nested lists:** loop over `server.ports`.
+  - **Padded table columns:** `${format("%-12s", row.name)}`.
+  - **Map loops** (`environment:`, `labels:`): written as a list of `{ key, value }`
+    objects, because Terraform iterates a map in key order and would reorder them.
+- **Values:** `terraform.tfvars` holds one object: HCL strings, and lists for the loops
+  (`main.tf` takes `type = any`).
+- **Running it:** `main.tf` declares no providers, so `terraform init` downloads nothing.
+
+**Loops in envsubst.** `envsubst` has no loops, so accepted lists stay literal text,
+and the build says so in `notes` (API, MCP, CLI and UI).
+
+**Verification.**
+- **In-process round trip:** both engines round-trip in-process, through their real
+  values file and parser, for every fixture, sample and corpus document.
+- **Real envsubst:** the tests also run the generated `render.sh` with the real
+  `envsubst` for every document.
+- **Real Terraform:** when Terraform or OpenTofu is installed, the tests run the
+  generated `main.tf` for every document and every awkward-literal and value case
+  (checked with Terraform 1.17.2). CI fetches that version with
+  `scripts/fetch-terraform.py`, which is pinned and checksum-verified, so these tests
+  always run there.
+
 ## Adding an engine emitter
 
 1. Create `src/templatize/emitters/<engine>.py` with a class satisfying the
    `Emitter` protocol in `emitters/base.py`:
-   - `engine`, `template_filename`
+   - `engine`, `template_filename`, `supports_loops`
    - `emit(ir) -> str`: escape every literal piece so the engine outputs it verbatim,
      and preserve newlines exactly.
    - `render(template, values, newline=None) -> str`: used by the round-trip check.
      If the engine isn't available in Python (e.g. Go templates), shell out to a
      bundled binary or embed a minimal renderer. Verification isn't optional.
-   - `runner_files(ir)` and `run_command()` for the downloadable bundle.
+   - `values_file(ir)` and `parse_values_file(content)`: the values in the engine's
+     own format. The round trip writes and reads them, so a quoting bug fails it.
+   - `notes(ir)`: what the user should know (renamed variables, unsupported names).
+   - `runner_files(ir)`, `run_command()` and `requirements()` for the downloadable bundle.
 2. Register it in `EMITTERS` in `emitters/__init__.py`.
 3. Run the fixture suite with the new engine (`tests/core/test_fixtures.py`).
    Every fixture must round-trip.

@@ -13,9 +13,21 @@ interface Props {
   onText: (text: string) => void;
   onVariants: (variants: string[]) => void;
   onAnalyze: () => void;
+  /** A sample selects its template engine (jinja2 unless it says otherwise). */
+  onEngine?: (engine: string) => void;
 }
 
-export function Editor({ text, variants, maxVariants, maxChars, busy, onText, onVariants, onAnalyze }: Props) {
+export function Editor({
+  text,
+  variants,
+  maxVariants,
+  maxChars,
+  busy,
+  onText,
+  onVariants,
+  onAnalyze,
+  onEngine,
+}: Props) {
   const [tab, setTab] = useState(0); // 0 = document, n = variant n-1
   const current = tab === 0 ? text : (variants[tab - 1] ?? "");
   const setCurrent = (v: string) => {
@@ -75,6 +87,7 @@ export function Editor({ text, variants, maxVariants, maxChars, busy, onText, on
             if (!pristine && !confirm("Replace the current document and examples with this sample?")) return;
             onText(sample.text);
             onVariants((sample.variants ?? []).slice(0, maxVariants));
+            onEngine?.(sample.engine ?? "jinja2");
             setTab(0);
           }}
         >

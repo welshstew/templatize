@@ -5,10 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from templatize.emitters.base import EmittedFile, Emitter, TemplateRenderError
+from templatize.emitters.envsubst import EnvsubstEmitter
 from templatize.emitters.jinja2 import Jinja2Emitter
+from templatize.emitters.terraform import TerraformEmitter
 
 EMITTERS: dict[str, Callable[[], Emitter]] = {
     "jinja2": Jinja2Emitter,
+    "envsubst": EnvsubstEmitter,
+    "terraform": TerraformEmitter,
 }
 
 

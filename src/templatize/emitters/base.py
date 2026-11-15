@@ -13,7 +13,12 @@ To add an engine (e.g. Go ``text/template`` for Helm):
 3. ``render`` must render a template with string values keyed by variable name
    (lowercase snake_case). If the engine is not available in Python, shell out to
    it or embed a minimal renderer; round-trip checking is mandatory.
-4. Register it in :data:`templatize.emitters.EMITTERS`.
+4. ``values_file`` writes the values in the engine's own format (``.env``,
+   ``terraform.tfvars``, ...) and ``parse_values_file`` reads that file back: the
+   round trip goes through both, so a quoting bug fails it.
+5. Set ``supports_loops``: an engine without loops gets an IR without them (the
+   loops' text stays literal) and a note saying so.
+6. Register it in :data:`templatize.emitters.EMITTERS`.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ class TemplateRenderError(Exception):
 class Emitter(Protocol):
     engine: str
     template_filename: str
+    supports_loops: bool
 
     def emit(self, ir: TemplateIR) -> str:
         """Return template source for ``ir``."""
@@ -53,10 +59,26 @@ class Emitter(Protocol):
         """Names the template references; raise :class:`TemplateRenderError` on syntax errors."""
         ...
 
+    def values_file(self, ir: TemplateIR) -> EmittedFile:
+        """The extracted values, in the file the runner reads."""
+        ...
+
+    def parse_values_file(self, content: str) -> dict[str, Any]:
+        """Read ``values_file`` content back: variable name (snake_case) -> value."""
+        ...
+
+    def notes(self, ir: TemplateIR) -> list[str]:
+        """What the user should know about this IR in this engine (empty if nothing)."""
+        ...
+
     def runner_files(self, ir: TemplateIR) -> list[EmittedFile]:
         """Extra files (e.g. ``render.py``) that render the template locally."""
         ...
 
     def run_command(self) -> str:
         """One-line shell command that renders the bundle, for the README."""
+        ...
+
+    def requirements(self) -> str:
+        """What the runner needs installed, for the README (one line)."""
         ...

@@ -29,6 +29,8 @@ interface Props {
   /** Helm chart output: show and edit each variable's values.yaml path. */
   helm?: boolean;
   chartStyle?: "exact" | "scaffold";
+  /** Template engine of the output: list cards show its loop syntax. */
+  engine?: string;
 }
 
 /** values.yaml key for an item: its own path, or derived from the name like the server does. */
@@ -386,6 +388,7 @@ export function Sidebar({
   onLoopUpdate = () => undefined,
   helm = false,
   chartStyle = "exact",
+  engine = "jinja2",
 }: Props) {
   const [showRejected, setShowRejected] = useState(false);
   const [allVars, setAllVars] = useState(false);
@@ -448,6 +451,7 @@ export function Sidebar({
                 onSelect={onSelect}
                 onStatus={onLoopStatus}
                 onUpdate={onLoopUpdate}
+                engine={helm ? "jinja2" : engine}
               />
             ))}
           </ul>

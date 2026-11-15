@@ -95,3 +95,83 @@ test("a multi-line address keeps its line break when edited", async ({ page }) =
   await page.getByRole("tab", { name: "Preview", exact: true }).click();
   await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText("2 Quay Street\nBristol BS1 4XY");
 });
+
+for (const [engine, template, placeholder] of [
+  ["envsubst", "template.tmpl", "${SERVER_NAME}"],
+  ["terraform", "template.tftpl", "${server_name}"],
+] as const) {
+  test(`the ${engine} engine builds, round-trips and previews edits`, async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel("Load a sample document").selectOption("nginx");
+    await analyze(page);
+    await page.getByRole("button", { name: "Accept all", exact: true }).click();
+    await page.getByLabel("Template engine").selectOption(engine);
+    await expect(page.getByRole("tab", { name: template, exact: true })).toBeVisible();
+    await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+    await page.getByRole("tab", { name: template, exact: true }).click();
+    await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText(placeholder);
+    await page.getByLabel("Preview value for server_name").fill("shop.example.org");
+    await page.getByRole("tab", { name: "Preview", exact: true }).click();
+    await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText("server_name shop.example.org;");
+  });
+}
+
+test("the terraform engine keeps lists as loops", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("python");
+  await analyze(page);
+  await page.getByRole("button", { name: "Accept list kafka_brokers", exact: true }).click();
+  await page.getByRole("button", { name: "Accept all", exact: true }).click();
+  await page.getByLabel("Template engine").selectOption("terraform");
+  await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+  await page.getByRole("tab", { name: "template.tftpl", exact: true }).click();
+  await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText(
+    "%{ for kafka_broker_index, kafka_broker in kafka_brokers }",
+  );
+  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  await expect(page.getByLabel("Generated output").locator("pre.code")).not.toContainText("Render error");
+});
+
+test("the cloud-init sample opens in Terraform and keeps nested lists as loops", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("cloud-init");
+  await analyze(page);
+  await expect(page.getByLabel("Template engine")).toHaveValue("terraform");
+  await expect(page.locator(".loop-for.nested").first()).toContainText("%{ for ssh_authorized_key_index,");
+  await page.getByRole("button", { name: "Accept list packages", exact: true }).click();
+  await page.getByRole("button", { name: "Accept list users", exact: true }).click();
+  await page.getByRole("button", { name: "Accept all", exact: true }).click();
+  await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+  await page.getByRole("tab", { name: "template.tftpl", exact: true }).click();
+  const code = page.getByLabel("Generated output").locator("pre.code");
+  await expect(code).toContainText("%{ for user_index, user in users }");
+  await expect(code).toContainText("in user.ssh_authorized_keys }");
+  // The live preview renders nested lists (each user's keys).
+  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  await expect(code).toContainText("monitor@backup");
+  await expect(page.getByLabel("Generated output").locator(".error-box")).toHaveCount(0);
+});
+
+test("a map list (environment:) previews in Jinja2", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("compose");
+  await analyze(page);
+  await page.getByRole("button", { name: "Accept list web_environment", exact: true }).click();
+  await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText("environment:");
+  await expect(page.getByLabel("Generated output").locator(".error-box")).toHaveCount(0);
+});
+
+test("the nginx envsubst sample leaves nginx's own variables alone", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("nginx-envsubst");
+  await analyze(page);
+  await expect(page.getByLabel("Template engine")).toHaveValue("envsubst");
+  await page.getByRole("button", { name: "Accept all", exact: true }).click();
+  await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+  await page.getByRole("tab", { name: "template.tmpl", exact: true }).click();
+  const code = page.getByLabel("Generated output").locator("pre.code");
+  await expect(code).toContainText("server_name ${SERVER_NAME};");
+  await expect(code).toContainText("proxy_set_header Host $host;");
+});

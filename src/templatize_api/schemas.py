@@ -20,9 +20,15 @@ MAX_VARIABLES = 2_000
 MAX_LOOPS = 200
 
 Scalar = Annotated[str, Field(max_length=MAX_INPUT_CHARS)]
-LoopValue = Annotated[list[dict[str, Scalar]] | list[Scalar], Field(max_length=MAX_LOOP_ITEMS)]
-"""A loop's list: one mapping per item (``{"email": ..., "role": ...}``), or one
-string per item for a scalar loop."""
+NestedList = Annotated[list[dict[str, Scalar]] | list[Scalar], Field(max_length=MAX_LOOP_ITEMS)]
+"""A nested list inside a row (``server.ports``, ``user.ssh_authorized_keys``)."""
+LoopValue = (
+    Annotated[list[dict[str, Scalar | NestedList]] | list[Scalar], Field(max_length=MAX_LOOP_ITEMS)]
+    | Annotated[dict[str, Scalar], Field(max_length=MAX_LOOP_ITEMS)]
+)
+"""A loop's value: one mapping per item (``{"email": ..., "role": ...}``, whose values
+may be a nested list), one string per item for a scalar loop, or a map loop's
+key -> value mapping."""
 
 
 class SuggestRequest(BaseModel):
@@ -54,6 +60,8 @@ class BuildResponse(BaseModel):
     variables: list[Variable]
     loops: list[Loop] = []
     roundtrip: RoundTripResult
+    notes: list[str] = []
+    """What the user should know: loops an engine cannot express, renamed variables."""
 
 
 class RenderRequest(BaseModel):

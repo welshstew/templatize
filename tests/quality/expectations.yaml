@@ -105,3 +105,26 @@ sql:
 html-email:
   want: [elena.rossi@example.com, 2 October 2026]
   reject: ["45"]
+
+csv:
+  loops: {rows: 3}  # header-named fields: username, email, team, role
+  want: [aisha.khan@example.com]
+  reject: [username, email]
+
+cloud-init:
+  # Terraform templatefile sample: packages and users (with their keys) are loops.
+  loops: {packages: 3, users: 2}
+  want: [app-01, Europe/London, /bin/bash]
+  reject: ["#cloud-config", laptop, ops, backup, nginx, ssh-ed25519]
+  names: {app-01: hostname, Europe/London: timezone}
+
+haproxy:
+  loops: {servers: 3}  # server lines: name and endpoint
+  want: [/etc/haproxy/certs/shop.example.com.pem, "10.0.1.11:8080"]
+  reject: [shop, roundrobin]
+
+nginx-envsubst:
+  # envsubst sample: nginx's own $host and $remote_addr are not values.
+  loops: {proxy_set_headers: 2}
+  want: ["80", shop.example.com, "http://storefront.internal.example.com:3000", "http://orders-api.internal.example.com:8080/", 30s]
+  reject: [$host, $remote_addr, host, remote_addr]

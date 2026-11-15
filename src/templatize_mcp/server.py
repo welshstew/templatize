@@ -128,11 +128,22 @@ def create_server() -> MCPServer:
             float,
             Field(ge=0, le=1, description="Threshold when accepting suggestions automatically."),
         ] = 0.5,
+        engine: Annotated[
+            Literal["jinja2", "envsubst", "terraform"],
+            Field(
+                description=(
+                    "jinja2 (template.j2 + .env + render.py), envsubst (${KEY} placeholders + "
+                    "values.env + render.sh) or terraform (templatefile() .tftpl + "
+                    "terraform.tfvars + main.tf). envsubst and terraform have no loops."
+                )
+            ),
+        ] = "jinja2",
     ) -> tools.GenerateTemplateResult:
-        """Build a Jinja2 template, a .env file and a render.py script from a document, and
-        verify the round trip (template + .env must reproduce the input byte for byte)."""
+        """Build a template, its values file and a script that renders it, from a document,
+        and verify the round trip (template + values must reproduce the input byte for
+        byte). Tell the user any `notes`."""
         with _tool_errors("generate_template"):
-            return tools.generate_template(text, variables, variants, min_confidence)
+            return tools.generate_template(text, variables, variants, min_confidence, engine)
 
     @server.tool(annotations=READ_ONLY)
     def generate_helm_chart(

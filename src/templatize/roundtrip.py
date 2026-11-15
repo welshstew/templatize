@@ -8,9 +8,7 @@ import yaml
 from pydantic import BaseModel
 
 from templatize.emitters import Emitter, TemplateRenderError
-from templatize.envfile import parse_env, serialize_env
 from templatize.ir import TemplateIR
-from templatize.valuesfile import parse_values, serialize_values
 
 EXCERPT_RADIUS = 40
 
@@ -34,8 +32,8 @@ def _encode(s: str) -> bytes:
 def check_roundtrip(
     ir: TemplateIR, emitter: Emitter, template: str | None = None
 ) -> RoundTripResult:
-    """Emit (unless ``template`` is given), serialise and re-parse the values (``.env``,
-    or ``values.yaml`` when there are loops), render, compare.
+    """Emit (unless ``template`` is given), serialise and re-parse the values in the
+    engine's values file, render, compare.
 
     Going through the real serialiser/parser is deliberate: quoting bugs would
     otherwise slip past an in-memory comparison.
@@ -45,10 +43,8 @@ def check_roundtrip(
         template = emitter.emit(ir)
     values: dict[str, Any]
     try:
-        if ir.loops:  # lists live in values.yaml
-            values = parse_values(serialize_values(ir))
-        else:
-            values = {k.lower(): v for k, v in parse_env(serialize_env(ir)).items()}
+        # The engine's own values file (.env, values.yaml, terraform.tfvars), read back.
+        values = emitter.parse_values_file(emitter.values_file(ir).content)
     except (ValueError, yaml.YAMLError) as exc:
         return RoundTripResult(
             ok=False, engine=emitter.engine, expected_bytes=len(expected), error=str(exc)
