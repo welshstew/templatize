@@ -23,7 +23,17 @@ jobs:
       - run: make frontend frontend-test
       # GLiNER model (~190 MB, pinned + verified) so the NER parity tests run in CI
       - run: make ner-model
+      # helm, kompose (pinned + verified, as in the app image) and ansible-core, so the
+      # tests that render real charts and run real playbooks don't skip
+      - run: |
+          python3 scripts/fetch-helm.py "$HOME/.tools"
+          python3 scripts/fetch-kompose.py "$HOME/.tools"
+          uv tool install ansible-core==2.20.7
+          echo "$HOME/.tools" >> "$GITHUB_PATH"
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
       - run: make test
+        env:
+          TEMPLATIZE_REQUIRE_TOOLS: "1"
 
   e2e:
     # The Playwright suite: every sample and corpus document analyzed, accepted and
