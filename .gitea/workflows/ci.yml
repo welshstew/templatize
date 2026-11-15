@@ -38,7 +38,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - run: uv sync --frozen
+      # the API server's extras, as in the app image
+      - run: uv sync --frozen --extra api --extra mcp
       - run: make frontend
       # Playwright's own Chromium (the runner has no Google Chrome), pinned by @playwright/test.
       - run: cd frontend && npx playwright install --with-deps chromium
