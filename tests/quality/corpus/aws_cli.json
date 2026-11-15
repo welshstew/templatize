@@ -1,0 +1,16 @@
+{
+  "DBInstances": [
+    {
+      "DBInstanceIdentifier": "orders-prod",
+      "DBInstanceClass": "db.r6g.xlarge",
+      "Engine": "postgres",
+      "EngineVersion": "16.4",
+      "Endpoint": {
+        "Address": "orders-prod.c9akciq32.eu-west-1.rds.amazonaws.com",
+        "Port": 5432
+      },
+      "AllocatedStorage": 500,
+      "MultiAZ": true
+    }
+  ]
+}

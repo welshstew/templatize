@@ -29,6 +29,31 @@ _SPACED_MIN_SHARE = 0.6
 # values are taken ("maxmemory 4gb"): longer ones ("server app1 10.0.1.11:8080 check")
 # are left to the patterns, which find their parts.
 _SPACED_LOWER = re.compile(r"^[ \t]*([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*)[ \t]+([^\s#;{}]+)[ \t]*$")
+# Markdown "**Location:** Manchester, UK" / "- **Salary**: £75,000" / "__Team:__ Platform".
+_MD_BOLD_KEY = re.compile(
+    r"^[ \t]*(?:[-*+][ \t]+)?(\*\*|__)([A-Za-z][\w .&/-]{0,40}?)[ \t]*(?::\1|\1[ \t]*:)[ \t]+(.+?)[ \t]*$"
+)
+# "£75,000 - £90,000", "3-5 days": a range, whose ends the patterns find.
+_MD_RANGE = re.compile(
+    r"\S*\d[\d.,]*\S*[ \t]*(?:-|\u2013|\u2014|to)[ \t]*\S*\d[\d.,]*\S*(?:[ \t]+\w+)?"
+)
+# `terraform plan` output: attribute lines carry a change marker (+, ~, -/+).
+_TF_PLAN = re.compile(r"Terraform will perform the following actions|^Plan: \d+ to add", re.M)
+_TF_PLAN_MARK = re.compile(r"^[ \t]*([+~])[ \t]+(?=[\w\"]+[ \t]*=)")
+_FUNCTION_WORDS = re.compile(
+    r"\b(?:the|and|will|to|is|are|a|an|of|for|with|on|in|at|be|by|this|that|you|your|we|our|"
+    r"please|can|need|then|it|has|have)\b"
+)
+
+
+def _prose_value(value: str) -> bool:
+    """A sentence rather than a setting: it ends like one, or reads like one."""
+    v = value.rstrip()
+    if v[-1:] in ".,!?:" and not re.search(r"[\w/][.:]\w", v[-3:]):
+        return True
+    return len(v.split()) >= 4 and len(_FUNCTION_WORDS.findall(v)) >= 2
+
+
 _PROSE_END = re.compile(r"[.!?,]$")
 # Dockerfile instructions whose arguments are values.
 _DOCKER_FIRST = re.compile(
@@ -231,9 +256,15 @@ class KeyValueDetector:
         scopes = _Scopes(ctx.text)
         section: str | None = None  # INI [section]
         last_name: tuple[int, str, str] | None = None  # (indent, name value, candidate id)
+        tf_plan = bool(_TF_PLAN.search(ctx.text))
         for line_start, line in _lines(ctx.text):
             if not line.strip():
                 continue
+            if tf_plan and line.startswith("Plan: "):
+                continue  # the plan's summary ("1 to add, 0 to change")
+            if tf_plan and (pm := _TF_PLAN_MARK.match(line)):
+                # "+ instance_type = "t3.large"": the change marker blanked, offsets kept.
+                line = line[: pm.start(1)] + " " + line[pm.end(1) :]
             if sm_ := _INI_SECTION.match(line):
                 section = sm_.group(1)
                 continue
@@ -351,6 +382,26 @@ class KeyValueDetector:
                 )
                 continue
 
+            bm = _MD_BOLD_KEY.match(line)
+            if bm:
+                value, vstart = bm.group(3), bm.start(3)
+                detail = _WITH_DETAIL.match(value)
+                if detail:
+                    value = detail.group(1)  # "Manchester, UK (hybrid, 2 days a week)"
+                ranged = _MD_RANGE.fullmatch(value)
+                if not ranged and not (len(value.split()) >= 8 and value.rstrip()[-1:] in ".!?"):
+                    self._add(
+                        out,
+                        ctx.text,
+                        bm.group(2),
+                        None,
+                        line_start + vstart,
+                        line_start + vstart + len(value),
+                        "kv.colon",
+                        0.7,
+                    )
+                continue
+
             ym = _YAML.match(line)
             if ym:
                 indent = len(ym.group(1)) + (len(ym.group(2)) if ym.group(2) else 0)
@@ -400,6 +451,8 @@ class KeyValueDetector:
                 continue
 
             sm = _SPACED.match(line) if spaced_ok else None
+            if sm and _prose_value(sm.group(2)):
+                sm = None  # "Then run `ssh buildbox` and check the fingerprint is"
             if sm:
                 value, s = _unquote(sm.group(2), sm.start(2))
                 self._add(
@@ -452,8 +505,11 @@ class KeyValueDetector:
         CamelCase keyword (``HostName``) or one that repeats (``Host`` per block)."""
         if len(content) < 3:
             return False
-        keys = [m.group(1) for ln in content if (m := _SPACED.match(ln))]
-        if len(keys) / len(content) < _SPACED_MIN_SHARE:
+        matches = [m for ln in content if (m := _SPACED.match(ln))]
+        # Sentences ("Children will need a packed lunch.") count for neither side.
+        prose = sum(1 for m in matches if _prose_value(m.group(2)))
+        keys = [m.group(1) for m in matches if not _prose_value(m.group(2))]
+        if len(keys) < 3 or len(keys) / (len(content) - prose) < _SPACED_MIN_SHARE:
             return False
         camel = any(sum(c.isupper() for c in k) >= 2 or "_" in k for k in keys)
         return camel or len(set(keys)) < len(keys)

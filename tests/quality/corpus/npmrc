@@ -1,0 +1,4 @@
+registry=https://npm.acme.example.com/
+@acme:registry=https://npm.acme.example.com/
+//npm.acme.example.com/:_authToken=npm_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8
+always-auth=true

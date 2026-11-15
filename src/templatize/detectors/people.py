@@ -19,9 +19,10 @@ from collections.abc import Sequence
 from templatize.detectors.address import address_roles, find_addresses
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span, VarType
-from templatize.naming import infer_type
+from templatize.naming import infer_type, snake_case
 
 CONFIDENCE = 0.7
+LIST_CONFIDENCE = 0.85
 
 _EMAIL = re.compile(r"(?<![\w.+-])([A-Za-z]+(?:[._-][A-Za-z]+){1,2})@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # "Patel", "O'Brien", "McDonald", "Smith-Jones" (\u2019 is a typographic apostrophe).
@@ -98,15 +99,26 @@ def _accented(part: str) -> str:
 def _elsewhere(text: str, c: Candidate) -> Candidate:
     """The same name or company written again later ("represent Keystone Freight Inc.
     in the matter"): one variable for every place."""
-    pattern = r"(?<![\w@./-])" + re.escape(c.value) + r"(?![\w@-]|\.\w)"
-    spans = list(c.spans)
-    for m in re.finditer(pattern, text):
-        s = Span(start=m.start(), end=m.end())
-        if not any(s.overlaps(o) for o in spans):
-            spans.append(s)
-    if len(spans) == len(c.spans):
+    after = re.compile(r"(?![\w@-]|\.\w)")
+    value, n = c.value, len(c.value)
+    own = sorted((s.start, s.end) for s in c.spans)
+    added: list[Span] = []
+    i = text.find(value)
+    while i >= 0:
+        j = i + n
+        free = not any(a < j and i < b for a, b in own)  # the candidate's own spans are few
+        if (
+            free
+            and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] in "_@./-"))
+            and after.match(text, j)
+        ):
+            added.append(Span(start=i, end=j))
+            i = text.find(value, j)
+        else:
+            i = text.find(value, i + 1)
+    if not added:
         return c
-    return c.model_copy(update={"spans": sorted(spans, key=lambda x: x.start)})
+    return c.model_copy(update={"spans": sorted([*c.spans, *added], key=lambda x: x.start)})
 
 
 _NOT_NAMES = frozenset(
@@ -177,13 +189,28 @@ def _greeting_only(text: str, taken: list[Span]) -> list[Candidate]:
         or value.lower() in _NOT_NAMES
     ):
         return []
-    return [_candidate(text, g, role, "the name in the greeting")]
+    out = [_candidate(text, g, role, "the name in the greeting")]
+    if role == "recipient_first_name":
+        # "Hello Daniel," ... "Passenger: Mr Daniel Okafor": the same person's last name.
+        full = re.search(rf"(?<![\w-]){re.escape(value)} ({_NAME_WORD})(?![\w-])", text)
+        if full and full.group(1).lower() not in _NOT_NAMES:
+            last = Span(start=full.start(1), end=full.end(1))
+            out.append(
+                _elsewhere(
+                    text, _candidate(text, last, "recipient_last_name", "the recipient's last name")
+                )
+            )
+    return out
 
 
 def _names_from_emails(text: str) -> list[Candidate]:
     out: list[Candidate] = []
     seen: set[str] = set()
+    locals_seen: set[str] = set()
     for m in _EMAIL.finditer(text):
+        if m.group(1).lower() in locals_seen:
+            continue  # the same person's address again
+        locals_seen.add(m.group(1).lower())
         parts = re.split(r"[._-]", m.group(1))
         if any(len(p) < 2 for p in parts):
             continue
@@ -200,6 +227,72 @@ def _names_from_emails(text: str) -> list[Candidate]:
                     f"the name of {m.group(0)}",
                 )
             )
+    return out
+
+
+_SIGN_OFF_NAME = re.compile(
+    rf"^(?:(?:Mr|Mrs|Ms|Miss|Mx|Dr|Prof)\.?[ ]+)?((?:[A-Z]\.[ ]?)*{_NAME_WORD}(?: {_NAME_WORD}){{0,2}})$"
+)
+
+
+def _unclosed_signature(text: str) -> list[Candidate]:
+    """A letter with a greeting that ends with a name and title, no "Regards," above:
+    "Mrs J. Thompson / Headteacher, Oakfield Primary School"."""
+    if not _GREETING.search(text) or _CLOSING.search(text):
+        return []
+    paras = [m for m in re.finditer(r"(?:[^\n]*\S[^\n]*(?:\r?\n|$))+", text)]
+    if not paras:
+        return []
+    last = paras[-1]
+    lines = [m for m in re.finditer(r"[^\r\n]+", last.group(0)) if m.group(0).strip()]
+    if not 1 <= len(lines) <= 3:
+        return []
+    first = lines[0].group(0).strip()
+    nm = _SIGN_OFF_NAME.match(first)
+    if nm is None or (len(lines) == 1 and " " not in nm.group(1)):
+        return []
+    base = (
+        last.start() + lines[0].start() + (len(lines[0].group(0)) - len(lines[0].group(0).lstrip()))
+    )
+    # "Northbank Customer Services": an organisation signs, not a person.
+    org = any(w.lower() in _NOT_PERSON_WORDS for w in nm.group(1).split())
+    out = [
+        _candidate(
+            text,
+            Span(start=base + nm.start(1), end=base + nm.end(1)),
+            "sender_company" if org else "sender_name",
+            "the organisation signing the letter" if org else "the name signing the letter",
+        )
+    ]
+    if org:
+        return out
+    if len(lines) > 1:
+        line = lines[1].group(0).strip()
+        ls = (
+            last.start()
+            + lines[1].start()
+            + (len(lines[1].group(0)) - len(lines[1].group(0).lstrip()))
+        )
+        cut = line.find(", ")
+        title_end = cut if cut > 0 else len(line)
+        if _JOB_WORDS.search(line[:title_end]) or cut > 0:
+            out.append(
+                _candidate(
+                    text,
+                    Span(start=ls, end=ls + title_end),
+                    "sender_title",
+                    "the signatory's job title",
+                )
+            )
+            if cut > 0:
+                out.append(
+                    _candidate(
+                        text,
+                        Span(start=ls + cut + 2, end=ls + len(line)),
+                        "sender_company",
+                        "the signatory's organisation",
+                    )
+                )
     return out
 
 
@@ -225,7 +318,14 @@ def _signature(text: str) -> list[Candidate]:
             # "People Partner, Orbit Analytics GmbH": the title, then the company.
             line = text[title.start : title.end]
             cut = line.find(", ")
-            if cut > 0 and _COMPANY.match(line[cut + 2 :]):
+            if cut > 0 and (
+                _COMPANY.match(line[cut + 2 :])
+                or (
+                    _JOB_WORDS.search(line[:cut])
+                    and not _JOB_WORDS.search(line[cut + 2 :])
+                    and re.fullmatch(r"[A-Z][\w&'.-]*(?: [A-Z&][\w&'.-]*){0,5}", line[cut + 2 :])
+                )
+            ):
                 company = Span(start=title.start + cut + 2, end=title.end)
                 title = Span(start=title.start, end=title.start + cut)
                 out.append(_candidate(text, company, "sender_company", "the signatory's company"))
@@ -405,6 +505,18 @@ _BRAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "company",
     ),
+    # "As a Senior Site Reliability Engineer at Brightwave, you will ..."
+    (
+        re.compile(r"\b[Aa]s (?:a|an|the) ((?:[A-Z][\w/&-]*[ ]){0,5}[A-Z][\w/&-]*) at [A-Z]"),
+        "job_title",
+    ),
+    (
+        re.compile(
+            r"\b[Aa]s (?:a|an|the) (?:[A-Z][\w/&-]*[ ]){0,5}[A-Z][\w/&-]* at "
+            r"([A-Z][\w&'-]*(?: [A-Z][\w&'-]*){0,3})(?=[,;!]|\.(?:\s|$)| [a-z])"
+        ),
+        "company",
+    ),
     # "the Senior Site Reliability Engineer role"
     (
         re.compile(
@@ -437,6 +549,284 @@ def _brands(text: str) -> list[Candidate]:
     return out
 
 
+# "Attendees: Priya Nair, Tom Okoro, Lena Fischer" (Markdown bold allowed).
+_PERSON_LIST = re.compile(
+    r"^[ \t]*(?:[-*][ \t]+)?(?:\*\*|__)?(Attendees|Attending|Participants|Present|Invitees|"
+    r"Authors?|Reviewers|Approvers|Owners|Apologies|Absent|Organi[sz]ers?|Speakers|Panel(?:ists)?)"
+    r"(?:\*\*|__)?[ \t]*:(?:\*\*|__)?[ \t]+(.+?)[ \t]*\r?$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_LIST_ROLE = {
+    "attendees": "attendee",
+    "attending": "attendee",
+    "participants": "participant",
+    "present": "attendee",
+    "invitees": "invitee",
+    "authors": "author",
+    "author": "author",
+    "reviewers": "reviewer",
+    "approvers": "approver",
+    "owners": "owner",
+    "apologies": "absentee",
+    "absent": "absentee",
+    "organiser": "organiser",
+    "organisers": "organiser",
+    "organizer": "organizer",
+    "organizers": "organizer",
+    "speakers": "speaker",
+    "panel": "panelist",
+    "panelists": "panelist",
+}
+_LIST_SEP = re.compile(r"[ \t]*(?:,|;|\band\b|&)[ \t]*")
+
+
+def _person_lists(text: str) -> list[Candidate]:
+    """Each person in an attendee or reviewer list; when their first name is also used
+    alone ("Tom presented ..."), first and last name are separate variables."""
+    out: list[Candidate] = []
+    for m in _PERSON_LIST.finditer(text):
+        role = _LIST_ROLE[m.group(1).lower()]
+        body, base = m.group(2), m.start(2)
+        parts = [(p.start(), p.end()) for p in re.finditer(r"[^,;&]+", body)]
+        people: list[Span] = []
+        for a, b in parts:
+            chunk = body[a:b]
+            for piece in re.split(r"[ \t]+and[ \t]+", chunk):
+                off = a + chunk.find(piece)
+                st = piece.strip()
+                if not st:
+                    continue
+                off += piece.find(st)
+                if not _FULL_NAME.match(st) or st.split()[0].lower() in _NOT_NAMES:
+                    people = []
+                    break
+                people.append(Span(start=base + off, end=base + off + len(st)))
+            else:
+                continue
+            break
+        if len(people) < 1:
+            continue
+        for i, sp in enumerate(people, 1):
+            full = text[sp.start : sp.end]
+            first = full.split()[0]
+            prefix = f"{role}_{i}" if len(people) > 1 else role
+            alone = [
+                Span(start=f.start(), end=f.end())
+                for f in re.finditer(rf"(?<![\w@.]){re.escape(first)}(?![\w@-]| [A-Z][a-z])", text)
+                if not any(Span(start=f.start(), end=f.end()).overlaps(p) for p in people)
+            ]
+            if alone:
+                fs = Span(start=sp.start, end=sp.start + len(first))
+                ls = Span(start=sp.start + len(first) + 1, end=sp.end)
+                out.append(_candidate(text, fs, f"{prefix}_first_name", f"a {role}", alone))
+                out.append(
+                    _elsewhere(text, _candidate(text, ls, f"{prefix}_last_name", f"a {role}"))
+                )
+            else:
+                out.append(_elsewhere(text, _candidate(text, sp, f"{prefix}_name", f"a {role}")))
+    # Each person is surer than the list as one value ("Authors: Ines Carvalho, Raj ...").
+    return [c.model_copy(update={"confidence": LIST_CONFIDENCE}) for c in out]
+
+
+# A person named after a phrase: "report to Grace Liu", "Questions to Hannah Kim".
+_PERSON = rf"({_NAME_WORD}(?: {_NAME_WORD}){{1,2}})"
+_PERSON_PHRASES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(rf"\breport(?:s|ing)? (?:in)?to {_PERSON}"), "manager_name"),
+    (
+        re.compile(
+            rf"\b(?:[Qq]uestions(?: to)?|[Cc]ontact|[Rr]each out to|[Aa]sk|[Ss]peak (?:to|with)|"
+            rf"[Tt]alk to|[Pp]ing|[Ee]mail) {_PERSON}"
+        ),
+        "contact_name",
+    ),
+    (
+        re.compile(rf"\b(?:[Ll]ed|[Hh]osted|[Cc]haired|[Pp]resented|[Rr]un) by {_PERSON}"),
+        "lead_name",
+    ),
+    (re.compile(rf"\b[Aa]pproved by {_PERSON}"), "approver_name"),
+    (re.compile(rf"\b(?:Dr|Doctor)\.? {_PERSON}"), "doctor_name"),
+    (
+        re.compile(rf"^[ \t]*Signed(?: for| on behalf of)? [^:\n]{{1,80}}: {_PERSON}", re.M),
+        "signatory_name",
+    ),
+    (re.compile(rf"\b[Aa]ssigned to {_PERSON}"), "assignee_name"),
+    (re.compile(rf"\b(?:[Ss]poke|[Mm]et|[Ss]poken) (?:to|with) {_PERSON}"), "contact_name"),
+]
+# Capitalised words that make a phrase an organisation or a thing, not a person.
+_NOT_PERSON_WORDS = frozenset(
+    [
+        "support",
+        "team",
+        "teams",
+        "service",
+        "services",
+        "desk",
+        "department",
+        "office",
+        "engineering",
+        "sales",
+        "operations",
+        "security",
+        "platform",
+        "customer",
+        "customers",
+        "help",
+        "helpdesk",
+        "billing",
+        "finance",
+        "legal",
+        "people",
+        "human",
+        "resources",
+        "group",
+        "the",
+        "our",
+        "your",
+        "us",
+        "me",
+        "them",
+        "him",
+        "her",
+        "api",
+        "portal",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ]
+)
+_PERSON_END = re.compile(r"(?=[,.;:!?)\s]|$)")
+
+
+def _phrase_people(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    seen: set[str] = set()
+    for pattern, role in _PERSON_PHRASES:
+        for m in pattern.finditer(text):
+            value = m.group(1)
+            words = value.lower().split()
+            if value in seen or any(w in _NOT_PERSON_WORDS for w in words):
+                continue
+            if not _PERSON_END.match(text, m.end(1)):
+                continue
+            seen.add(value)
+            span = Span(start=m.start(1), end=m.end(1))
+            out.append(
+                _elsewhere(text, _candidate(text, span, role, f"the {role.replace('_', ' ')}"))
+            )
+            # "Amelia Ward, Chief Operating Officer": the title after the name.
+            t = _TITLE_AFTER.match(text, m.end(1))
+            if t and _JOB_WORDS.search(t.group(1)):
+                tspan = Span(start=t.start(1), end=t.end(1))
+                title = role.removesuffix("_name") + "_title"
+                out.append(_candidate(text, tspan, title, f"the {title.replace('_', ' ')}"))
+    return out
+
+
+_TITLE_AFTER = re.compile(
+    r",[ \t]+([A-Z][\w&/'-]*(?:[ ][A-Za-z&][\w&/'-]*){0,5})[ \t]*\.?[ \t]*(?=\r?\n|$)"
+)
+
+
+# Services and products named in prose: "the Payments API", "the Ledger Service".
+_PRODUCT = re.compile(
+    r"(?<![\w-])((?:[A-Z][a-z][\w-]*[ ]){1,3}(?:API|Service|Gateway|Portal|Dashboard|Console|"
+    r"Pipeline|Cluster|Database|Queue|Worker|Scheduler))(?![\w-])"
+)
+_PRODUCT_LEAD = frozenset(
+    ["the", "a", "an", "our", "your", "their", "this", "that", "new", "old", "each", "every"]
+)
+
+
+def _products(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    seen: set[str] = set()
+    for m in _PRODUCT.finditer(text):
+        words = m.group(1).split()
+        while words and words[0].lower() in _PRODUCT_LEAD:
+            words.pop(0)
+        if len(words) < 2:
+            continue
+        value = " ".join(words)
+        if value in seen:
+            continue
+        seen.add(value)
+        start = m.end(1) - len(value)
+        c = _candidate(text, Span(start=start, end=m.end(1)), snake_case(value), "a service name")
+        out.append(_elsewhere(text, c.model_copy(update={"confidence": 0.55})))
+    return out
+
+
+# A contract's parties: "Halden Robotics Ltd, a company registered ... ("the Client")".
+_PARTY = re.compile(
+    r"([A-Z][\w&'.-]*(?:[ ][A-Z&][\w&'.-]*){0,5}[ ](?:Ltd|Limited|plc|PLC|Inc|LLC|LLP|GmbH|AG|SA|BV|"
+    r"Corp|Corporation|Pty Ltd)\.?)(?=[,\s(])[^()]{0,300}?\([ \t]*(?:the[ \t]+)?[\"\u201c](?:the[ \t]+)?"
+    r"([A-Z][a-z]+)[\"\u201d][ \t]*\)"
+)
+
+
+def _parties(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    seen: set[str] = set()
+    for m in _PARTY.finditer(text):
+        value, role = m.group(1), m.group(2).lower()
+        if value in seen:
+            continue
+        seen.add(value)
+        span = Span(start=m.start(1), end=m.end(1))
+        out.append(_elsewhere(text, _candidate(text, span, f"{role}_company", f"the {role}")))
+    return out
+
+
+# Companies with a legal suffix anywhere in prose: "The payment was from KESTREL HOMES LTD".
+_LEGAL_NAME = re.compile(
+    r"(?<![\w&'.-])((?:[A-Z][\w&'.-]*[ ]){1,5}(?:Ltd|LTD|Limited|LIMITED|plc|PLC|Inc|INC|LLC|LLP|GmbH|"
+    r"Corp|CORP|Corporation)\.?)(?![\w&'-])"
+)
+_LEAD_WORDS = frozenset(
+    ["The", "THE", "A", "An", "From", "FROM", "To", "TO", "For", "FOR", "At", "By"]
+)
+
+
+def _legal_names(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    seen: set[str] = set()
+    for m in _LEGAL_NAME.finditer(text):
+        words = m.group(1).split(" ")
+        while len(words) > 2 and words[0] in _LEAD_WORDS:
+            words.pop(0)
+        value = " ".join(words)
+        if value in seen or len(words) < 2:
+            continue
+        seen.add(value)
+        start = m.end(1) - len(value)
+        before = text[max(0, start - 30) : start].lower()
+        line_start, line_end = _line_at(text, start)
+        # A line break inside the name ("at Orbit\nAnalytics GmbH"): its start is above.
+        if start == line_start and re.search(r"[A-Z][\w&'.-]*[ \t]*\r?\n$", text[:start]):
+            continue
+        letterhead = not text[:line_start].strip() and text[line_start:line_end].strip() == value
+        role = (
+            "sender_company"
+            if letterhead
+            else "payer_name"
+            if re.search(r"\b(?:payment|paid|transfer)\b[^.]*\bfrom $", before)
+            else "company"
+        )
+        out.append(
+            _elsewhere(
+                text,
+                _candidate(
+                    text, Span(start=start, end=m.end(1)), role, f"the {role.replace('_', ' ')}"
+                ),
+            )
+        )
+    return out
+
+
 class PeopleDetector:
     name = "people"
 
@@ -451,7 +841,7 @@ class PeopleDetector:
             if not any(sp.overlaps(t) for sp in c.spans for t in taken)
         ]
         companies = [c for c in _companies(text) if not any(sp in taken for sp in c.spans)]
-        signature = _signature(text)
+        signature = _signature(text) or _unclosed_signature(text)
         # A name that signs the letter is the sender, even when its email is there too.
         signed = {c.value for c in signature}
         contacts = [c for c in contacts if c.value not in signed]
@@ -464,7 +854,28 @@ class PeopleDetector:
             for c in recipient
         ]
         taken_values = {c.value for c in [*named, *recipient, *greeting]}
+        parties = [c for c in _parties(text) if c.value not in taken_values]
+        taken_values |= {c.value for c in parties}
+        legal = [c for c in _legal_names(text) if c.value not in taken_values]
+        taken_values |= {c.value for c in legal}
         brands = [c for c in _brands(text) if c.value not in taken_values]
+        taken_values |= {c.value for c in brands}
+        lists = _person_lists(text)
+        taken_values |= {c.value for c in lists}
+        phrased = [c for c in _phrase_people(text) if c.value not in taken_values]
+        taken_values |= {c.value for c in phrased}
+        products = [c for c in _products(text) if c.value not in taken_values]
         return DetectorResult(
-            candidates=[*named, *recipient, *greeting, *brands, *_letter_date(text)]
+            candidates=[
+                *named,
+                *recipient,
+                *greeting,
+                *parties,
+                *legal,
+                *brands,
+                *lists,
+                *phrased,
+                *products,
+                *_letter_date(text),
+            ]
         )

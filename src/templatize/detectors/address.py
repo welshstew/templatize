@@ -33,7 +33,9 @@ _POSTCODE_END = re.compile(
     r"|[A-Za-z.],?[ ]+[A-Z]{2}[ ]+\d{5}(?:-\d{4})?"
     # Canada: "Toronto, ON M5V 3L9"
     r"|\b[A-Z]\d[A-Z][ ]?\d[A-Z]\d"
-    r")[ \t]*,?(?:[ \t]*(?:United Kingdom|UK|USA|United States|Canada))?[ \t]*$"
+    r")[ \t]*,?(?:[ \t]*(?:United Kingdom|UK|USA|United States|Canada))?"
+    # What may follow in prose: ' ("the Supplier").', a full stop or comma.
+    r"(?P<tail>[ \t]*(?:\([^()\n]{1,40}\))?[.,;]?)[ \t]*$"
 )
 # Continental Europe: "10115 Berlin", "75001 Paris", "1012 AB Amsterdam" (a postcode
 # before the town; "1600 Main Street" is a street line instead).
@@ -76,6 +78,14 @@ def _is_postcode_line(line: str) -> bool:
     return bool(_POSTCODE_START.match(line)) and not _STREET.match(line)
 
 
+def _content_end(line: str) -> int:
+    """Where the address ends on its postcode line: before a trailing '("the Client").'"""
+    m = _POSTCODE_END.search(line)
+    if m is None:
+        return len(line.rstrip())
+    return len(line[: m.start("tail")].rstrip())
+
+
 def find_addresses(text: str) -> list[Span]:
     lines = _lines(text)
     found: list[Span] = []
@@ -96,7 +106,7 @@ def find_addresses(text: str) -> list[Span]:
                 top = j
         if top is None and inline is not None:
             # "ships to 8 Canal Street, Manchester M1 3HE": a one-line address in prose.
-            found.append(Span(start=ls + inline.start(), end=ls + len(line.rstrip())))
+            found.append(Span(start=ls + inline.start(), end=ls + _content_end(line)))
             used_to = i
             continue
         if top is None:
@@ -106,7 +116,7 @@ def find_addresses(text: str) -> list[Span]:
             + len(text[lines[top][0] : lines[top][1]])
             - len(text[lines[top][0] : lines[top][1]].lstrip())
         )
-        end = ls + len(line.rstrip())
+        end = ls + _content_end(line)
         found.append(Span(start=start, end=end))
         used_to = i
     return found
@@ -119,13 +129,27 @@ def address_roles(text: str, spans: list[Span]) -> list[str | None]:
     return [None] * len(spans)
 
 
+# A contract party's defined term right after its address: ... CB2 1RX ("the Client").
+_PARTY_AFTER = re.compile(
+    r"\s*\([ \t]*(?:the[ \t]+)?[\"\u201c](?:the[ \t]+)?([A-Z][a-z]+)[\"\u201d][ \t]*\)"
+)
+
+
+def _party_after(text: str, s: Span) -> str | None:
+    m = _PARTY_AFTER.match(text, s.end)
+    return f"{m.group(1).lower()}_address" if m else None
+
+
 class AddressDetector:
     name = "address"
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
         text = ctx.text
         spans = find_addresses(text)
-        names = [f"{r}_address" if r else "address" for r in address_roles(text, spans)]
+        names = [
+            f"{r}_address" if r else _party_after(text, sp) or "address"
+            for sp, r in zip(spans, address_roles(text, spans), strict=True)
+        ]
         return DetectorResult(
             candidates=[
                 Candidate(

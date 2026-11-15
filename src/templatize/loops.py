@@ -458,6 +458,13 @@ def find_inline_lists(text: str) -> list[Found]:
 _KEYWORD_LINE = re.compile(r"^([ \t]*)([A-Za-z][\w-]*)(?=[ \t])(?![ \t]*[:=])", re.MULTILINE)
 
 
+# Log lines start with a month ("Dec  3 14:30:01 web-03 ..."): entries, not a block of
+# configuration to repeat.
+_LOG_STARTS = frozenset(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+)
+
+
 def find_keyword_lines(text: str) -> list[Found]:
     """Runs of consecutive lines with the same indent that start with the same keyword
     (``server 10.0.0.1:8080 weight=5;``)."""
@@ -465,7 +472,7 @@ def find_keyword_lines(text: str) -> list[Found]:
     run: list[tuple[str, str, Span]] = []
 
     def flush() -> None:
-        if len(run) >= MIN_ITEMS:
+        if len(run) >= MIN_ITEMS and run[0][1] not in _LOG_STARTS:
             kw = run[0][1]
             out.append(
                 Found(

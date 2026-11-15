@@ -1,0 +1,3 @@
+Dec  3 14:30:01 web-03 CRON[22817]: (root) CMD (/usr/local/bin/backup.sh --target s3://acme-backups-prod)
+Dec  3 14:30:05 web-03 sshd[22840]: Accepted publickey for deploy from 198.51.100.23 port 51422 ssh2: ED25519 SHA256:q9Xk2LmN0pRsTuVwYz1aBcDeFgHiJkLm
+Dec  3 14:31:12 web-03 kernel: [812345.678901] Out of memory: Killed process 22911 (java) total-vm:8123456kB

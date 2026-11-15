@@ -1,0 +1,9 @@
+Release v2.9.0 of acme-cli is out.
+
+Highlights:
+- New `acme deploy --env staging` flag
+- Supports Go 1.23 and Node 22.11
+- Fixed a crash on Windows 11 when HOME is unset
+
+Download: https://github.com/acme/acme-cli/releases/tag/v2.9.0
+Checksum (SHA-256): 4e1b9a2c7d0f3e6b8a5c2d9f1e0b7a4c6d3f8e2b1a9c0d7e5f4b3a2c1d0e9f8a

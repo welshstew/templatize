@@ -1,0 +1,12 @@
+Change request CHG-30871
+Requested by: Marcus Webb (marcus.webb@acme.example.com)
+Service: Customer Portal
+Environment: production
+Window: 2026-12-06 22:00 – 2026-12-07 01:00 UTC
+
+Description:
+Upgrade PostgreSQL on db-portal-01.prod.acme.internal from 14.11 to 16.6 using
+pg_upgrade --link. Expected downtime: 20 minutes.
+
+Rollback: restore the snapshot snap-0d4e8f1a2b3c4d5e6 taken at the start of the window.
+Approver: Sofia Martins

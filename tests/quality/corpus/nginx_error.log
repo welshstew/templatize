@@ -1,0 +1,2 @@
+2026/12/04 10:15:02 [error] 2241#2241: *88123 connect() failed (111: Connection refused) while connecting to upstream, client: 203.0.113.9, server: api.acme.example.com, request: "GET /v1/health HTTP/1.1", upstream: "http://10.0.3.14:8080/v1/health", host: "api.acme.example.com"
+2026/12/04 10:15:07 [warn] 2241#2241: *88130 upstream server temporarily disabled while reading response header from upstream, client: 203.0.113.9, server: api.acme.example.com

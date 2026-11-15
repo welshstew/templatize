@@ -1,0 +1,4 @@
+LAST SEEN   TYPE      REASON             OBJECT                              MESSAGE
+2m          Warning   BackOff            pod/checkout-7d9f8b6c5-x2kqp        Back-off restarting failed container checkout in pod checkout-7d9f8b6c5-x2kqp_payments(3f1e2d4c-aaaa-bbbb-cccc-111122223333)
+5m          Normal    Pulled             pod/checkout-7d9f8b6c5-x2kqp        Container image "registry.acme.example.com/payments/checkout:2.14.0" already present on machine
+7m          Warning   FailedScheduling   pod/ledger-0                        0/6 nodes are available: 6 Insufficient memory.
