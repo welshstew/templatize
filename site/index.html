@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>templatize: text to templates, proven exact</title>
+  <meta name="description" content="templatize turns config files, emails and contracts into Jinja2 templates, a .env and a render script, and proves the template reproduces your original byte for byte. Open source, runs fully offline.">
+  <link rel="canonical" href="https://welshstew.github.io/templatize/">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!--
+    Repository: https://github.com/welshstew/templatize
+    Buy Me a Coffee: https://buymeacoffee.com/welshstew
+    No third-party scripts, fonts or trackers are loaded by this page.
+  -->
+  <header class="nav">
+    <a class="brand" href="#top"><span class="logo">{{ }}</span> templatize</a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#why">Why not just ask an AI?</a>
+      <a href="#start">Get started</a>
+      <a href="https://github.com/welshstew/templatize">GitHub</a>
+      <a class="coffee small" href="https://buymeacoffee.com/welshstew">☕ Buy me a coffee</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="hero-text">
+        <p class="eyebrow">Open source · runs fully offline</p>
+        <h1>Turn any document into a template, and prove it's&nbsp;exact.</h1>
+        <p class="lede">
+          Paste a config file, manifest, email or contract. templatize finds the values that
+          should be parameters, writes a <strong>Jinja2 template</strong>, a <strong>.env</strong>
+          and a <strong>render script</strong>, then checks that the template reproduces your
+          original <strong>byte for byte</strong>.
+        </p>
+        <div class="cta">
+          <a class="button primary" href="#start">Get started</a>
+          <a class="button" href="https://github.com/welshstew/templatize">View on GitHub</a>
+        </div>
+      </div>
+
+      <figure class="demo" aria-label="Example: an nginx config becomes a template">
+        <div class="pane">
+          <div class="pane-title">nginx.conf <span class="muted">· your input</span></div>
+<pre><code>server {
+    listen <mark class="m-pattern">443</mark> ssl;
+    server_name <mark class="m-key">billing.example.com</mark>;
+    proxy_pass <mark class="m-diff">10.20.30.41:8080</mark>;
+    proxy_set_header X-Env <mark class="m-diff">production</mark>;
+}</code></pre>
+        </div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="pane">
+          <div class="pane-title">template.j2</div>
+<pre><code>server {
+    listen <span class="v">{{ listen_port }}</span> ssl;
+    server_name <span class="v">{{ server_name }}</span>;
+    proxy_pass <span class="v">{{ upstream }}</span>;
+    proxy_set_header X-Env <span class="v">{{ environment }}</span>;
+}</code></pre>
+          <div class="pane-title">.env</div>
+<pre><code>LISTEN_PORT="443"
+SERVER_NAME="billing.example.com"
+UPSTREAM="10.20.30.41:8080"
+ENVIRONMENT="production"</code></pre>
+          <p class="badge">✓ Round-trip PASS · 140 bytes identical</p>
+        </div>
+      </figure>
+    </section>
+
+    <section id="how" class="section">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li>
+          <h3>Paste</h3>
+          <p>Paste your document. Optionally add one to three other versions of it, such as
+          staging and production, or two different customers' letters.</p>
+        </li>
+        <li>
+          <h3>Review</h3>
+          <p>Likely parameters are highlighted: IPs, hostnames, dates, emails, key/value pairs
+          and repeated tokens. <em>Anything that differs between your examples</em> is suggested
+          with high confidence. Accept, reject, rename, or select any text yourself.</p>
+        </li>
+        <li>
+          <h3>Verify</h3>
+          <p>The template is rendered with the extracted values and compared with your original,
+          byte for byte, including whitespace, line endings and the trailing newline. A
+          mismatch shows a red FAIL; it never slips through.</p>
+        </li>
+        <li>
+          <h3>Use</h3>
+          <p>Download <code>template.j2</code>, <code>.env</code> and <code>render.py</code>.
+          Run <code>uv run render.py</code> to render it anywhere. Edit the values and preview
+          the result live first.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section id="why" class="section">
+      <h2>Why not just ask an AI?</h2>
+      <p class="section-lede">A chat model gives you a <em>plausible</em> template.
+      templatize gives you one that's <em>proven</em> correct, privately and repeatably.</p>
+      <div class="grid">
+        <article>
+          <h3>Exact, not approximate</h3>
+          <p>Models are poor at copying long text verbatim. They quietly tidy whitespace,
+          normalise line endings or "fix" typos. In a config or a contract one changed character
+          is a bug. Here, every build is checked byte for byte.</p>
+        </article>
+        <article>
+          <h3>The edge cases are handled</h3>
+          <p>Text that already contains <code>{{ }}</code> or <code>{% endraw %}</code>, CRLF
+          and mixed line endings, values containing quotes, <code>#</code> or <code>$</code>.
+          Each has a deterministic rule, tested with thousands of random inputs.</p>
+        </article>
+        <article>
+          <h3>AI assists, code decides</h3>
+          <p>An optional local model can suggest names and spot missed values, but it never
+          writes the template. Its output is schema-constrained, every quoted value is checked
+          against your document, and anything invented is discarded.</p>
+        </article>
+        <article>
+          <h3>Evidence, not guesses</h3>
+          <p>Give it several versions of a document and it <em>measures</em> what varies, rather
+          than guessing what might change between deployments.</p>
+        </article>
+        <article>
+          <h3>Your data stays yours</h3>
+          <p>Configs hold passwords; letters hold customer details. templatize runs entirely on
+          your machine or server, offline, and never logs or stores what you paste.</p>
+        </article>
+        <article>
+          <h3>Works with your AI, too</h3>
+          <p>An MCP server lets Claude and other assistants use templatize as a tool. You get
+          the AI's judgement with the tool's guarantees.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>What's inside</h2>
+      <ul class="features">
+        <li><strong>Web UI</strong>: highlight, accept or reject, select any text, live preview, one-click zip</li>
+        <li><strong>CLI</strong>: <code>templatize suggest</code> / <code>templatize build</code></li>
+        <li><strong>HTTP API</strong> and an <strong>MCP server</strong> (stdio and streamable HTTP)</li>
+        <li><strong>Detectors</strong>: patterns, key/value, repetition, multi-example diff</li>
+        <li><strong>Optional NER</strong>: names, organisations, addresses, money (GLiNER, CPU, no PyTorch)</li>
+        <li><strong>Optional local LLM</strong>: better names and missed values (llama.cpp; CPU, NVIDIA or AMD via Vulkan)</li>
+        <li><strong>Containers</strong>: non-root, read-only, and verified offline by an automated test</li>
+        <li><strong>Pluggable engines</strong>: Jinja2 today; Helm, Liquid and others can be added</li>
+      </ul>
+    </section>
+
+    <section id="start" class="section">
+      <h2>Get started</h2>
+      <div class="start">
+        <div>
+          <h3>Docker / Podman</h3>
+<pre><code>git clone https://github.com/welshstew/templatize
+cd templatize
+make up            # UI + API at http://127.0.0.1:8000
+make up-ner        # …with the NER detector</code></pre>
+        </div>
+        <div>
+          <h3>Python (uv)</h3>
+<pre><code>uv sync --all-extras
+uv run templatize build nginx.conf --accept-all -o out/
+cd out &amp;&amp; uv run render.py &gt; nginx.conf</code></pre>
+        </div>
+        <div>
+          <h3>Claude Code (MCP)</h3>
+<pre><code>claude mcp add --transport http templatize \
+  http://127.0.0.1:8000/mcp</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="section support">
+      <div>
+        <h2>Support the project</h2>
+        <p>templatize is free and open source. Keeping a public instance online, and the GPU
+        that runs its optional AI features, costs real money. If it saves you time, a coffee
+        helps keep it running.</p>
+      </div>
+      <a class="coffee" href="https://buymeacoffee.com/welshstew">☕ Buy me a coffee</a>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>templatize is open source under the MIT licence. Made by
+      <a href="https://github.com/welshstew">welshstew</a>, also the author of
+      <a href="https://github.com/welshstew/lockstep">lockstep</a>.</p>
+    <p class="muted">This page loads no third-party scripts, fonts or trackers.</p>
+  </footer>
+</body>
+</html>

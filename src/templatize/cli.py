@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -88,9 +89,13 @@ def _suggest(text: str, variants: list[str], llm_url: str | None) -> SuggestResu
     res = suggest(text, variants)
     if not llm_url:
         return res
+    # The key comes from the environment, never a flag (shell history, `ps`).
+    api_key = os.environ.get("TEMPLATIZE_LLM_API_KEY") or None
     try:
         review = asyncio.run(
-            review_candidates(LlmConfig(url=llm_url), text, res.candidates, variants)
+            review_candidates(
+                LlmConfig(url=llm_url, api_key=api_key), text, res.candidates, variants
+            )
         )
     except LlmUnavailable as exc:
         print(f"warning: LLM review skipped: {exc}", file=sys.stderr)

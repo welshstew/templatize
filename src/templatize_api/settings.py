@@ -25,6 +25,18 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _secret(name: str) -> str | None:
+    """A secret from NAME or from the file named by NAME_FILE (Docker-secrets style)."""
+    path = _opt(f"{name}_FILE")
+    if path:
+        try:
+            value = Path(path).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise SystemExit(f"cannot read {name}_FILE ({path}): {exc.strerror}") from None
+        return value or None
+    return _opt(name)
+
+
 def _opt(name: str) -> str | None:
     raw = os.environ.get(name, "").strip()
     return raw or None
@@ -43,7 +55,17 @@ class Settings:
     ner_max_chars: int = 200_000
     llm_url: str | None = None
     llm_timeout: float = 300.0
+    llm_api_key: str | None = field(default=None, repr=False)
     llm_max_chars: int = 24_000
+    # Rate limiting (per client IP). "off" disables a limit.
+    rate_limit: str = "300/minute"
+    llm_rate_limit: str = "20/hour"
+    llm_concurrency: int = 1
+    """LLM reviews run at the same time (one GPU/CPU does one review well)."""
+    llm_queue: int = 2
+    """Reviews allowed to wait for a slot; beyond that callers get 429."""
+    trusted_proxies: tuple[str, ...] = ()
+    """Reverse proxies whose X-Forwarded-For is trusted for the client IP."""
     # MCP over streamable HTTP at /mcp (needs the `mcp` extra).
     mcp_http: bool = True
     mcp_allowed_hosts: tuple[str, ...] = DEFAULT_MCP_ALLOWED_HOSTS
@@ -65,7 +87,17 @@ class Settings:
             ner_max_chars=int(os.environ.get("TEMPLATIZE_NER_MAX_CHARS", "200000")),
             llm_url=_opt("TEMPLATIZE_LLM_URL"),
             llm_timeout=float(os.environ.get("TEMPLATIZE_LLM_TIMEOUT", "300")),
+            llm_api_key=_secret("TEMPLATIZE_LLM_API_KEY"),
             llm_max_chars=int(os.environ.get("TEMPLATIZE_LLM_MAX_CHARS", "24000")),
+            rate_limit=os.environ.get("TEMPLATIZE_RATE_LIMIT", "300/minute"),
+            llm_rate_limit=os.environ.get("TEMPLATIZE_LLM_RATE_LIMIT", "20/hour"),
+            llm_concurrency=int(os.environ.get("TEMPLATIZE_LLM_CONCURRENCY", "1")),
+            llm_queue=int(os.environ.get("TEMPLATIZE_LLM_QUEUE", "2")),
+            trusted_proxies=tuple(
+                p.strip()
+                for p in os.environ.get("TEMPLATIZE_TRUSTED_PROXIES", "").split(",")
+                if p.strip()
+            ),
             mcp_http=_bool("TEMPLATIZE_MCP_HTTP", True),
             mcp_allowed_hosts=DEFAULT_MCP_ALLOWED_HOSTS
             + tuple(

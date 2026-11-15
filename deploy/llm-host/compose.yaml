@@ -1,0 +1,42 @@
+# Standalone LLM service for a separate GPU machine (e.g. an Unraid server reached
+# over Tailscale). The templatize app elsewhere points TEMPLATIZE_LLM_URL at it.
+#
+#   cp .env.example .env            # set LLM_BIND and MODELS_DIR, then:
+#   openssl rand -hex 32 > llm_api_key && chmod 600 llm_api_key
+#   docker compose up -d --build
+#
+# Requires an API key and an explicit bind address: it refuses to start otherwise.
+name: templatize-llm
+
+services:
+  llm:
+    image: ${TEMPLATIZE_LLM_IMAGE:-templatize-llm:vulkan}
+    build:
+      context: ../..
+      dockerfile: docker/llm.Dockerfile
+      args:
+        LLAMA_IMAGE: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-vulkan-b11946}
+    devices:
+      - /dev/dri:/dev/dri
+    ports:
+      # Bind to the machine's Tailscale IP only (e.g. 100.x.y.z), never 0.0.0.0.
+      - "${LLM_BIND:?set LLM_BIND to this machine's Tailscale IP}:${LLM_PORT:-8080}:8080"
+    volumes:
+      - ${MODELS_DIR:?set MODELS_DIR to the folder holding the GGUF}:/models:ro
+      - ./llm_api_key:/run/secrets/llm_api_key:ro
+    environment:
+      LLM_MODEL: /models/${LLM_MODEL_FILE:-Qwen3-4B-Instruct-2507-Q4_K_M.gguf}
+      LLM_CTX: ${LLM_CTX:-16384}
+      LLM_GPU_LAYERS: ${LLM_GPU_LAYERS:-99}
+      LLM_API_KEY_FILE: /run/secrets/llm_api_key
+      LLM_REQUIRE_API_KEY: "1"
+    read_only: true
+    tmpfs: ["/tmp:size=64m"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped

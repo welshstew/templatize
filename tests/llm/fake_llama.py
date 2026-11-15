@@ -17,6 +17,8 @@ class FakeLlama:
         self.requests: list[dict[str, Any]] = []
         self.responder: Responder = lambda _req: '{"candidates": [], "missed": []}'
         self.health_status = 200
+        self.auth_headers: list[str | None] = []
+        self.required_key: str | None = None
         self.raw_override: bytes | None = None
         self.url = ""
 
@@ -44,6 +46,11 @@ def fake_llama() -> Iterator[FakeLlama]:
                 self._send(404, b"{}")
 
         def do_POST(self) -> None:
+            auth = self.headers.get("authorization")
+            state.auth_headers.append(auth)
+            if state.required_key and auth != f"Bearer {state.required_key}":
+                self._send(401, b'{"error": "invalid api key"}')
+                return
             length = int(self.headers.get("content-length", "0"))
             req = json.loads(self.rfile.read(length))
             state.requests.append(req)

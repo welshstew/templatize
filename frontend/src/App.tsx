@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 
 import {
+  ApiError,
   api,
   type BuildResponse,
   type ChartResponse,
@@ -43,6 +44,7 @@ export type LlmStatus =
   | { state: "off" }
   | { state: "running" }
   | { state: "unavailable"; detail: string }
+  | { state: "limited"; detail: string }
   | { state: "done"; renamed: number; flagged: number; added: number };
 
 const DEFAULT_LIMITS = { max_input_chars: 1_000_000, max_variants: 3, max_variables: 2000 };
@@ -176,7 +178,9 @@ export function App() {
         setLlm({ state: "done", ...outcome });
       },
       (e) => {
-        if (!isAbort(e)) setLlm({ state: "unavailable", detail: e instanceof Error ? e.message : String(e) });
+        if (isAbort(e)) return;
+        const detail = e instanceof Error ? e.message : String(e);
+        setLlm(e instanceof ApiError && e.status === 429 ? { state: "limited", detail } : { state: "unavailable", detail });
       },
     );
   };

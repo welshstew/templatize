@@ -62,6 +62,8 @@ class LlmConfig:
     max_chars: int = 24_000
     """Documents longer than this are not sent (the model's context is limited)."""
     max_tokens: int = 2048
+    api_key: str | None = None
+    """Bearer token for a llama-server started with --api-key / --api-key-file."""
     temperature: float = 0.0
 
 
@@ -216,18 +218,21 @@ def build_messages(
     return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}], short
 
 
-def _http_json(url: str, payload: dict[str, Any] | None, timeout: float) -> Any:
+def _http_json(
+    url: str, payload: dict[str, Any] | None, timeout: float, api_key: str | None = None
+) -> Any:
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"content-type": "application/json"} if data else {},
-        method="POST" if data else "GET",
-    )
+    headers = {"content-type": "application/json"} if data else {}
+    if api_key:
+        headers["authorization"] = f"Bearer {api_key}"
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
+        exc.close()  # the error carries the open response; release the socket
+        if exc.code == 401:
+            raise LlmUnavailable("llama.cpp server rejected the API key (HTTP 401)") from None
         raise LlmUnavailable(f"llama.cpp server returned HTTP {exc.code}") from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
@@ -236,10 +241,10 @@ def _http_json(url: str, payload: dict[str, Any] | None, timeout: float) -> Any:
         raise LlmUnavailable("llama.cpp server sent invalid JSON") from None
 
 
-def check_health(url: str, timeout: float = 2.0) -> bool:
+def check_health(url: str, timeout: float = 2.0, api_key: str | None = None) -> bool:
     """True when the server is up and the model is loaded (GET /health -> 200)."""
     try:
-        res = _http_json(url.rstrip("/") + "/health", None, timeout)
+        res = _http_json(url.rstrip("/") + "/health", None, timeout, api_key)
     except LlmUnavailable:
         return False
     return isinstance(res, dict) and res.get("status") == "ok"
@@ -256,7 +261,9 @@ def call_model(config: LlmConfig, messages: list[dict[str, str]], schema: dict[s
         },
         "cache_prompt": True,
     }
-    res = _http_json(config.url.rstrip("/") + "/v1/chat/completions", payload, config.timeout)
+    res = _http_json(
+        config.url.rstrip("/") + "/v1/chat/completions", payload, config.timeout, config.api_key
+    )
     try:
         content = res["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):

@@ -7,6 +7,8 @@ errors are returned without the ``input`` echo FastAPI includes by default.
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
@@ -38,6 +40,7 @@ from templatize.helm.chart import CHART_NAME_RE, render_templates
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, IRValidationError
 from templatize.suggest import InputLimitError, SuggestResult, suggest
 from templatize_api.middleware import BodyLimitMiddleware, SecurityHeadersMiddleware
+from templatize_api.ratelimit import Rate, RateLimitMiddleware, parse_networks
 from templatize_api.schemas import (
     MAX_VARIABLES,
     BuildRequest,
@@ -67,9 +70,35 @@ ERRORS: dict[int | str, dict[str, Any]] = {
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, detail: str) -> None:
+    def __init__(self, status: int, detail: str, headers: dict[str, str] | None = None) -> None:
         self.status = status
         self.detail = detail
+        self.headers = headers
+
+
+class _LlmSlots:
+    """At most ``concurrency`` reviews run; at most ``queue`` wait; the rest get 429."""
+
+    def __init__(self, concurrency: int, queue: int) -> None:
+        self.sem = asyncio.Semaphore(max(1, concurrency))
+        self.queue = max(0, queue)
+        self.waiting = 0
+
+    @asynccontextmanager
+    async def slot(self) -> AsyncIterator[None]:
+        if self.sem.locked() and self.waiting >= self.queue:
+            raise ApiError(
+                429, "the LLM is busy with other reviews; try again shortly", {"retry-after": "30"}
+            )
+        self.waiting += 1
+        try:
+            await self.sem.acquire()
+        finally:
+            self.waiting -= 1
+        try:
+            yield
+        finally:
+            self.sem.release()
 
 
 def _validation_message(exc: ValidationError) -> str:
@@ -182,8 +211,11 @@ class _HealthCache:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    llm_health = _HealthCache(settings.llm_url)
+    llm_health = _HealthCache(
+        settings.llm_url, probe=functools.partial(check_health, api_key=settings.llm_api_key)
+    )
     ner_health = _HealthCache(settings.ner_url, probe=ner_detector.check_health)
+    llm_slots = _LlmSlots(settings.llm_concurrency, settings.llm_queue)
 
     def run_suggest(text: str, variants: list[str]) -> SuggestResult:
         """Heuristics, plus the NER service when it is up (it answers in milliseconds;
@@ -224,7 +256,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
-        return JSONResponse({"detail": exc.detail}, status_code=exc.status)
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status, headers=exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def _request_validation(_: Request, exc: RequestValidationError) -> JSONResponse:
@@ -285,10 +317,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except InputLimitError as exc:
             raise ApiError(413, str(exc)) from None
         config = LlmConfig(
-            url=settings.llm_url, timeout=settings.llm_timeout, max_chars=settings.llm_max_chars
+            url=settings.llm_url,
+            timeout=settings.llm_timeout,
+            max_chars=settings.llm_max_chars,
+            api_key=settings.llm_api_key,
         )
         try:
-            review = await review_candidates(config, req.text, heuristic.candidates, req.variants)
+            async with llm_slots.slot():
+                review = await review_candidates(
+                    config, req.text, heuristic.candidates, req.variants
+                )
         except LlmUnavailable as exc:
             return LlmReviewResponse(available=False, detail=str(exc))
         return LlmReviewResponse(available=True, review=review)
@@ -467,5 +505,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Outermost first: headers wrap everything, body limit applies before routing.
     app.add_middleware(BodyLimitMiddleware, max_bytes=settings.max_body_bytes)
+    app.add_middleware(
+        RateLimitMiddleware,
+        api=Rate.parse(settings.rate_limit),
+        llm=Rate.parse(settings.llm_rate_limit),
+        trusted_proxies=parse_networks(settings.trusted_proxies),
+    )
     app.add_middleware(SecurityHeadersMiddleware)
     return app
