@@ -234,10 +234,76 @@ _FORMAT_TYPES = {
 }
 
 
+# Kubernetes schemas list a string field's values in prose, not as an enum:
+# "One of Always, Never, IfNotPresent", "Valid options are ExternalName, ClusterIP,
+# NodePort, and LoadBalancer", "Must be UDP, TCP, or SCTP". Only lists of two or more
+# capitalised words count ("Exactly one of A and B" names fields, so it does not).
+_CHOICE = r"""["']?[A-Z][A-Za-z]+["']?"""
+_CHOICE_SEP = r"(?:,\s*(?:and\s+|or\s+)?|\s+or\s+|\s+and\s+)"
+_PROSE_CHOICES = re.compile(
+    r"(?<!xactly )(?:[Oo]ne of|Valid options are|Valid values are|[Mm]ust be|"
+    r"[Mm]ay be one of|[Cc]an be one of|[Ss]upported values(?: are)?)[:\s]+"
+    rf"({_CHOICE}(?:{_CHOICE_SEP}{_CHOICE})+)"
+)
+
+
+def _choices(schemas: list[dict[str, Any]]) -> list[str] | None:
+    """The values a string field allows: its ``enum`` (strings only; ``null`` is
+    dropped), else a list in its description."""
+    for s in schemas:
+        enum = s.get("enum")
+        if isinstance(enum, list):
+            vals = [v for v in enum if v is not None]
+            if vals and all(isinstance(v, str) for v in vals):
+                return list(dict.fromkeys(vals))
+            return None
+    for s in schemas:
+        desc, typ = s.get("description"), s.get("type")
+        if isinstance(desc, str) and (
+            typ == "string" or (isinstance(typ, list) and "string" in typ)
+        ):
+            m = _PROSE_CHOICES.search(desc)
+            if m:
+                return list(dict.fromkeys(re.findall(r"[A-Z][A-Za-z]+", m.group(1))))
+    return None
+
+
+_JSON_TYPES = ("integer", "number", "boolean", "string")
+
+
+def _accepts(schemas: list[dict[str, Any]]) -> list[str] | None:
+    """The scalar JSON types the field allows (``type``, or the members of a
+    ``oneOf``/``anyOf``), ``null`` left out; ``None`` when not stated or not scalar."""
+    found: set[str] = set()
+    stated = False
+
+    def take(t: Any) -> bool:
+        types = [t] if isinstance(t, str) else t if isinstance(t, list) else None
+        if types is None:
+            return False
+        found.update(x for x in types if x != "null")
+        return True
+
+    for s in schemas:
+        if take(s.get("type")):
+            stated = True
+        for key in ("oneOf", "anyOf"):
+            members = s.get(key)
+            if isinstance(members, list):
+                for m in members:
+                    if isinstance(m, dict) and take(m.get("type")):
+                        stated = True
+    if not stated or not found or not found <= set(_JSON_TYPES):
+        return None
+    return [t for t in _JSON_TYPES if t in found]
+
+
 class _Facts:
     def __init__(self, schemas: list[dict[str, Any]], value: str) -> None:
         self.const = any("const" in s for s in schemas)
         self.enum = next((s["enum"] for s in schemas if isinstance(s.get("enum"), list)), None)
+        self.choices = _choices(schemas)
+        self.accepts = _accepts(schemas)
         fmt = next((s["format"] for s in schemas if isinstance(s.get("format"), str)), None)
         self.vtype: VarType | None = _FORMAT_TYPES.get(fmt) if fmt else None
         if self.vtype is None and any(
@@ -324,6 +390,10 @@ def apply(
                 notes.append("the schema's default")
             if fact.enum:
                 notes.append("one of: " + ", ".join(map(str, fact.enum[:8])))
+            if fact.choices and c.value in fact.choices:
+                update["choices"] = fact.choices
+            if fact.accepts:
+                update["accepts"] = fact.accepts
             if notes:
                 update["reason"] = "; ".join([*(filter(None, [c.reason])), *notes])
         out.append(c.model_copy(update=update) if update else c)

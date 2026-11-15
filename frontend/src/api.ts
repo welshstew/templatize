@@ -19,6 +19,10 @@ export interface Candidate {
   variant_values: string[] | null;
   /** Helm values.yaml location, e.g. ["image", "tag"] (Kubernetes input only). */
   values_path?: string[] | null;
+  /** The values its schema allows (Helm enum, Ansible choices). */
+  choices?: string[] | null;
+  /** The JSON types its schema allows (["integer", "string"] for a targetPort). */
+  accepts?: string[] | null;
 }
 
 export interface Notice {
@@ -124,6 +128,9 @@ export interface VariableSpec {
   sources?: string[];
   values_path?: string[] | null;
   variant_values?: string[] | null;
+  description?: string | null;
+  choices?: string[] | null;
+  accepts?: string[] | null;
 }
 
 export interface EmittedFile {

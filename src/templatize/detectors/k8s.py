@@ -18,7 +18,7 @@ from collections import Counter
 from yaml.nodes import Node, ScalarNode
 
 from templatize.detectors.base import DetectionContext, DetectorResult
-from templatize.ir import VALUES_KEY_RE, Candidate, Source, Span
+from templatize.ir import VALUES_KEY_RE, Candidate, Source, Span, VarType
 from templatize.k8s import Resource, get, items, parse_resources, scalar, seq
 from templatize.naming import infer_type, snake_case
 
@@ -82,6 +82,7 @@ class _Collector:
         reason: str,
         confidence: float = CONF_FIELD,
         sub: tuple[int, int] | None = None,
+        port: bool = False,
     ) -> None:
         span = scalar_span(self.text, node)
         if span is None:
@@ -92,6 +93,8 @@ class _Collector:
         if not value.strip() or value.lower() in ("null", "~"):
             return
         vtype = infer_type(value)
+        if port and vtype is VarType.INT:  # a number in a port field (not a name)
+            vtype = VarType.PORT
         self.out.append(
             Candidate(
                 name=snake_case("_".join(path)),
@@ -247,9 +250,9 @@ class _Rules:
                 pbase = svc
             else:
                 pbase = [*svc, "ports", camel(scalar(get(p, "name")) or f"port{i + 1}")]
-            col.add(get(p, "port"), [*pbase, "port"], "Service port")
-            col.add(get(p, "targetPort"), [*pbase, "targetPort"], "Service target port")
-            col.add(get(p, "nodePort"), [*pbase, "nodePort"], "Service node port")
+            col.add(get(p, "port"), [*pbase, "port"], "Service port", port=True)
+            col.add(get(p, "targetPort"), [*pbase, "targetPort"], "Service target port", port=True)
+            col.add(get(p, "nodePort"), [*pbase, "nodePort"], "Service node port", port=True)
 
     @staticmethod
     def ingress(col: _Collector, r: Resource, base: list[str]) -> None:
@@ -307,7 +310,7 @@ def _container(col: _Collector, c: Node, base: list[str], cname: str) -> None:
             path = [*base, "containerPort"]
         else:
             path = [*base, "ports", camel(scalar(get(p, "name")) or f"port{i + 1}")]
-        col.add(get(p, "containerPort"), path, f"port of {cname}")
+        col.add(get(p, "containerPort"), path, f"port of {cname}", port=True)
     for e in seq(get(c, "env")):
         ename = scalar(get(e, "name"))
         if ename:

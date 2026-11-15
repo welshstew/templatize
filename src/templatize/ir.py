@@ -171,6 +171,11 @@ class Candidate(BaseModel):
     reason: str | None = None
     variant_values: list[str] | None = None
     values_path: ValuesPath | None = None
+    choices: list[str] | None = None
+    """The values its schema allows (an ``enum``), when known."""
+    accepts: list[str] | None = None
+    """The JSON types its schema allows (``["integer", "string"]`` for a Kubernetes
+    targetPort), when known; they override the type guessed from the value."""
 
     @model_validator(mode="after")
     def _fill_id(self) -> Candidate:
@@ -257,6 +262,10 @@ class Variable(BaseModel):
     confidence: float | None = None
     description: str | None = None
     values_path: ValuesPath | None = None
+    choices: list[str] | None = None
+    """The values its schema allows; charts and roles refuse others."""
+    accepts: list[str] | None = None
+    """The JSON types its schema allows (see :class:`Candidate`)."""
 
     @property
     def env_key(self) -> str:

@@ -59,6 +59,8 @@ def _combine(group: list[Candidate]) -> Candidate:
     typed = [c for c in group if c.type is not VarType.STRING]
     vtype = max(typed, key=lambda c: c.confidence).type if typed else VarType.STRING
     variant_values = next((c.variant_values for c in group if c.variant_values), None)
+    choices = next((c.choices for c in group if c.choices), None)
+    accepts = next((c.accepts for c in group if c.accepts), None)
     pathed = [c for c in group if c.values_path]
     values_path = (
         max(pathed, key=lambda c: (NAME_ORIGIN_RANK[c.name_origin], c.confidence)).values_path
@@ -79,6 +81,8 @@ def _combine(group: list[Candidate]) -> Candidate:
         reason="; ".join(dict.fromkeys(reasons)) or None,
         variant_values=variant_values,
         values_path=values_path,
+        choices=choices,
+        accepts=accepts,
     )
 
 

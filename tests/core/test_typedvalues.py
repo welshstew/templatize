@@ -244,3 +244,124 @@ def test_ansible_refuses_a_bad_value_before_rendering(tmp_path: Path) -> None:
     bad = _ansible(tmp_path, "-e", f"config_dest={tmp_path / 'bad'}", "-e", "config_port=http")
     assert bad.returncode != 0 and "config_port" in bad.stdout
     assert not (tmp_path / "bad").exists()
+
+
+SERVICE = """\
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+"""
+
+
+def test_schema_choices_from_an_enum_or_kubernetes_prose() -> None:
+    from templatize.userschema import _accepts, _choices
+
+    assert _choices([{"enum": ["a", "b", None]}]) == ["a", "b"]
+    assert _choices([{"enum": [1, 2]}]) is None  # only strings
+    prose = {
+        "type": ["string", "null"],
+        "description": "Image pull policy. One of Always, Never, IfNotPresent. Defaults to Always.",
+    }
+    assert _choices([prose]) == ["Always", "Never", "IfNotPresent"]
+    assert _choices([{"type": "string", "description": "Must be UDP, TCP, or SCTP."}]) == [
+        "UDP",
+        "TCP",
+        "SCTP",
+    ]
+    fields = {
+        "type": "string",
+        "description": "Exactly one of ResourceClaimName and ResourceClaimTemplateName must be set.",
+    }
+    assert _choices([fields]) is None
+    assert _choices([{"type": "integer", "description": "One of Always, Never."}]) is None
+    int_or_string = [{"type": ["string", "null"]}, {"type": ["integer", "null"]}]
+    assert _accepts(int_or_string) == ["integer", "string"]
+    assert _accepts([{"type": "object"}]) is None
+    assert _accepts([{"description": "no type"}]) is None
+
+
+def test_service_type_choices_and_an_open_target_port() -> None:
+    res = suggest(SERVICE)
+    by_name = {c.name: c for c in res.candidates}
+    assert by_name["service_type"].choices == [
+        "ExternalName",
+        "ClusterIP",
+        "NodePort",
+        "LoadBalancer",
+    ]
+    assert by_name["service_port"].type is VarType.PORT
+    assert by_name["service_target_port"].accepts == ["integer", "string"]
+    specs, loops = accept_suggestions(res.candidates, res.loops)
+    chart = build_chart(SERVICE, specs, loops=loops)
+    schema = json.loads(chart.file("values.schema.json").content)
+    svc = schema["properties"]["service"]["properties"]
+    assert svc["type"]["enum"] == ["ExternalName", "ClusterIP", "NodePort", "LoadBalancer"]
+    base = yaml.safe_load(chart.file("values.yaml").content)
+    assert valid(schema, base)
+    for ok in ({"targetPort": "http"}, {"targetPort": 9090}, {"type": "NodePort"}, {"port": 443}):
+        assert valid(schema, {**base, "service": {**base["service"], **ok}}), ok
+    for bad in ({"type": "Loadbalancer"}, {"port": 70000}, {"port": "http"}, {"targetPort": 0}):
+        assert not valid(schema, {**base, "service": {**base["service"], **bad}}), bad
+
+    role = build_role(SERVICE, specs, loops, role_name="svc")
+    spec_file = next(f.content for f in role.files if f.path.endswith("argument_specs.yml"))
+    options = yaml.safe_load(spec_file)["argument_specs"]["main"]["options"]
+    assert options["svc_service_type"]["choices"] == [
+        "ExternalName",
+        "ClusterIP",
+        "NodePort",
+        "LoadBalancer",
+    ]
+    assert options["svc_service_port"]["type"] == "int"
+    assert options["svc_service_target_port"]["type"] == "str"  # 8080 or http
+
+
+def test_choices_that_a_shipped_value_breaks_are_dropped() -> None:
+    hints = {("mode",): Hint(VarType.STRING, None, ("a", "b"))}
+    assert "enum" in values_schema([{"mode": "a"}], hints, "V")["properties"]["mode"]
+    assert (
+        "enum"
+        not in values_schema([{"mode": "a"}, {"mode": "c"}], hints, "V")["properties"]["mode"]
+    )
+    assert "choices" not in argument_options([{"mode": "a"}, {"mode": "c"}], hints)["mode"]
+
+
+@pytest.mark.skipif(HELM is None or ANSIBLE is None, reason="helm and ansible-playbook needed")
+def test_real_tools_hold_service_values_to_the_schema(tmp_path: Path) -> None:
+    assert HELM is not None
+    specs, loops = accepted(SERVICE)
+    chart = build_chart(SERVICE, specs, loops=loops)
+    _write(chart.files, tmp_path / "c")
+
+    def template(*args: str) -> int:
+        cmd = [HELM, "template", "x", str(tmp_path / "c"), *args]
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=60, check=False
+        ).returncode
+
+    assert template("--set", "service.targetPort=http", "--set", "service.type=NodePort") == 0
+    assert template("--set", "service.type=Loadbalancer") != 0
+    assert template("--set", "service.port=70000") != 0
+
+    role = build_role(SERVICE, specs, loops, filename="svc.yaml")
+    _write(role.files, tmp_path / "r")
+    out = tmp_path / "out.yaml"
+    ok = _ansible(
+        tmp_path / "r", "-e", f"config_dest={out}", "-e", "config_service_target_port=http"
+    )
+    assert ok.returncode == 0, ok.stdout[-2000:]
+    assert "targetPort: http" in out.read_text()
+    bad = _ansible(
+        tmp_path / "r",
+        "-e",
+        f"config_dest={tmp_path / 'bad'}",
+        "-e",
+        "config_service_type=Loadbalancer",
+    )
+    assert bad.returncode != 0 and "config_service_type" in bad.stdout

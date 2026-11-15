@@ -31,6 +31,15 @@ Path = tuple[str, ...]
 class Hint:
     type: VarType | None = None
     description: str | None = None
+    choices: tuple[str, ...] | None = None
+    """What the schema allows (``enum``); kept only if every shipped value is one."""
+    accepts: tuple[str, ...] | None = None
+    """The JSON types the field's schema allows; with "string" among them the value
+    is not held to the detected type (a targetPort can be 8080 or ``http``)."""
+
+    @property
+    def open_string(self) -> bool:
+        return bool(self.accepts) and "string" in (self.accepts or ())
 
 
 # Reason parts that say how a value was found, not what it is.
@@ -72,7 +81,12 @@ def variable_hints(
     hints: dict[Path, Hint] = {}
     for v in variables:
         if v.name in path_of:
-            hints[path_of[v.name]] = Hint(v.type, describe(v.description))
+            hints[path_of[v.name]] = Hint(
+                v.type,
+                describe(v.description),
+                tuple(v.choices) if v.choices else None,
+                tuple(v.accepts) if v.accepts else None,
+            )
 
     def loop(lp: Loop, path: Path) -> None:
         hints[path] = Hint(None, describe(lp.description))
@@ -144,7 +158,9 @@ def _schema(path: Path, observed: list[Any], hints: Mapping[Path, Hint]) -> dict
     elif all(_json_type(v) is not None for v in vals) and (vals or hint.type is not None):
         types = {t for v in vals if (t := _json_type(v))}
         want = _JSON_TYPE.get(hint.type) if hint.type is not None else None
-        if want is not None:
+        if hint.open_string:
+            types |= set(hint.accepts or ())
+        elif want is not None:
             # The same value quoted ("5672") renders the same: accepted as a string
             # when it looks like one, so only "three" is turned away.
             types |= {want, "string"}
@@ -162,6 +178,8 @@ def _schema(path: Path, observed: list[Any], hints: Mapping[Path, Hint]) -> dict
         ints = [v for v in vals if _json_type(v) == "integer"]
         if hint.type is VarType.PORT and all(1 <= i <= 65535 for i in ints):
             out["minimum"], out["maximum"] = 1, 65535  # applies to numbers only
+        if _fits_choices(hint, vals):
+            out["enum"] = list(hint.choices or ())
     if hint.description:
         out["description"] = hint.description
     return out
@@ -244,6 +262,8 @@ def _option(path: Path, observed: list[Any], hints: Mapping[Path, Hint]) -> dict
             out["elements"] = _scalar_kind((*path, ITEM), items, hints)
     elif all(not isinstance(v, Mapping | list) for v in vals):
         out["type"] = _scalar_kind(path, vals, hints)
+        if out["type"] == "str" and _fits_choices(hint, vals):
+            out["choices"] = list(hint.choices or ())
     else:
         out["type"] = "raw"
     if hint.description:
@@ -251,9 +271,16 @@ def _option(path: Path, observed: list[Any], hints: Mapping[Path, Hint]) -> dict
     return out
 
 
+def _fits_choices(hint: Hint, vals: list[Any]) -> bool:
+    allowed = hint.choices or ()
+    return bool(allowed) and all(isinstance(v, str) and v in allowed for v in vals)
+
+
 def _scalar_kind(path: Path, vals: list[Any], hints: Mapping[Path, Hint]) -> str:
     hint = hints.get(path, Hint())
     kind = _ANSIBLE_TYPE.get(hint.type, "str") if hint.type is not None else "str"
+    if hint.open_string:
+        kind = "str"
     if kind != "str" and all(_converts(v, kind) for v in vals):
         return kind
     if all(isinstance(v, str) for v in vals):

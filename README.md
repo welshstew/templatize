@@ -501,9 +501,20 @@ value would just be rendered.
   generator checks that before writing the file. If they ever did not fit, it would leave
   the file out with a note rather than ship a chart that refuses itself.
 
+- **The field's schema** (bundled or supplied), when it applies:
+  - **Allowed values:** an `enum`, or for Kubernetes, the list in the field's
+    description ("Valid options are ExternalName, ClusterIP, NodePort, and
+    LoadBalancer"). These become `enum` in Helm and `choices` in Ansible, so
+    `service.type=Loadbalancer` is refused.
+  - **Allowed JSON types:** these take precedence over the type guessed from the value.
+    A `targetPort` of `8080` still takes `http`, because Kubernetes allows a port name
+    there, and an env value of `"8080"` takes any string.
+
 **What is accepted:**
 - **Numbers and booleans:** an integer field takes `5` or a quoted `"5"` (both render
-  the same) but not `"three"`. A port must be 1–65535.
+  the same) but not `"three"`. A port must be 1–65535: Kubernetes `containerPort`,
+  `port`, `targetPort` and `nodePort` are detected as ports.
+- **Choices:** a choice list is kept only if every shipped value is in it.
 - **Detected strings:** a number is refused there. YAML would print `tag: 1.10` as
   `1.1`.
 - **Strings nothing detected:** in the helm create style, defaults such as a probe's
@@ -511,7 +522,8 @@ value would just be rendered.
 
 **Descriptions:** come from the suggestion's reason and the field's schema, for example
 "Replica count. Number of desired pods.". They show up in the schema and in
-`ansible-doc`.
+`ansible-doc`. The UI sends them, along with the schema's choices and types, when it
+builds a chart or role. Variables you select yourself carry none of these.
 
 The chart view's preview applies the same check. An edited `values.yaml` that the
 schema refuses shows "✗ values.schema.json: replicaCount: 'three' is not an integer".

@@ -259,3 +259,24 @@ test("prefix: replace the shared prefix, add one, or remove it", () => {
   const plain = itemsFromCandidates([mk("x", "host"), mk("y", "port")]).map((i, k) => ({ ...i, spans: [{ start: k, end: k + 1 }] }));
   assert.deepEqual(applyPrefix(plain, new Set(["x", "y"]), "db_").items.map((i) => i.name), ["db_host", "db_port"]);
 });
+
+test("accepted suggestions carry their description and the schema's choices and types", () => {
+  const items = setStatus(
+    itemsFromCandidates([
+      cand({ reason: "Service type", choices: ["ClusterIP", "NodePort"], accepts: ["string"] } as Partial<Candidate>),
+    ]),
+    new Set(["c1"]),
+    "accepted",
+  );
+  assert.deepEqual(specsFor(items), [
+    {
+      name: "host",
+      spans: [{ start: 6, end: 10 }],
+      type: "hostname",
+      sources: ["key_value"],
+      description: "Service type",
+      choices: ["ClusterIP", "NodePort"],
+      accepts: ["string"],
+    },
+  ]);
+});

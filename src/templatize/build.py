@@ -45,6 +45,10 @@ class VariableSpec(BaseModel):
     variant_values: list[str] | None = None
     """Value of this variable in each example document, in order (Helm charts write
     them to per-example values files). Missing means "same as in the main text"."""
+    choices: list[str] | None = Field(default=None, max_length=1000)
+    """The values its schema allows (Helm ``enum``, Ansible ``choices``)."""
+    accepts: list[str] | None = Field(default=None, max_length=8)
+    """The JSON types its schema allows; they override ``type`` in charts and roles."""
 
 
 class LoopFieldSpec(BaseModel):
@@ -161,6 +165,8 @@ def make_ir(text: str, specs: Sequence[VariableSpec], loops: Sequence[LoopSpec] 
                 confidence=spec.confidence,
                 description=spec.description,
                 values_path=spec.values_path,
+                choices=spec.choices,
+                accepts=spec.accepts,
             )
         )
     return TemplateIR(
@@ -180,6 +186,8 @@ def specs_from_candidates(candidates: Iterable[Candidate]) -> list[VariableSpec]
             description=c.reason,
             values_path=c.values_path,
             variant_values=c.variant_values,
+            choices=c.choices,
+            accepts=c.accepts,
         )
         for c in candidates
     ]
