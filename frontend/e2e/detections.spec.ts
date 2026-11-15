@@ -115,3 +115,19 @@ for (const [engine, template, placeholder] of [
     await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText("server_name shop.example.org;");
   });
 }
+
+test("the terraform engine keeps lists as loops", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("python");
+  await analyze(page);
+  await page.getByRole("button", { name: "Accept list kafka_brokers", exact: true }).click();
+  await page.getByRole("button", { name: "Accept all", exact: true }).click();
+  await page.getByLabel("Template engine").selectOption("terraform");
+  await expect(page.locator(".badge.pass").first()).toContainText("Round-trip PASS");
+  await page.getByRole("tab", { name: "template.tftpl", exact: true }).click();
+  await expect(page.getByLabel("Generated output").locator("pre.code")).toContainText(
+    "%{ for kafka_broker_index, kafka_broker in kafka_brokers }",
+  );
+  await page.getByRole("tab", { name: "Preview", exact: true }).click();
+  await expect(page.getByLabel("Generated output").locator("pre.code")).not.toContainText("Render error");
+});

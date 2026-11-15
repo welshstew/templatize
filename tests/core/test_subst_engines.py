@@ -141,16 +141,30 @@ def test_envsubst_renames_keys_the_text_or_the_shell_uses() -> None:
     assert out.startswith("registry: quay.io/x\nrun: docker push $REGISTRY/app\n")
 
 
-def test_engines_without_loops_keep_the_loop_text() -> None:
+def test_envsubst_keeps_the_loop_text() -> None:
     text = "hosts:\n  - web-01.example.com\n  - web-02.example.com\n  - web-03.example.com\n"
     res = suggest(text)
     specs, loops = accept_suggestions(res.candidates, res.loops)
     assert loops, "the list should be offered as a loop"
-    for engine in ENGINES:
-        result = build_ir(make_ir(text, specs, loops), engine)
-        assert result.roundtrip.ok
-        assert any("no loops" in n for n in result.notes)
-        assert not result.ir.loops
+    result = build_ir(make_ir(text, specs, loops), "envsubst")
+    assert result.roundtrip.ok
+    assert any("no loops" in n for n in result.notes)
+    assert not result.ir.loops
+
+
+def test_terraform_loops() -> None:
+    text = "hosts:\n  - web-01.example.com\n  - web-02.example.com\n  - web-03.example.com\n"
+    res = suggest(text)
+    specs, loops = accept_suggestions(res.candidates, res.loops)
+    result = build_ir(make_ir(text, specs, loops), "terraform")
+    assert result.roundtrip.ok and result.ir.loops and not result.notes
+    assert "%{ for host_index, host in hosts }" in result.template.content
+    assert "%{ if host_index > 0 }" in result.template.content
+    assert '"hosts" = [' in result.env.content
+    # Edited rows render: one more host, one fewer.
+    emitter = get_emitter("terraform")
+    out = emitter.render(result.template.content, {"hosts": ["a.example.com", "b.example.com"]})
+    assert out == "hosts:\n  - a.example.com\n  - b.example.com\n"
 
 
 @pytest.mark.skipif(ENVSUBST is None, reason="envsubst not installed")
@@ -245,3 +259,76 @@ def test_cli_build_with_an_engine(tmp_path: Path, engine: str, template: str, va
     out = tmp_path / "out"
     assert main(["build", str(src), "--accept-all", "--engine", engine, "-o", str(out)]) == 0
     assert (out / template).is_file() and (out / values).is_file()
+
+
+# --- Terraform loops: maps and nested lists ---------------------------------------
+
+SERVERS = (
+    "servers:\n"
+    "  - name: web\n    host: 10.0.0.1\n    ports:\n      - 80\n      - 443\n"
+    "  - name: api\n    host: 10.0.0.2\n    ports:\n      - 8080\n"
+)
+USERS = (
+    "users:\n"
+    "  - login: ana\n    keys:\n      - type: ed25519\n        id: k1\n"
+    "  - login: bo\n    keys:\n      - type: rsa\n        id: k2\n      - type: ed25519\n        id: k3\n"
+)
+CONFIGMAP = (  # keys out of order: a map loop must keep the document's order
+    "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app\ndata:\n"
+    "  B_KEY: two\n  A_KEY: one\n  C_KEY: three\n"
+)
+COMPOSE_ENV = (
+    "services:\n  web:\n    image: app:1\n    environment:\n"
+    "      REDIS_HOST: cache\n      LOG_LEVEL: info\n"
+)
+
+
+def _loop_build(text: str, *, maps: bool = False):  # type: ignore[no-untyped-def]
+    from templatize.build import specs_from_loop_candidates
+
+    res = suggest(text)
+    if maps:
+        return build(text, [], engine="terraform", loops=specs_from_loop_candidates(res.loops))
+    specs, loops = accept_suggestions(res.candidates, res.loops)
+    return build(text, specs, engine="terraform", loops=loops)
+
+
+@pytest.mark.parametrize(
+    ("text", "maps"), [(SERVERS, False), (USERS, False), (CONFIGMAP, True), (COMPOSE_ENV, True)]
+)
+def test_terraform_nested_and_map_loops(text: str, maps: bool) -> None:
+    result = _loop_build(text, maps=maps)
+    assert result.ir.loops and result.roundtrip.ok, result.roundtrip
+
+
+def test_terraform_nested_loop_renders_other_counts() -> None:
+    result = _loop_build(SERVERS)
+    assert "%{ for port_index, port in server.ports }" in result.template.content
+    out = get_emitter("terraform").render(
+        result.template.content, {"servers": [{"name": "x", "host": "h", "ports": ["1", "2", "3"]}]}
+    )
+    assert (
+        out == "servers:\n  - name: x\n    host: h\n    ports:\n      - 1\n      - 2\n      - 3\n"
+    )
+
+
+def test_terraform_map_loop_keeps_order_and_accepts_a_mapping() -> None:
+    result = _loop_build(CONFIGMAP, maps=True)
+    tfvars = result.env.content
+    assert tfvars.index('"B_KEY"') < tfvars.index('"A_KEY"') < tfvars.index('"C_KEY"')
+    # The UI preview sends a map loop as an object (insertion-ordered).
+    (lp,) = [lp for lp in result.ir.loops if lp.map]
+    out = get_emitter("terraform").render(
+        result.template.content, {lp.name: {"Z": "26", "Y": "25"}, "name": "app"}
+    )
+    assert out.endswith("data:\n  Z: 26\n  Y: 25\n")
+
+
+@pytest.mark.skipif(TERRAFORM is None, reason="terraform / tofu not installed")
+@pytest.mark.parametrize(
+    ("text", "maps"), [(SERVERS, False), (USERS, False), (CONFIGMAP, True), (COMPOSE_ENV, True)]
+)
+def test_terraform_nested_and_map_loops_with_real_terraform(
+    tmp_path: Path, text: str, maps: bool
+) -> None:
+    assert _terraform_output(tmp_path, _loop_build(text, maps=maps)) == text.encode("utf-8")

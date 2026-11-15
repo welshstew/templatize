@@ -814,7 +814,7 @@ Register new detectors in `detectors/__init__.py`.
 |---|---|---|---|---|
 | `jinja2` (default) | `template.j2`, `{{ name }}` | `.env` (`values.yaml` with loops) | `uv run render.py` | yes |
 | `envsubst` | `template.tmpl`, `${KEY}` | `values.env` (single-quoted, sourced) | `sh render.sh` (GNU gettext `envsubst`) | no |
-| `terraform` | `template.tftpl`, `${name}` | `terraform.tfvars` | `main.tf`: `templatefile()`; `terraform apply`, `terraform output -raw rendered` | no |
+| `terraform` | `template.tftpl`, `${name}` | `terraform.tfvars` | `main.tf`: `templatefile()`; `terraform apply`, `terraform output -raw rendered` | yes |
 
 **envsubst.**
 - **No escape syntax, and none needed:** `render.sh` runs `envsubst '${HOST} ${PORT}'`
@@ -834,11 +834,19 @@ Register new detectors in `detectors/__init__.py`.
   can be read two ways.
 - **Lone carriage returns:** a lone CR (an old Mac line ending) is written `${"\r"}`.
   After a raw one, Terraform stops interpolating for the rest of the file.
-- **Values:** `terraform.tfvars` holds a `map(string)`, with HCL string escapes.
+- **Loops:** `%{ for user_index, user in users }…%{ endfor }`, with the separator
+  inside `%{ if user_index > 0 }…%{ endif }`. There are no `~` strip markers, so
+  whitespace is exactly the text's.
+  - **Nested lists:** loop over `server.ports`.
+  - **Padded table columns:** `${format("%-12s", row.name)}`.
+  - **Map loops** (`environment:`, `labels:`): written as a list of `{ key, value }`
+    objects, because Terraform iterates a map in key order and would reorder them.
+- **Values:** `terraform.tfvars` holds one object: HCL strings, and lists for the loops
+  (`main.tf` takes `type = any`).
 - **Running it:** `main.tf` declares no providers, so `terraform init` downloads nothing.
 
-**Loops.** Neither engine has loops here (`envsubst` has none). Accepted lists stay
-literal text, and the build says so in `notes` (API, MCP, CLI and UI).
+**Loops in envsubst.** `envsubst` has no loops, so accepted lists stay literal text,
+and the build says so in `notes` (API, MCP, CLI and UI).
 
 **Verification.**
 - **In-process round trip:** both engines round-trip in-process, through their real
