@@ -80,6 +80,15 @@ class BuildResponse(BaseModel):
     """What the user should know: loops an engine cannot express, renamed variables."""
 
 
+class CheckRequest(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    text: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)]
+    json_schema: str | None = Field(default=None, max_length=2_000_000, alias="schema")
+    """A JSON Schema (JSON or YAML) instead of the bundled ones."""
+    document_type: str | None = Field(default=None, max_length=64)
+
+
 class RenderRequest(BaseModel):
     template: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)]
     values: dict[str, Scalar | LoopValue] = Field(default_factory=dict, max_length=MAX_VARIABLES)

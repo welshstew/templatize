@@ -98,6 +98,15 @@ def _plan(
     return [(entry.title, catalog.load(entry.id), all_docs)] if entry else []
 
 
+def _message(e: Any) -> str:
+    """The error's message; a type list loses ``null`` (Kubernetes schemas allow it on
+    every field, which reads as noise: "is not of type 'integer', 'null'")."""
+    if e.validator == "type" and isinstance(e.validator_value, list):
+        types = [t for t in e.validator_value if t != "null"] or e.validator_value
+        return f"{e.instance!r} is not of type " + ", ".join(repr(t) for t in types)
+    return str(e.message)
+
+
 def check_output(
     text: str, *, schema: str | None = None, document_type: str | None = None
 ) -> SchemaCheck | None:
@@ -155,8 +164,37 @@ def check_output(
                 # the closest alternative's actual problem instead.
                 e = best_match(e.context) if e.context else e
                 path = ".".join(str(p) for p in e.absolute_path) or "(document)"
-                problems.append(SchemaProblem(document=i, path=path, message=e.message[:300]))
+                problems.append(SchemaProblem(document=i, path=path, message=_message(e)[:300]))
     if len(problems) > MAX_PROBLEMS:
         note = f"{len(problems)} problems; the first {MAX_PROBLEMS} are shown"
         problems = problems[:MAX_PROBLEMS]
     return SchemaCheck(ok=not problems, schemas=titles, problems=problems, note=note)
+
+
+class DocumentCheck(BaseModel):
+    """A document checked on its own (the MCP ``check_document`` tool, ``POST /check``)."""
+
+    checked: bool
+    """Whether a schema applied. When false, nothing was checked (see ``note``)."""
+    ok: bool | None = None
+    """Valid against every schema applied; ``None`` when nothing was checked."""
+    schemas: list[str] = []
+    problems: list[SchemaProblem] = []
+    note: str | None = None
+
+
+def check_document(
+    text: str, *, schema: str | None = None, document_type: str | None = None
+) -> DocumentCheck:
+    """:func:`check_output`, saying so when no schema applies."""
+    result = check_output(text, schema=schema, document_type=document_type)
+    if result is None:
+        return DocumentCheck(
+            checked=False,
+            note=(
+                "no schema applies: pass the schema, or the document type if it is one "
+                "with a bundled schema (Kubernetes, Compose, GitHub Actions, GitLab CI, "
+                "cloud-init, Helm Chart.yaml, Prometheus, Dependabot, package.json)"
+            ),
+        )
+    return DocumentCheck(checked=True, **result.model_dump())

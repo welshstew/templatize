@@ -33,7 +33,7 @@ from templatize.ir import MAX_INPUT_CHARS, Candidate, IRValidationError, Notice,
 from templatize.k8s import DocumentProfile
 from templatize.loops import loop_values
 from templatize.roundtrip import RoundTripResult
-from templatize.schemacheck import SchemaCheck, check_output
+from templatize.schemacheck import DocumentCheck, SchemaCheck, check_document, check_output
 from templatize.suggest import SuggestResult, check_limits, suggest
 from templatize.userschema import SchemaInfo
 from templatize.validate import validate_template as core_validate
@@ -340,6 +340,17 @@ def render_template(
         except ValueError as exc:
             raise ToolInputError(str(exc)) from None
     return RenderTemplateResult(ok=True, output=output, schema_check=check)
+
+
+def check_document_tool(
+    text: str, schema: str | None = None, document_type: str | None = None
+) -> DocumentCheck:
+    if len(text) > MAX_INPUT_CHARS * 2:
+        raise ToolInputError("document too large")
+    try:
+        return check_document(text, schema=schema, document_type=document_type)
+    except ValueError as exc:  # an invalid schema or unknown document type
+        raise ToolInputError(str(exc)) from None
 
 
 def validate_template(

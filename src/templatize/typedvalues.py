@@ -45,7 +45,8 @@ class Hint:
 # Reason parts that say how a value was found, not what it is.
 _MECHANICAL = re.compile(
     r"^(?:value of (?:key|column|--)|looks like|appears \d+ times|also part of|"
-    r"lines starting|items of the|rows of a|entries of|a field of|repeated)",
+    r"lines starting|items of the|rows of a|entries of|a field of|repeated|"
+    r"differs between examples)",
 )
 
 

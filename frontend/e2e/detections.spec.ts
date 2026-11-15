@@ -228,7 +228,15 @@ test("the preview checks the output against its schema", async ({ page }) => {
   await expect(check).toContainText("Valid against Kubernetes Deployment");
   await page.getByLabel("Preview value for replica_count").fill("three");
   await expect(check).toContainText("1 schema problem");
-  await expect(check).toContainText("spec.replicas");
+  await expect(check).toContainText("spec.replicas: 'three' is not of type 'integer'");
+  // Also in the header, which stays visible while values are edited in the sidebar;
+  // it brings the Preview tab back.
+  const badge = page.getByRole("button", { name: "✗ 1 schema problem" });
+  await page.getByRole("tab", { name: "template.j2" }).click();
+  await badge.click();
+  await expect(check).toBeVisible();
+  await page.getByLabel("Preview value for replica_count").fill("3");
+  await expect(badge).toHaveCount(0);
 });
 
 test("the chart preview refuses values its values.schema.json does not allow", async ({ page }) => {

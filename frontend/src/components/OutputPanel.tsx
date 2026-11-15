@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 
 import type { BuildResponse, RenderResponse, SchemaCheck } from "../api.ts";
 import { AnsiblePanel, type RoleInput } from "./AnsiblePanel.tsx";
@@ -17,6 +17,8 @@ interface Props {
   engine: string;
   engines: string[];
   onEngine: (engine: string) => void;
+  /** Bumped to open the Preview tab and scroll to its schema check. */
+  showSchemaCheck?: number;
 }
 
 const ENGINE_LABELS: Record<string, string> = {
@@ -86,8 +88,16 @@ export function OutputPanel({
   engine,
   engines,
   onEngine,
+  showSchemaCheck = 0,
 }: Props) {
   const [tab, setTab] = useState<Tab>("preview");
+  useEffect(() => {
+    if (!showSchemaCheck) return;
+    setTab("preview");
+    requestAnimationFrame(() =>
+      document.querySelector(".schema-check")?.scrollIntoView({ block: "center", behavior: "smooth" }),
+    );
+  }, [showSchemaCheck]);
   const files: Record<Exclude<Tab, "preview" | "ansible">, { label: string; content: string } | null> = {
     template: build ? { label: build.template.path, content: build.template.content } : null,
     env: build ? { label: build.env.path, content: build.env.content } : null,

@@ -111,7 +111,8 @@ TEMPLATIZE_STATIC_DIR=frontend/dist uv run templatize-api   # what `make serve` 
 |---|---|---|
 | `POST /suggest` | `{text, variants?: [≤3]}` | `{candidates, notices}` (spans in code points) |
 | `POST /build` | `{text, variables: [{name, spans, type?, value?}], engine?}` | `{template, env, runner, variables, roundtrip}` |
-| `POST /render` | `{template, values: {name\|ENV_KEY: value}, newline?}` | `{ok, output, error}`: errors are reported, not raised |
+| `POST /render` | `{template, values: {name\|ENV_KEY: value}, newline?, engine?, check_schema?, schema?, document_type?}` | `{ok, output, error, schema_check}`: errors are reported, not raised |
+| `POST /check` | `{text, schema?, document_type?}` | `{checked, ok, schemas, problems: [{document, path, message}], note}`: a YAML/JSON document against its JSON Schema, offline |
 | `POST /download` | same as `/build` | `application/zip` (`template.j2`, `.env`, `render.py`, `README.md`); header `x-roundtrip: pass\|fail` |
 | `GET /healthz`, `GET /info` | | health; version, engines, detectors, limits |
 
@@ -555,7 +556,7 @@ How it behaves:
 ### MCP server
 
 The same core library is exposed as an MCP server (official Python SDK, `mcp` 2.x)
-with five read-only tools:
+with seven read-only tools:
 
 | Tool | What it does |
 |---|---|
@@ -563,7 +564,8 @@ with five read-only tools:
 | `generate_template(text, variables?, variants?, min_confidence?, engine?)` | Template, values file, runner script and the round-trip verdict (`engine`: `jinja2`, `envsubst` or `terraform`), plus `notes` to pass on. Give variables **by value**, e.g. `[{"name": "db_host", "value": "db01.example.com", "occurrences": "all"}]`, so the model never has to count characters (spans also work). Omit `variables` to accept suggestions automatically |
 | `generate_helm_chart(text, variables?, variants?, chart_name?, variant_labels?, min_confidence?, style?)` | Helm chart from Kubernetes manifests: Chart.yaml, nested values.yaml, templates, and a values file per variant. `style="exact"` checks a byte-for-byte round trip per document; `style="scaffold"` fills in the `helm create` chart and returns a coverage report. Variables take an optional `values_path` |
 | `generate_ansible_role(text, variables?, variants?, role_name?, filename?, dest?, variant_labels?, min_confidence?)` | The template packaged as an Ansible role (defaults, tasks, template, meta, README, a vars file per variant) plus `playbook.yml`, with the round-trip verdict |
-| `render_template(template, values?, newline?)` | Sandboxed render. Errors come back in `error`, not as an exception |
+| `render_template(template, values?, newline?, engine?, check_schema?, json_schema?, document_type?)` | Sandboxed render. Errors come back in `error`, not as an exception. With `check_schema`, the output is checked against its JSON Schema too |
+| `check_document(text, json_schema?, document_type?)` | Checks any YAML/JSON document (one the model wrote, or rendered output) against its JSON Schema, offline: the bundled, pinned schemas for 20 Kubernetes kinds, Compose, GitHub Actions, GitLab CI, cloud-init, Helm `Chart.yaml`, Prometheus, Dependabot and `package.json`, or one passed in. Returns each problem's path and message. `checked` is false when no schema applies |
 | `validate_template(template, values?, expected_text?)` | Syntax, referenced, missing and unused variables, renders?, and reproduces `expected_text` byte for byte? |
 
 Transports:
@@ -1006,7 +1008,9 @@ refuses any whose SHA-256 changed. Sources and licences are listed in
 
 The **preview** checks its output against the document's schema on every edit, and
 shows either "✓ Valid against Kubernetes Deployment (apps/v1)" or each problem with its
-path. That way a bad value shows before the file is used. For example:
+path. While a problem stands, a "✗ N schema problems" badge stays in the header next to
+the round-trip badge, and clicking it opens the problem list. That way a bad value shows
+before the file is used. For example:
 - `replica_count: three` gives `spec.replicas`: 'three' is not of type 'integer'.
 - A misspelt key gives "Additional properties are not allowed ('containerport' was
   unexpected)".
@@ -1028,7 +1032,10 @@ listed.
   is in `schema_check`.
 - **MCP:** the same options on `render_template`, which now also takes `engine` and
   nested list values.
-- **Library:** `templatize.schemacheck.check_output`.
+- **On its own:** `POST /check`, the MCP tool `check_document` and `templatize check`
+  check a document that wasn't rendered here, such as a manifest an assistant just
+  wrote.
+- **Library:** `templatize.schemacheck.check_output` / `check_document`.
 
 Validation uses the `jsonschema` library (now a core dependency, already in the
 lockfile) and never touches the network.

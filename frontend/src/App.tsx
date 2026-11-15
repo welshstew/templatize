@@ -101,6 +101,7 @@ export function App() {
   const [buildError, setBuildError] = useState<string | null>(null);
   const [buildPending, setBuildPending] = useState(false);
   const [preview, setPreview] = useState<RenderResponse | null>(null);
+  const [showSchemaCheck, setShowSchemaCheck] = useState(0);
   const reviewedText = useRef("");
   const [llm, setLlm] = useState<LlmStatus>({ state: "off" });
   const llmAbort = useRef<AbortController | null>(null);
@@ -401,6 +402,19 @@ export function App() {
               failedDocument={helm ? (chart?.roundtrips.find((r) => !r.ok)?.document ?? null) : null}
             />
             )}
+            {!helm && preview?.schema_check && !preview.schema_check.ok ? (
+              // The preview's check, visible while a value is edited in the sidebar.
+              <button
+                class="badge fail"
+                title="Show the problems in the preview"
+                onClick={() => setShowSchemaCheck((n) => n + 1)}
+              >
+                ✗{" "}
+                {preview.schema_check.problems.length
+                  ? `${preview.schema_check.problems.length} schema problem${preview.schema_check.problems.length === 1 ? "" : "s"}`
+                  : "schema not checked"}
+              </button>
+            ) : null}
             {isK8s ? (
               <span class="seg" role="group" aria-label="Output format">
                 <button aria-pressed={!helm} class={!helm ? "on" : ""} onClick={() => setOutput("jinja")}>
@@ -597,6 +611,7 @@ export function App() {
               previewChanged={previewChanged(items, loops)}
               original={reviewedText.current}
               role={{ text, variants: reviewedVariants.current, variables: specs, loops: loopSpecs }}
+              showSchemaCheck={showSchemaCheck}
               engine={engine}
               engines={info?.engines ?? ["jinja2"]}
               onEngine={setEngine}
