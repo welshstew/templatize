@@ -342,15 +342,21 @@ def _candidate(text: str, span: Span, name: str, vtype: VarType, why: str) -> Ca
 
 
 def apply(
-    text: str, schema: dict[str, Any], raw: list[Candidate], *, doc: int | None = None
+    text: str,
+    schema: dict[str, Any],
+    raw: list[Candidate],
+    *,
+    doc: int | None = None,
+    parsed: list[Field] | None = None,
 ) -> tuple[list[Candidate], SchemaInfo]:
     """``raw`` with a schema applied, and what was matched. ``doc`` limits it to one
-    YAML document (``---``) of a multi-document file."""
+    YAML document (``---``) of a multi-document file; ``parsed`` is the text's fields
+    when the caller already has them (one parse for every document's schema)."""
     s = _Schema(schema)
     title = schema.get("title") if isinstance(schema.get("title"), str) else None
     structure: set[tuple[int, int]] = set()
     facts: dict[tuple[int, int], tuple[_Facts, Field]] = {}
-    for f in fields(text):
+    for f in fields(text) if parsed is None else parsed:
         if doc is not None and f.doc != doc:
             continue
         subs = s.at(f.path)
@@ -437,13 +443,15 @@ def apply_catalog(
     or confidently detected) type; Kubernetes manifests get one schema per resource
     kind. ``None`` info when no bundled schema applies."""
     plan: list[tuple[catalog.Entry, int | None]] = []
+    parsed: list[Field] | None = None
     referenced = catalog.for_url(reference.url) if reference else None
     if referenced is not None:
         plan.append((referenced, None))
     elif doc_type is not None and (doc_type.confirmed or doc_type.confidence >= CATALOG_CONFIDENCE):
         if doc_type.id == "kubernetes":
             heads: dict[int, dict[str, str]] = {}
-            for f in fields(text):
+            parsed = fields(text)
+            for f in parsed:
                 if f.path in (("apiVersion",), ("kind",)):
                     heads.setdefault(f.doc, {})[f.path[0]] = f.value
             for i, head in sorted(heads.items()):
@@ -457,8 +465,13 @@ def apply_catalog(
     matched = 0
     notes: list[str] = []
     used: list[str] = []
+    # Each document's schema sees only its own fields: one parse, not one per document.
+    by_doc: dict[int, list[Field]] = {}
+    for f in parsed or []:
+        by_doc.setdefault(f.doc, []).append(f)
     for entry, doc in plan:
-        raw, info = apply(text, catalog.load(entry.id), raw, doc=doc)
+        mine = by_doc.get(doc, []) if doc is not None and parsed is not None else None
+        raw, info = apply(text, catalog.load(entry.id), raw, doc=doc, parsed=mine)
         matched += info.matched_fields
         notes += [n for n in info.notes if n not in notes]
         if entry.id not in used:

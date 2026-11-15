@@ -365,3 +365,30 @@ def test_real_tools_hold_service_values_to_the_schema(tmp_path: Path) -> None:
         "config_service_type=Loadbalancer",
     )
     assert bad.returncode != 0 and "config_service_type" in bad.stdout
+
+
+def test_argument_specs_are_written_as_yaml_reads_them() -> None:
+    """The spec file is written directly (PyYAML's dumper is slow on big roles); it
+    must read back exactly like PyYAML's own output."""
+    from templatize.ansible import _block
+
+    spec = {
+        "argument_specs": {
+            "main": {
+                "short_description": 'Render "a: b" from a template',
+                "options": {
+                    "yes": {"type": "str", "description": "on/off: \u2028 tab\t \x85 é {{ x }}"},
+                    "x_users": {
+                        "type": "list",
+                        "elements": "dict",
+                        "options": {"name": {"type": "str"}, "the key": {"type": "int"}},
+                    },
+                    "mode": {"type": "str", "choices": ["a", "no", "1", "x: y"]},
+                    "empty": {},
+                },
+            }
+        }
+    }
+    text = _block(spec, "")
+    assert yaml.safe_load(text) == spec
+    assert yaml.safe_load(yaml.dump(spec, sort_keys=False)) == yaml.safe_load(text)

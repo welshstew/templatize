@@ -52,18 +52,53 @@ class _Yaml12Loader(yaml.SafeLoader):
     pass
 
 
-# YAML 1.2 core schema: drop the 1.1 boolean words (on/off/yes/no) and timestamps.
+# YAML 1.2 core schema. YAML 1.1's rules are dropped: the boolean words (on/off/yes/no),
+# timestamps, and the 1.1 numbers: base 60 (``12:30``, whose conversion is quadratic in
+# its length), ``0755`` as octal, ``1_000``.
+_REPLACED = (
+    "tag:yaml.org,2002:bool",
+    "tag:yaml.org,2002:timestamp",
+    "tag:yaml.org,2002:int",
+    "tag:yaml.org,2002:float",
+)
 _Yaml12Loader.yaml_implicit_resolvers = {
-    ch: [
-        (tag, rx)
-        for tag, rx in resolvers
-        if tag not in ("tag:yaml.org,2002:bool", "tag:yaml.org,2002:timestamp")
-    ]
+    ch: [(tag, rx) for tag, rx in resolvers if tag not in _REPLACED]
     for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
 _Yaml12Loader.add_implicit_resolver(  # type: ignore[no-untyped-call]
     "tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
 )
+_Yaml12Loader.add_implicit_resolver(  # type: ignore[no-untyped-call]
+    "tag:yaml.org,2002:int",
+    re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$"),
+    list("-+0123456789"),
+)
+_Yaml12Loader.add_implicit_resolver(  # type: ignore[no-untyped-call]
+    "tag:yaml.org,2002:float",
+    re.compile(
+        r"^(?:[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?"
+        r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"
+    ),
+    list("-+0123456789."),
+)
+
+
+def _int(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> int:
+    value = str(loader.construct_scalar(node))
+    if value.startswith(("0o", "0x")):
+        return int(value, 0)
+    return int(value, 10)  # "0755" is 755 in YAML 1.2
+
+
+def _float(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> float:
+    value = str(loader.construct_scalar(node)).lower()
+    if value.endswith("nan"):
+        return float("nan")
+    return float(value.replace(".inf", "inf"))
+
+
+_Yaml12Loader.add_constructor("tag:yaml.org,2002:int", _int)
+_Yaml12Loader.add_constructor("tag:yaml.org,2002:float", _float)
 
 
 def _documents(text: str) -> list[Any]:

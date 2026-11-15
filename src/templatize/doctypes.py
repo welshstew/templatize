@@ -92,7 +92,8 @@ _SSH = _rx(r"^Host\s+\S")
 _SSH_BODY = _rx(r"^[ \t]+(?:HostName|User|IdentityFile|Port|ProxyJump|ForwardAgent)\s")
 _SYSTEMD = _rx(r"^\[(?:Unit|Service|Install|Timer|Socket|Mount|Path)\]")
 _PROM = _rx(r"^scrape_configs:|^[ \t]+(?:static_configs|scrape_interval|job_name):")
-_PROM_RULES = _rx(r"^[ \t]+-?[ \t]*(?:alert|expr|record):")
+# One way to match a run of spaces ("-?" between two [ \t]* would try every split).
+_PROM_RULES = _rx(r"^[ \t]+(?:-[ \t]*)?(?:alert|expr|record):")
 _DOTENV = _rx(r"^(?:export[ \t]+)?[A-Z_][A-Z0-9_]*=")
 _INI_SECTION = _rx(r"^\[[^\]\n]+\][ \t]*$")
 _INI_PAIR = _rx(r"^[ \t]*[\w.-]+[ \t]*[=:]")
@@ -161,7 +162,7 @@ def _csv(text: str) -> float:
 
 
 def _yaml_mapping(text: str) -> float:
-    keys = _count(_rx(r"^[ \t]*-?[ \t]*[\w.\"'-]+:(?:[ \t]|$)"), text)
+    keys = _count(_rx(r"^[ \t]*(?:-[ \t]*)?[\w.\"'-]+:(?:[ \t]|$)"), text)
     lines = len(_lines(text))
     return 0.45 if lines and keys / lines > 0.6 else 0.0
 

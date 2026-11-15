@@ -17,6 +17,20 @@ SAMPLES = {s["id"]: s["text"] for s in json.loads((ROOT / "quality/samples.json"
 def test_yaml_is_read_with_yaml_1_2_rules() -> None:
     (doc,) = _documents("on: push\nyes: 1\nwhen: 2026-01-01\nflag: true\n")
     assert doc == {"on": "push", "yes": 1, "when": "2026-01-01", "flag": True}
+    # YAML 1.2 numbers: no base 60 (quadratic to convert), no 0755-is-octal, no 1_000.
+    (doc,) = _documents(
+        "a: 0755\nb: 0o17\nc: 0x1f\nd: 1_000\ne: 12:30\nf: 1.5e3\ng: -.inf\nh: +4\n"
+    )
+    assert doc == {
+        "a": 755,
+        "b": 15,
+        "c": 31,
+        "d": "1_000",
+        "e": "12:30",
+        "f": 1500.0,
+        "g": float("-inf"),
+        "h": 4,
+    }
 
 
 @pytest.mark.parametrize("sample", ["k8s", "k8s-stack", "compose", "gha", "cloud-init"])
