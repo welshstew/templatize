@@ -50,7 +50,12 @@ def _combine(group: list[Candidate]) -> Candidate:
     for c in group:
         sources.extend(s for s in c.sources if s not in sources)
         detectors.extend(d for d in c.detectors if d not in detectors)
-    best_name = max(group, key=lambda c: (NAME_ORIGIN_RANK[c.name_origin], c.confidence))
+    # At equal rank another detector's name beats the diff's, which only knows the type
+    # ("443" stays port_keyword's "port", not the diff's "number").
+    best_name = max(
+        group,
+        key=lambda c: (NAME_ORIGIN_RANK[c.name_origin], Source.DIFF not in c.sources, c.confidence),
+    )
     typed = [c for c in group if c.type is not VarType.STRING]
     vtype = max(typed, key=lambda c: c.confidence).type if typed else VarType.STRING
     variant_values = next((c.variant_values for c in group if c.variant_values), None)

@@ -525,6 +525,16 @@ PATTERNS: list[Pattern] = [
         name="checksum",
     ),
     Pattern(
+        "regex.vault_path",
+        VarType.PATH,
+        # HashiCorp Vault paths: "secret/billing/stripe", "kv/data/orders/db".
+        re.compile(
+            r"(?<![\w/.-])(?:secret|kv|kv-v2|database/creds|pki|transit)/[\w.-]+(?:/[\w.-]+)*(?<![.])(?![\w/])"
+        ),
+        0.65,
+        name="vault_path",
+    ),
+    Pattern(
         "regex.semver",
         VarType.SEMVER,
         re.compile(
@@ -622,6 +632,18 @@ class RegexDetector:
                     )
                 )
         out.extend(_short_versions(text))
+        mappings = _port_mappings(text)
+        if mappings:
+            taken = {(c.spans[0].start, c.spans[0].end) for c in mappings}
+            out = [
+                c
+                for c in out
+                if not (
+                    c.type in (VarType.PORT, VarType.TIME)
+                    and (c.spans[0].start, c.spans[0].end) in taken
+                )
+            ]
+            out.extend(mappings)
         if text.startswith("#!"):
             eol = text.find("\n")
             first_line_end = len(text) if eol < 0 else eol
@@ -735,6 +757,41 @@ _NOT_PRODUCTS = frozenset(
         "column",
     ]
 )
+
+
+# Port mappings: docker -p 3000:3000, compose ports "18080:8080" / 127.0.0.1:5432:5432.
+_PORT_MAPPING = re.compile(
+    # docker -p / --publish: followed by more arguments or the line's end.
+    r"(?<![\w-])(?:-p|--publish)[ \t=]+(?:\d{1,3}(?:\.\d{1,3}){3}:)?(\d{1,5}):(\d{1,5})(?:/(?:tcp|udp))?"
+    r"(?=[ \t]|\\|$)"
+    # a YAML list item that is only the mapping (not "- 13:02 - Alert fired").
+    r"|^[ \t]*-[ \t]*[\"']?(?:\d{1,3}(?:\.\d{1,3}){3}:)?(\d{1,5}):(\d{1,5})(?:/(?:tcp|udp))?[\"']?"
+    r"[ \t]*(?:#.*)?\r?$",
+    re.MULTILINE,
+)
+
+
+def _port_mappings(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    for m in _PORT_MAPPING.finditer(text):
+        host, container = (1, 2) if m.group(1) else (3, 4)
+        if not (_valid_port(m.group(host)) and _valid_port(m.group(container))):
+            continue
+        for g, name in ((host, "host_port"), (container, "container_port")):
+            out.append(
+                Candidate(
+                    name=name,
+                    name_origin="context",
+                    type=VarType.PORT,
+                    value=m.group(g),
+                    spans=[Span(start=m.start(g), end=m.end(g))],
+                    sources=[Source.REGEX],
+                    detectors=["regex.port_mapping"],
+                    confidence=0.75,
+                    reason="a port mapping",
+                )
+            )
+    return out
 
 
 def _version_candidate(text: str, start: int, end: int, name: str, why: str) -> Candidate:

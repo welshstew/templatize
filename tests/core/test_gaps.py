@@ -378,3 +378,39 @@ def test_checksums_and_algorithm_names() -> None:
     found = values(f"Checksum (SHA-256): {digest}\nSigned with RSA-2048 over TLS-1.3.\n")
     assert found[digest] == "checksum"
     assert not {"SHA-256", "RSA-2048"} & set(found)
+
+
+# --- after batch eight ------------------------------------------------------------
+
+
+def test_port_mappings() -> None:
+    found = values('services:\n  api:\n    ports:\n      - "18080:8080"\n')
+    assert found["18080"] == "host_port" and found["8080"] == "container_port"
+    assert values("docker run -p 9000:80 nginx:1.27\n")["9000"] == "host_port"
+
+
+def test_timeline_items_are_not_port_mappings() -> None:
+    found = values("- 13:02 - Alert fired\n- 13:47 - Error rate back to normal\n")
+    assert not any(n.endswith("_port") for n in found.values())
+
+
+def test_vault_paths() -> None:
+    assert (
+        values("Pull it from Vault at secret/billing/stripe after 21:15.\n")[
+            "secret/billing/stripe"
+        ]
+        == "vault_path"
+    )
+
+
+def test_nginx_header_values_are_named_after_the_header() -> None:
+    text = "server {\n    proxy_set_header X-Env production;\n    proxy_set_header Host $host;\n}\n"
+    found = values(text)
+    assert found["production"] == "x_env"
+    assert "$host" not in found
+
+
+def test_a_diff_keeps_the_pattern_name() -> None:
+    text = "server {\n    listen 443 ssl;\n}\n"
+    found = {c.value: c.name for c in suggest(text, [text.replace("443", "8443")]).candidates}
+    assert found["443"] == "port"
