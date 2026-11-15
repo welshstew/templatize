@@ -145,7 +145,7 @@ def split_rendered(output: str, chart_name: str) -> list[EmittedFile]:
 def _docs(text: str) -> list[dict[str, Any]]:
     try:
         return [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
         raise ValueError(f"cannot parse rendered YAML: {exc}") from None
 
 

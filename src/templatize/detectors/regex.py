@@ -181,6 +181,18 @@ def _hostname_ok(v: str) -> bool:
     return tld in _COMMON_TLDS or v.count(".") >= 2
 
 
+LOOKBACK = 400
+
+
+def _line_start(text: str, pos: int) -> int:
+    """Where ``pos``'s line starts, looking back at most LOOKBACK characters: the words
+    before a value are near it, and one 1M-character line must not make every lookup
+    scan back to its start."""
+    lo = max(0, pos - LOOKBACK)
+    i = text.rfind("\n", lo, pos)
+    return i + 1 if i >= 0 else lo
+
+
 @dataclass(frozen=True)
 class Pattern:
     detector: str
@@ -679,9 +691,13 @@ _AWS_ID_NAMES = {
 # "Elasticsearch 7.17", "PostgreSQL 14.11 to 16.6", "Python 3.12": a two-part version
 # after a product name (three-part ones are semver).
 _SHORT_VERSION = re.compile(
-    r"\b([A-Z][A-Za-z]*[a-z][A-Za-z]*|[A-Z]{2,}[a-z]*|[a-z]{1,4}[A-Z][A-Za-z]*)[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w|[ \t]*%)"
+    # A whole word of at most 40 letters (its shape is checked in code: a nested
+    # [A-Za-z]*[a-z][A-Za-z]* would backtrack quadratically on a long run of letters).
+    r"(?<![A-Za-z])([A-Za-z]{1,40})(?![A-Za-z])[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w|[ \t]*%)"
     r"(?:[ \t]+(?:to|and|or|->|\u2192)[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w))?"
 )
+# "Elasticsearch", "PHP", "macOS" (not "version" or "about": lower-case words).
+_PRODUCT_WORD = re.compile(r"[A-Z][A-Za-z]*[a-z][A-Za-z]*|[A-Z]{2,}[a-z]*|[a-z]{1,4}[A-Z][A-Za-z]*")
 # "upgrade ... from 14.11 to 16.6": both ends of an upgrade.
 _VERSION_RANGE = re.compile(
     r"\bfrom[ \t]+v?(\d{1,4}\.\d{1,4})[ \t]+to[ \t]+v?(\d{1,4}\.\d{1,4})(?!\w|\.\w)"
@@ -813,6 +829,8 @@ def _short_versions(text: str) -> list[Candidate]:
     seen: set[int] = set()
     for m in _SHORT_VERSION.finditer(text):
         product = m.group(1)
+        if not _PRODUCT_WORD.fullmatch(product):
+            continue
         if product.lower() in _NOT_PRODUCTS or text[m.start(2) - 1] in "$£€¥":
             continue
         low = product.lower()
@@ -831,7 +849,7 @@ def _short_versions(text: str) -> list[Candidate]:
     for m in _VERSION_RANGE.finditer(text):
         if m.start(1) in seen:
             continue
-        line_start = text.rfind("\n", 0, m.start()) + 1
+        line_start = _line_start(text, m.start())
         if not _VERSION_CONTEXT.search(text, line_start, m.start()):
             continue
         out.append(_version_candidate(text, m.start(1), m.end(1), "from_version", "upgraded from"))
@@ -965,7 +983,7 @@ def _line_labels(text: str, found: list[Candidate]) -> list[Candidate]:
             out.append(c)
             continue
         s = c.spans[0]
-        line_start = text.rfind("\n", 0, s.start) + 1
+        line_start = _line_start(text, s.start)
         m = _LINE_LABEL.match(text, line_start, s.start)
         between = text[m.end() : s.start] if m else ""
         if m is None or _PROSE_WORD.search(_ACCESS_WORDS.sub("", between)):
@@ -1094,7 +1112,7 @@ def _context_names(text: str, found: list[Candidate]) -> list[Candidate]:
             out.append(c)
             continue
         s = c.spans[0]
-        line_start = text.rfind("\n", 0, s.start) + 1
+        line_start = _line_start(text, s.start)
         before = text[line_start : s.start]
         if kind in ("reference", "id") and "(" in before and ")" not in before[before.rfind("(") :]:
             before = before[before.rfind("(") + 1 :]  # "(PAY-1183)": not the word before "("
@@ -1126,13 +1144,13 @@ _KEY_AFTER = re.compile(r"[ \t]*(?:=|:(?![/\d]))")
 
 def _is_key(text: str, s: Span) -> bool:
     """``net.core.somaxconn = 4096``, ``log.retention.hours=168``: a dotted key, not a host."""
-    line_start = text.rfind("\n", 0, s.start) + 1
+    line_start = _line_start(text, s.start)
     return not text[line_start : s.start].strip() and bool(_KEY_AFTER.match(text, s.end))
 
 
 def _port_mapping(text: str, s: Span) -> bool:
     """``- "22:22"`` in a YAML list is a port mapping, not a time."""
-    line_start = text.rfind("\n", 0, s.start) + 1
+    line_start = _line_start(text, s.start)
     line_end = text.find("\n", s.end)
     rest = text[s.end : len(text) if line_end < 0 else line_end]
     return bool(_PORT_ITEM.match(text[line_start : s.start])) and rest.strip(" \t\"'\r") == ""

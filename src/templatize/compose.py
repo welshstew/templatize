@@ -83,12 +83,17 @@ def kompose_binary() -> str | None:
     return shutil.which("kompose")
 
 
+_SERVICES_KEY = re.compile(r"^services[ \t]*:", re.MULTILINE)
+
+
 def compose_services(text: str) -> dict[str, Any] | None:
     """The ``services`` mapping if ``text`` is a Compose file, else None."""
+    if not _SERVICES_KEY.search(text):
+        return None  # cheap test first: YAML-parsing any text can be slow ("12:12:12...")
     try:
         data = yaml.safe_load(text)
-    except yaml.YAMLError:
-        return None
+    except (yaml.YAMLError, ValueError, RecursionError):
+        return None  # not YAML, a 5000-digit integer, or nesting too deep
     if not isinstance(data, dict) or "apiVersion" in data:
         return None
     services = data.get("services")

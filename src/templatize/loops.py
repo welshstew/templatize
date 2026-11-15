@@ -153,8 +153,8 @@ def find_yaml(text: str) -> list[Found]:
     """Sequences of >= 2 scalars, or of >= 2 mappings with the same keys."""
     try:
         docs = list(yaml.compose_all(text, Loader=_Loader))
-    except (yaml.YAMLError, ValueError):
-        return []
+    except (yaml.YAMLError, ValueError, RecursionError):
+        return []  # not YAML, or nested deeper than anything worth a loop
     out: list[Found] = []
 
     def walk(node: Node | None, key: str | None) -> None:
@@ -194,9 +194,12 @@ def find_yaml(text: str) -> list[Found]:
             for k in kids:
                 walk(k, key)
 
-    for d in docs:
-        walk(d, None)
-        _maps(text, d, None, out, ())
+    try:
+        for d in docs:
+            walk(d, None)
+            _maps(text, d, None, out, ())
+    except RecursionError:
+        return []
     return out
 
 
@@ -413,7 +416,8 @@ def find_sql(text: str) -> list[Found]:
     return out
 
 
-_LIST_START = re.compile(r"([A-Za-z_][\w.-]*)[\"']?[ \t]*[:=][ \t]*\[")
+# Starts only at a word's start, with a bounded key: "a.a.a.a..." stays linear.
+_LIST_START = re.compile(r"(?<![\w.-])([A-Za-z_][\w.-]{0,127})[\"']?[ \t]*[:=][ \t]*\[")
 _LIST_ITEM = re.compile(
     r"\s*(?:\"((?:[^\"\\\n]|\\.)*)\"|'((?:[^'\\\n]|\\.)*)'|(-?\d+(?:\.\d+)?))\s*"
 )
