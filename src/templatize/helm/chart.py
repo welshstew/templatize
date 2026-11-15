@@ -20,11 +20,12 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Sequence
-from typing import Literal, Protocol
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
+from templatize import typedvalues
 from templatize.build import LoopSpec, VariableSpec, make_ir
 from templatize.detectors.k8s import camel
 from templatize.emitters.base import EmittedFile, TemplateRenderError
@@ -359,6 +360,17 @@ def build_chart(
             )
         )
 
+    hints = typedvalues.variable_hints(
+        variables,
+        chart_loops,
+        ir,
+        {
+            **{v.name: tuple(v.values_path or []) for v in variables},
+            **{lp.name: tuple(lp.values_path or []) for lp in chart_loops},
+        },
+    )
+    schema_file, schema_note = values_schema_file(name, values_yaml, overlays, hints)
+
     roundtrips = [_check("values.yaml", "input", text, templates, values_yaml)]
     for i, (fname, overlay) in enumerate(overlays):
         roundtrips.append(
@@ -380,6 +392,7 @@ def build_chart(
     files = [
         EmittedFile(path="Chart.yaml", content=chart_yaml),
         EmittedFile(path="values.yaml", content=values_yaml),
+        *([schema_file] if schema_file else []),
         *(EmittedFile(path=f, content=c) for f, c in overlays),
         EmittedFile(path=".helmignore", content=HELMIGNORE),
         *templates,
@@ -391,7 +404,30 @@ def build_chart(
         variables=variables,
         roundtrips=roundtrips,
         loops=chart_loops,
+        notes=[schema_note] if schema_note else [],
     )
+
+
+def values_schema_file(
+    name: str,
+    values_yaml: str,
+    overlays: Sequence[tuple[str, str]],
+    hints: Mapping[typedvalues.Path, typedvalues.Hint],
+) -> tuple[EmittedFile | None, str | None]:
+    """``values.schema.json``: Helm checks values against it on install, upgrade and
+    template. Built from (and checked against) values.yaml and every example file."""
+    from jsonschema import Draft7Validator
+
+    base = values.load(values_yaml)
+    trees = [base, *(values.merge(base, values.load(o, f)) for f, o in overlays)]
+    schema = typedvalues.values_schema(trees, hints, f"Values for the {name} chart")
+    validator = Draft7Validator(schema)
+    for tree in trees:
+        error = next(iter(validator.iter_errors(tree)), None)
+        if error is not None:  # never ship a schema the chart's own values fail
+            return None, f"values.schema.json left out: the values do not fit it ({error.message})"
+    content = json.dumps(schema, indent=2, ensure_ascii=False) + "\n"
+    return EmittedFile(path="values.schema.json", content=content), None
 
 
 def _as_rows(lp: Loop, value: object) -> object:
@@ -448,3 +484,40 @@ def _range_emit(
         source=f"${parent.item}.{lp.name}" if parent is not None else None,
         separator_span=sep,
     )
+
+
+def values_problems(tree: Mapping[str, Any], schema_text: str, limit: int = 5) -> list[str]:
+    """Where ``tree`` does not fit a chart's ``values.schema.json`` (``path: message``),
+    as ``helm template`` would refuse it. An unreadable schema is a problem too."""
+    from jsonschema import Draft7Validator
+    from jsonschema.exceptions import SchemaError as JsonSchemaError
+
+    try:
+        schema = json.loads(schema_text)
+        validator = Draft7Validator(schema)
+        errors = sorted(validator.iter_errors(tree), key=lambda e: list(map(str, e.absolute_path)))
+    except (ValueError, JsonSchemaError) as exc:
+        return [f"values.schema.json is not a valid schema ({str(exc).splitlines()[0][:120]})"]
+    out = []
+    for e in errors[:limit]:
+        path = ".".join(str(p) for p in e.absolute_path) or "(values)"
+        out.append(f"{path}: {_message(e)}")
+    if len(errors) > limit:
+        out.append(f"and {len(errors) - limit} more")
+    return out
+
+
+_PATTERN_MEANS = {
+    p.pattern: what
+    for p, what in (
+        (typedvalues.PATTERNS["integer"], "an integer"),
+        (typedvalues.PATTERNS["number"], "a number"),
+        (typedvalues.PATTERNS["boolean"], "true or false"),
+    )
+}
+
+
+def _message(e: Any) -> str:
+    if e.validator == "pattern" and e.validator_value in _PATTERN_MEANS:
+        return f"{e.instance!r} is not {_PATTERN_MEANS[e.validator_value]}"
+    return str(e.message)[:200]

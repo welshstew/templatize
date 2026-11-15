@@ -121,3 +121,26 @@ def test_role_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Non
     assert "round-trip (defaults): PASS" in capsys.readouterr().err
     assert (out / "web" / "templates" / "nginx.conf.j2").exists()
     assert (out / "playbook.yml").read_text().count("- web") == 1
+
+
+def test_check_validates_a_document_against_its_schema(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    good = (
+        "apiVersion: v1\nkind: Service\nmetadata:\n  name: web\nspec:\n  ports:\n    - port: 80\n"
+    )
+    (tmp_path / "ok.yaml").write_text(good)
+    (tmp_path / "bad.yaml").write_text(good.replace("port: 80", "port: eighty"))
+    (tmp_path / "note.txt").write_text("Dear Sam,\n")
+    assert main(["check", str(tmp_path / "ok.yaml")]) == 0
+    assert "valid against Kubernetes Service (v1)" in capsys.readouterr().err
+    assert main(["check", str(tmp_path / "bad.yaml")]) == 2
+    out = capsys.readouterr()
+    assert "spec.ports.0.port:" in out.out and "1 problem against" in out.err
+    assert main(["check", str(tmp_path / "note.txt")]) == 3
+    assert "no schema applies" in capsys.readouterr().err
+    schema = tmp_path / "s.json"
+    schema.write_text('{"type": "object", "required": ["owner"]}')
+    assert main(["check", str(tmp_path / "ok.yaml"), "--schema", str(schema), "--json"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert not result["ok"] and "'owner' is a required property" in result["problems"][0]["message"]

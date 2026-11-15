@@ -230,3 +230,20 @@ test("the preview checks the output against its schema", async ({ page }) => {
   await expect(check).toContainText("1 schema problem");
   await expect(check).toContainText("spec.replicas");
 });
+
+test("the chart preview refuses values its values.schema.json does not allow", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Load a sample document").selectOption("k8s");
+  await analyze(page);
+  await page.getByRole("button", { name: "Accept all", exact: true }).click();
+  await page.getByRole("button", { name: "Helm chart", exact: true }).click();
+  const chart = page.getByRole("region", { name: "Helm chart" });
+  await expect(chart.getByRole("navigation", { name: "Chart files" })).toContainText("values.schema.json");
+  await chart.getByRole("navigation", { name: "Chart files" }).getByRole("button", { name: "values.yaml", exact: true }).click();
+  const editor = chart.getByLabel("values.yaml (editable for the preview)");
+  const text = await editor.inputValue();
+  await editor.fill(text.replace("replicaCount: 3", "replicaCount: three"));
+  await expect(chart.locator(".st-fail")).toContainText("values.schema.json: replicaCount: 'three' is not an integer");
+  await editor.fill(text);
+  await expect(chart.locator(".st-fail")).toHaveCount(0);
+});

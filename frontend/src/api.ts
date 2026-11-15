@@ -424,6 +424,7 @@ export const api = {
     overlayYaml: string | null,
     scaffold: { chartName: string; files: EmittedFile[] } | null,
     signal?: AbortSignal,
+    valuesSchema: string | null = null,
   ) =>
     post<ChartRenderResponse>(
       "/chart/render",
@@ -436,7 +437,7 @@ export const api = {
             values_yaml: valuesYaml,
             overlay_yaml: overlayYaml,
           }
-        : { templates, values_yaml: valuesYaml, overlay_yaml: overlayYaml },
+        : { templates, values_yaml: valuesYaml, overlay_yaml: overlayYaml, values_schema: valuesSchema },
       signal,
     ),
   chartDownload: async (

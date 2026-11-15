@@ -176,6 +176,9 @@ class ChartRenderRequest(BaseModel):
     chart_name: Annotated[str, Field(max_length=53)] = "chart"
     files: list[EmittedFile] = Field(default_factory=list, max_length=MAX_CHART_FILES)
     """Scaffold style: the whole chart (helpers included), rendered with real Helm."""
+    values_schema: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)] | None = None
+    """Exact style: the chart's ``values.schema.json``; values that do not fit it are
+    an error, as with ``helm template`` (the scaffold style runs Helm itself)."""
 
 
 class ChartRenderResponse(BaseModel):

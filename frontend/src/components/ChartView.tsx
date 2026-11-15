@@ -4,6 +4,7 @@ import { api, type ChartRenderResponse, type ChartResponse, type ChartStyle, typ
 import {
   buildTree,
   fileRole,
+  schemaProblem,
   filledLines,
   findValuesLine,
   language,
@@ -39,6 +40,7 @@ function rank(n: TreeNode, scaffoldFiles: Set<string>): number {
   const role = fileRole(n.path);
   if (role === "values") return 0;
   if (role === "overlay") return 1;
+  if (role === "schema") return 1.5;
   if (role === "chart") return 2;
   if (role === "template") return scaffoldFiles.has(n.path) ? 4 : 3;
   return 6;
@@ -333,7 +335,8 @@ export function ChartView({
       const scaffoldFiles = scaffold
         ? { chartName: chart.chart_name, files: files.map((f) => ({ path: f.path, content: contentOf(f.path) })) }
         : null;
-      api.chartRender(templates, valuesText, overlayText, scaffoldFiles, ctrl.signal).then(setRendered, (e) => {
+      const schema = scaffold ? null : (byPath.get("values.schema.json") ?? null);
+      api.chartRender(templates, valuesText, overlayText, scaffoldFiles, ctrl.signal, schema).then(setRendered, (e) => {
         if (!(e instanceof DOMException && e.name === "AbortError")) {
           setRendered({ ok: false, files: [], error: String(e) });
         }
@@ -629,7 +632,11 @@ export function ChartView({
                 ✗ {failed.map((f) => f.label).join(", ")} round-trip
               </span>
             ) : null}
-            {rendered && !rendered.ok ? <span class="st-fail">render error</span> : null}
+            {rendered && !rendered.ok ? (
+              <span class="st-fail" title={rendered.error ?? ""}>
+                {schemaProblem(rendered.error) ? `✗ values.schema.json: ${schemaProblem(rendered.error)}` : "render error"}
+              </span>
+            ) : null}
             {scaffold && chart ? (
               chart.coverage[expectedIdx]?.available && !chart.coverage[expectedIdx]?.error ? (
                 <span class={chart.coverage[expectedIdx]!.lost ? "muted" : "st-pass"}>

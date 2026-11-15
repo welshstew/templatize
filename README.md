@@ -40,6 +40,7 @@ templatize suggest FILE [--variant FILE]... [--json] [--min-confidence X]
 templatize build   FILE [--variant FILE]... (--accept-all | --vars vars.json)
                    [--engine jinja2|envsubst|terraform] [--min-confidence X] [-o DIR] [--zip bundle.zip]
                    [--print template|env|script] [--json]
+templatize check   FILE [--type ID] [--schema FILE] [--json]
 ```
 
 - `--variant` adds another example of the same document (up to 3). The regions
@@ -48,6 +49,10 @@ templatize build   FILE [--variant FILE]... (--accept-all | --vars vars.json)
   `[{"name": "db_host", "spans": [{"start": 10, "end": 18}]}]`.
 - `--engine` picks the template engine (see [Engines](#engines)); its notes go to stderr.
 - `build` exits with code 2 if the round-trip check fails.
+- `check` validates a document (say, a rendered one) against its JSON Schema, as the
+  preview does (see [Checking rendered output](#checking-rendered-output-against-the-schema)).
+  It exits 0 when valid, 2 with problems (one `FILE: path: message` line each), and 3
+  when no schema applies. For example: `python render.py | templatize check -`.
 
 ### Web UI
 
@@ -347,6 +352,7 @@ chart**. The chart is built from the same accepted variables:
 storefront/
   Chart.yaml                appVersion from the image tag
   values.yaml               every variable, nested: image.tag, replicaCount, service.port, …
+  values.schema.json        each value's type: Helm refuses replicaCount=three
   values-staging.yaml       per example document: only the values that differ
   .helmignore
   templates/configmap.yaml  one template per resource, in input order
@@ -460,6 +466,7 @@ web/
   tasks/main.yml        # ansible.builtin.template with byte-exact options
   templates/nginx.conf.j2
   meta/main.yml
+  meta/argument_specs.yml  # each variable's type: Ansible refuses web_port=http
   README.md
   examples/<label>.yml  # per --variant: only the values that differ (-e @...)
 playbook.yml
@@ -475,6 +482,41 @@ round trip renders the template with the vars files as Ansible reads them, and t
 test suite runs real `ansible-playbook` (when installed) on the fixtures, including
 CRLF, mixed line endings and literal `{{`. API: `POST /role` and `POST /role/download`.
 In the UI: the **Ansible role** tab of the output panel.
+
+### Typed values: values.schema.json and argument_specs
+
+A generated chart or role checks its own values when it is used. Without that, a bad
+value would just be rendered.
+- **Helm:** `values.schema.json` is checked on every `helm install`, `upgrade` and
+  `template`. `helm template --set replicaCount=three` stops with "at '/replicaCount':
+  'three' does not match pattern …".
+- **Ansible:** `meta/argument_specs.yml` is checked when the role starts. `-e
+  web_port=http` stops the run before anything is written.
+
+**Where the types come from:**
+- **What the detectors found:** an `int`, `port`, `float` or `bool` value, a list of rows
+  with typed fields, a list of strings.
+- **The values actually shipped:** `values.yaml` and every example file. Types are only
+  widened by these, never narrowed, so the defaults and examples always pass. The
+  generator checks that before writing the file. If they ever did not fit, it would leave
+  the file out with a note rather than ship a chart that refuses itself.
+
+**What is accepted:**
+- **Numbers and booleans:** an integer field takes `5` or a quoted `"5"` (both render
+  the same) but not `"three"`. A port must be 1–65535.
+- **Detected strings:** a number is refused there. YAML would print `tag: 1.10` as
+  `1.1`.
+- **Strings nothing detected:** in the helm create style, defaults such as a probe's
+  `port: http` are left open, since they can take a number too.
+
+**Descriptions:** come from the suggestion's reason and the field's schema, for example
+"Replica count. Number of desired pods.". They show up in the schema and in
+`ansible-doc`.
+
+The chart view's preview applies the same check. An edited `values.yaml` that the
+schema refuses shows "✗ values.schema.json: replicaCount: 'three' is not an integer".
+The helm create style shows Helm's own message. In the API, `/chart/render` takes
+`values_schema`.
 
 ### Running it publicly: rate limits and proxies
 

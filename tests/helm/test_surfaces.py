@@ -75,6 +75,19 @@ def test_api_chart_and_render(client: TestClient) -> None:
     bad = client.post("/chart/render", json={"templates": templates, "values_yaml": "a: ["}).json()
     assert not bad["ok"] and "values.yaml" in bad["error"]
 
+    # With the chart's values.schema.json, values it does not allow are refused like
+    # helm template would.
+    wrong = files["values.yaml"].replace("replicaCount: 4", "replicaCount: four")
+    body = {"templates": templates, "values_yaml": wrong}
+    assert client.post("/chart/render", json=body).json()["ok"]
+    out = client.post(
+        "/chart/render", json={**body, "values_schema": files["values.schema.json"]}
+    ).json()
+    assert not out["ok"]
+    assert out["error"] == (
+        "the values do not fit values.schema.json: replicaCount: 'four' is not an integer"
+    )
+
 
 def test_api_chart_errors_and_download(client: TestClient) -> None:
     r = client.post("/chart", json={"text": "hello\n"})

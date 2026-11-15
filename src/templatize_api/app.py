@@ -37,7 +37,7 @@ from templatize.helm import ChartError, ChartResult
 from templatize.helm import build as build_helm_chart
 from templatize.helm import coverage as helm_coverage
 from templatize.helm import values as helm_values
-from templatize.helm.chart import CHART_NAME_RE, render_templates
+from templatize.helm.chart import CHART_NAME_RE, render_templates, values_problems
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, IRValidationError
 from templatize.schemacheck import check_output
 from templatize.suggest import InputLimitError, SuggestResult, suggest
@@ -447,6 +447,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             tree = helm_values.load(req.values_yaml)
             if req.overlay_yaml is not None:
                 tree = helm_values.merge(tree, helm_values.load(req.overlay_yaml, "overlay"))
+            if req.values_schema:
+                problems = values_problems(tree, req.values_schema)
+                if problems:
+                    return ChartRenderResponse(
+                        ok=False,
+                        error="the values do not fit values.schema.json: " + "; ".join(problems),
+                    )
             files = render_templates(req.templates, tree)
         except (TemplateRenderError, helm_values.ValuesError) as exc:
             return ChartRenderResponse(ok=False, error=str(exc))

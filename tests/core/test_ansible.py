@@ -41,6 +41,7 @@ def test_role_layout_and_prefixed_variables() -> None:
     assert sorted(out) == [
         "db/README.md",
         "db/defaults/main.yml",
+        "db/meta/argument_specs.yml",
         "db/meta/main.yml",
         "db/tasks/main.yml",
         "db/templates/app.ini.j2",
