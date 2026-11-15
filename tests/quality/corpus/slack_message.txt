@@ -1,0 +1,3 @@
+@channel heads up: we're rotating the Stripe webhook secret for the billing-service tonight at 21:00 GMT.
+If you run billing-service locally, pull the new value from Vault at secret/billing/stripe after 21:15.
+Questions to Hannah Kim or #billing-eng.

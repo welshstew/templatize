@@ -1,0 +1,8 @@
+services:
+  api:
+    image: registry.acme.example.com/shop/api:5.3.0
+    environment:
+      LOG_LEVEL: debug
+      FEATURE_FLAGS: new-checkout,fast-search
+    ports:
+      - "18080:8080"

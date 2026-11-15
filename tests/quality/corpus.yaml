@@ -335,3 +335,57 @@ haproxy_backend.cfg:
   want: [api_servers, leastconn]
   reject: [backend, check]
   loops: {servers: 3}
+
+# Fifth batch: logs, incident and change notes, meeting notes, a job posting, a quote.
+
+nginx_access.log:
+  want: [10.12.4.77, "03/Dec/2026:14:22:09 +0000", https://portal.example.com/login, 192.0.2.18, /api/v2/sessions]
+  reject: [Mozilla/5.0, Linux, x86_64, HTTP/2.0, "03", "14:22:09"]
+  names: {"03/Dec/2026:14:22:09 +0000": timestamp}
+
+syslog:
+  want: ["Dec  3 14:30:01", web-03, s3://acme-backups-prod, 198.51.100.23]
+  reject: ["Dec  3", "14:30:01"]
+  loops: {}
+  names: {"Dec  3 14:30:01": timestamp}
+
+status_update.txt:
+  want: [Payments API, Checkout Service, Ledger Service, eu-central-1, 2 December 2026, "09:40", "10:15", Daniel Brooks]
+  reject: []
+  names: {Ledger Service: ledger_service, "09:40": start_time, "10:15": end_time}
+  occurrences: {Payments API: 2}
+
+job_posting.md:
+  want: [Senior Site Reliability Engineer, "Manchester, UK", "75,000", "90,000", Platform Engineering, Brightwave, Grace Liu, europe-west2, 31 January 2027]
+  reject: ["Manchester, UK (hybrid, 2 days in the office)", "£75,000 – £90,000"]
+  names: {"Manchester, UK": location, "75,000": salary_min, "90,000": salary_max, Grace Liu: manager_name, Brightwave: company}
+
+meeting_notes.md:
+  want: [4 December 2026, Priya Nair, Tom, Okoro, Lena, Fischer, Search Service, "7.17", "2.18", 1.2 TB, 15 January 2027, "4,000"]
+  reject: ["Priya Nair, Tom Okoro, Lena Fischer"]
+  occurrences: {Tom: 3, Lena: 3}
+  names: {"7.17": elasticsearch_version, 1.2 TB: index_size, Tom: attendee_2_first_name, Priya Nair: attendee_1_name}
+
+change_request.txt:
+  want: [CHG-30871, Marcus Webb, marcus.webb@acme.example.com, Customer Portal, production, "2026-12-06 22:00", "2026-12-07 01:00", db-portal-01.prod.acme.internal, "14.11", "16.6", snap-0d4e8f1a2b3c4d5e6, Sofia Martins]
+  reject: []
+  names: {"14.11": from_version, "16.6": to_version, snap-0d4e8f1a2b3c4d5e6: snapshot_id}
+
+k8s_events.txt:
+  want: [registry.acme.example.com/payments/checkout:2.14.0, 3f1e2d4c-aaaa-bbbb-cccc-111122223333]
+  reject: [Warning, Normal, registry.acme.example.com, 2.14.0]
+  names: {registry.acme.example.com/payments/checkout:2.14.0: image}
+
+quote.txt:
+  want: [Q-2026-1187, Harlow Dental Group, Dr. Emma Clarke, 31 December 2026, £580.00, £696.00, Oliver Grant, Account Manager, Northgate IT Services]
+  reject: ["Account Manager, Northgate IT Services"]
+  names: {Account Manager: sender_title, Northgate IT Services: sender_company}
+
+slack_message.txt:
+  want: [billing-service, "21:00", "21:15", Hannah Kim, "#billing-eng"]
+  reject: []
+  names: {Hannah Kim: contact_name}
+
+docker_compose_override.yml:
+  want: [registry.acme.example.com/shop/api:5.3.0, debug, "new-checkout,fast-search"]
+  reject: [registry.acme.example.com, 5.3.0]

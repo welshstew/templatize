@@ -29,6 +29,14 @@ _SPACED_MIN_SHARE = 0.6
 # values are taken ("maxmemory 4gb"): longer ones ("server app1 10.0.1.11:8080 check")
 # are left to the patterns, which find their parts.
 _SPACED_LOWER = re.compile(r"^[ \t]*([a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*)[ \t]+([^\s#;{}]+)[ \t]*$")
+# Markdown "**Location:** Manchester, UK" / "- **Salary**: £75,000" / "__Team:__ Platform".
+_MD_BOLD_KEY = re.compile(
+    r"^[ \t]*(?:[-*+][ \t]+)?(\*\*|__)([A-Za-z][\w .&/-]{0,40}?)[ \t]*(?::\1|\1[ \t]*:)[ \t]+(.+?)[ \t]*$"
+)
+# "£75,000 - £90,000", "3-5 days": a range, whose ends the patterns find.
+_MD_RANGE = re.compile(
+    r"\S*\d[\d.,]*\S*[ \t]*(?:-|\u2013|\u2014|to)[ \t]*\S*\d[\d.,]*\S*(?:[ \t]+\w+)?"
+)
 _PROSE_END = re.compile(r"[.!?,]$")
 # Dockerfile instructions whose arguments are values.
 _DOCKER_FIRST = re.compile(
@@ -349,6 +357,26 @@ class KeyValueDetector:
                     "kv.equals",
                     0.7,
                 )
+                continue
+
+            bm = _MD_BOLD_KEY.match(line)
+            if bm:
+                value, vstart = bm.group(3), bm.start(3)
+                detail = _WITH_DETAIL.match(value)
+                if detail:
+                    value = detail.group(1)  # "Manchester, UK (hybrid, 2 days a week)"
+                ranged = _MD_RANGE.fullmatch(value)
+                if not ranged and not (len(value.split()) >= 8 and value.rstrip()[-1:] in ".!?"):
+                    self._add(
+                        out,
+                        ctx.text,
+                        bm.group(2),
+                        None,
+                        line_start + vstart,
+                        line_start + vstart + len(value),
+                        "kv.colon",
+                        0.7,
+                    )
                 continue
 
             ym = _YAML.match(line)

@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from templatize.detectors.address import address_roles, find_addresses
 from templatize.detectors.base import DetectionContext, DetectorResult
 from templatize.ir import Candidate, Source, Span, VarType
-from templatize.naming import infer_type
+from templatize.naming import infer_type, snake_case
 
 CONFIDENCE = 0.7
 
@@ -98,15 +98,26 @@ def _accented(part: str) -> str:
 def _elsewhere(text: str, c: Candidate) -> Candidate:
     """The same name or company written again later ("represent Keystone Freight Inc.
     in the matter"): one variable for every place."""
-    pattern = r"(?<![\w@./-])" + re.escape(c.value) + r"(?![\w@-]|\.\w)"
-    spans = list(c.spans)
-    for m in re.finditer(pattern, text):
-        s = Span(start=m.start(), end=m.end())
-        if not any(s.overlaps(o) for o in spans):
-            spans.append(s)
-    if len(spans) == len(c.spans):
+    after = re.compile(r"(?![\w@-]|\.\w)")
+    value, n = c.value, len(c.value)
+    own = sorted((s.start, s.end) for s in c.spans)
+    added: list[Span] = []
+    i = text.find(value)
+    while i >= 0:
+        j = i + n
+        free = not any(a < j and i < b for a, b in own)  # the candidate's own spans are few
+        if (
+            free
+            and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] in "_@./-"))
+            and after.match(text, j)
+        ):
+            added.append(Span(start=i, end=j))
+            i = text.find(value, j)
+        else:
+            i = text.find(value, i + 1)
+    if not added:
         return c
-    return c.model_copy(update={"spans": sorted(spans, key=lambda x: x.start)})
+    return c.model_copy(update={"spans": sorted([*c.spans, *added], key=lambda x: x.start)})
 
 
 _NOT_NAMES = frozenset(
@@ -183,7 +194,11 @@ def _greeting_only(text: str, taken: list[Span]) -> list[Candidate]:
 def _names_from_emails(text: str) -> list[Candidate]:
     out: list[Candidate] = []
     seen: set[str] = set()
+    locals_seen: set[str] = set()
     for m in _EMAIL.finditer(text):
+        if m.group(1).lower() in locals_seen:
+            continue  # the same person's address again
+        locals_seen.add(m.group(1).lower())
         parts = re.split(r"[._-]", m.group(1))
         if any(len(p) < 2 for p in parts):
             continue
@@ -225,7 +240,14 @@ def _signature(text: str) -> list[Candidate]:
             # "People Partner, Orbit Analytics GmbH": the title, then the company.
             line = text[title.start : title.end]
             cut = line.find(", ")
-            if cut > 0 and _COMPANY.match(line[cut + 2 :]):
+            if cut > 0 and (
+                _COMPANY.match(line[cut + 2 :])
+                or (
+                    _JOB_WORDS.search(line[:cut])
+                    and not _JOB_WORDS.search(line[cut + 2 :])
+                    and re.fullmatch(r"[A-Z][\w&'.-]*(?: [A-Z&][\w&'.-]*){0,5}", line[cut + 2 :])
+                )
+            ):
                 company = Span(start=title.start + cut + 2, end=title.end)
                 title = Span(start=title.start, end=title.start + cut)
                 out.append(_candidate(text, company, "sender_company", "the signatory's company"))
@@ -405,6 +427,18 @@ _BRAND_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "company",
     ),
+    # "As a Senior Site Reliability Engineer at Brightwave, you will ..."
+    (
+        re.compile(r"\b[Aa]s (?:a|an|the) ((?:[A-Z][\w/&-]*[ ]){0,5}[A-Z][\w/&-]*) at [A-Z]"),
+        "job_title",
+    ),
+    (
+        re.compile(
+            r"\b[Aa]s (?:a|an|the) (?:[A-Z][\w/&-]*[ ]){0,5}[A-Z][\w/&-]* at "
+            r"([A-Z][\w&'-]*(?: [A-Z][\w&'-]*){0,3})(?=[,;!]|\.(?:\s|$)| [a-z])"
+        ),
+        "company",
+    ),
     # "the Senior Site Reliability Engineer role"
     (
         re.compile(
@@ -437,6 +471,198 @@ def _brands(text: str) -> list[Candidate]:
     return out
 
 
+# "Attendees: Priya Nair, Tom Okoro, Lena Fischer" (Markdown bold allowed).
+_PERSON_LIST = re.compile(
+    r"^[ \t]*(?:[-*][ \t]+)?(?:\*\*|__)?(Attendees|Attending|Participants|Present|Invitees|"
+    r"Reviewers|Approvers|Owners|Apologies|Absent|Organi[sz]ers?|Speakers|Panel(?:ists)?)"
+    r"(?:\*\*|__)?[ \t]*:(?:\*\*|__)?[ \t]+(.+?)[ \t]*\r?$",
+    re.MULTILINE | re.IGNORECASE,
+)
+_LIST_ROLE = {
+    "attendees": "attendee",
+    "attending": "attendee",
+    "participants": "participant",
+    "present": "attendee",
+    "invitees": "invitee",
+    "reviewers": "reviewer",
+    "approvers": "approver",
+    "owners": "owner",
+    "apologies": "absentee",
+    "absent": "absentee",
+    "organiser": "organiser",
+    "organisers": "organiser",
+    "organizer": "organizer",
+    "organizers": "organizer",
+    "speakers": "speaker",
+    "panel": "panelist",
+    "panelists": "panelist",
+}
+_LIST_SEP = re.compile(r"[ \t]*(?:,|;|\band\b|&)[ \t]*")
+
+
+def _person_lists(text: str) -> list[Candidate]:
+    """Each person in an attendee or reviewer list; when their first name is also used
+    alone ("Tom presented ..."), first and last name are separate variables."""
+    out: list[Candidate] = []
+    for m in _PERSON_LIST.finditer(text):
+        role = _LIST_ROLE[m.group(1).lower()]
+        body, base = m.group(2), m.start(2)
+        parts = [(p.start(), p.end()) for p in re.finditer(r"[^,;&]+", body)]
+        people: list[Span] = []
+        for a, b in parts:
+            chunk = body[a:b]
+            for piece in re.split(r"[ \t]+and[ \t]+", chunk):
+                off = a + chunk.find(piece)
+                st = piece.strip()
+                if not st:
+                    continue
+                off += piece.find(st)
+                if not _FULL_NAME.match(st) or st.split()[0].lower() in _NOT_NAMES:
+                    people = []
+                    break
+                people.append(Span(start=base + off, end=base + off + len(st)))
+            else:
+                continue
+            break
+        if len(people) < 1:
+            continue
+        for i, sp in enumerate(people, 1):
+            full = text[sp.start : sp.end]
+            first = full.split()[0]
+            prefix = f"{role}_{i}" if len(people) > 1 else role
+            alone = [
+                Span(start=f.start(), end=f.end())
+                for f in re.finditer(rf"(?<![\w@.]){re.escape(first)}(?![\w@-]| [A-Z][a-z])", text)
+                if not any(Span(start=f.start(), end=f.end()).overlaps(p) for p in people)
+            ]
+            if alone:
+                fs = Span(start=sp.start, end=sp.start + len(first))
+                ls = Span(start=sp.start + len(first) + 1, end=sp.end)
+                out.append(_candidate(text, fs, f"{prefix}_first_name", f"a {role}", alone))
+                out.append(
+                    _elsewhere(text, _candidate(text, ls, f"{prefix}_last_name", f"a {role}"))
+                )
+            else:
+                out.append(_elsewhere(text, _candidate(text, sp, f"{prefix}_name", f"a {role}")))
+    return out
+
+
+# A person named after a phrase: "report to Grace Liu", "Questions to Hannah Kim".
+_PERSON = rf"({_NAME_WORD}(?: {_NAME_WORD}){{1,2}})"
+_PERSON_PHRASES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(rf"\breport(?:s|ing)? (?:in)?to {_PERSON}"), "manager_name"),
+    (
+        re.compile(
+            rf"\b(?:[Qq]uestions(?: to)?|[Cc]ontact|[Rr]each out to|[Aa]sk|[Ss]peak (?:to|with)|"
+            rf"[Tt]alk to|[Pp]ing|[Ee]mail) {_PERSON}"
+        ),
+        "contact_name",
+    ),
+    (
+        re.compile(rf"\b(?:[Ll]ed|[Hh]osted|[Cc]haired|[Pp]resented|[Rr]un) by {_PERSON}"),
+        "lead_name",
+    ),
+    (re.compile(rf"\b[Aa]pproved by {_PERSON}"), "approver_name"),
+    (re.compile(rf"\b[Aa]ssigned to {_PERSON}"), "assignee_name"),
+    (re.compile(rf"\b(?:[Ss]poke|[Mm]et|[Ss]poken) (?:to|with) {_PERSON}"), "contact_name"),
+]
+# Capitalised words that make a phrase an organisation or a thing, not a person.
+_NOT_PERSON_WORDS = frozenset(
+    [
+        "support",
+        "team",
+        "teams",
+        "service",
+        "services",
+        "desk",
+        "department",
+        "office",
+        "engineering",
+        "sales",
+        "operations",
+        "security",
+        "platform",
+        "customer",
+        "customers",
+        "help",
+        "helpdesk",
+        "billing",
+        "finance",
+        "legal",
+        "people",
+        "human",
+        "resources",
+        "group",
+        "the",
+        "our",
+        "your",
+        "us",
+        "me",
+        "them",
+        "him",
+        "her",
+        "api",
+        "portal",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ]
+)
+_PERSON_END = re.compile(r"(?=[,.;:!?)\s]|$)")
+
+
+def _phrase_people(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    seen: set[str] = set()
+    for pattern, role in _PERSON_PHRASES:
+        for m in pattern.finditer(text):
+            value = m.group(1)
+            words = value.lower().split()
+            if value in seen or any(w in _NOT_PERSON_WORDS for w in words):
+                continue
+            if not _PERSON_END.match(text, m.end(1)):
+                continue
+            seen.add(value)
+            span = Span(start=m.start(1), end=m.end(1))
+            out.append(
+                _elsewhere(text, _candidate(text, span, role, f"the {role.replace('_', ' ')}"))
+            )
+    return out
+
+
+# Services and products named in prose: "the Payments API", "the Ledger Service".
+_PRODUCT = re.compile(
+    r"(?<![\w-])((?:[A-Z][a-z][\w-]*[ ]){1,3}(?:API|Service|Gateway|Portal|Dashboard|Console|"
+    r"Pipeline|Cluster|Database|Queue|Worker|Scheduler))(?![\w-])"
+)
+_PRODUCT_LEAD = frozenset(
+    ["the", "a", "an", "our", "your", "their", "this", "that", "new", "old", "each", "every"]
+)
+
+
+def _products(text: str) -> list[Candidate]:
+    out: list[Candidate] = []
+    seen: set[str] = set()
+    for m in _PRODUCT.finditer(text):
+        words = m.group(1).split()
+        while words and words[0].lower() in _PRODUCT_LEAD:
+            words.pop(0)
+        if len(words) < 2:
+            continue
+        value = " ".join(words)
+        if value in seen:
+            continue
+        seen.add(value)
+        start = m.end(1) - len(value)
+        c = _candidate(text, Span(start=start, end=m.end(1)), snake_case(value), "a service name")
+        out.append(_elsewhere(text, c.model_copy(update={"confidence": 0.55})))
+    return out
+
+
 class PeopleDetector:
     name = "people"
 
@@ -465,6 +691,21 @@ class PeopleDetector:
         ]
         taken_values = {c.value for c in [*named, *recipient, *greeting]}
         brands = [c for c in _brands(text) if c.value not in taken_values]
+        taken_values |= {c.value for c in brands}
+        lists = _person_lists(text)
+        taken_values |= {c.value for c in lists}
+        phrased = [c for c in _phrase_people(text) if c.value not in taken_values]
+        taken_values |= {c.value for c in phrased}
+        products = [c for c in _products(text) if c.value not in taken_values]
         return DetectorResult(
-            candidates=[*named, *recipient, *greeting, *brands, *_letter_date(text)]
+            candidates=[
+                *named,
+                *recipient,
+                *greeting,
+                *brands,
+                *lists,
+                *phrased,
+                *products,
+                *_letter_date(text),
+            ]
         )

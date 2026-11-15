@@ -166,9 +166,46 @@ _STOPWORDS = frozenset(
     ]
 )
 
+# Well-known constants that repeat in logs and listings without being parameters:
+# user-agent parts, CPU architectures, operating systems, log levels and event types.
+_CONSTANTS = frozenset(
+    w.lower()
+    for w in [
+        "Mozilla/5.0",
+        "AppleWebKit/537.36",
+        "KHTML",
+        "Gecko",
+        "Safari/537.36",
+        "Linux",
+        "Windows",
+        "Macintosh",
+        "Android",
+        "iPhone",
+        "x86_64",
+        "amd64",
+        "arm64",
+        "aarch64",
+        "Win64",
+        "Warning",
+        "Normal",
+        "Error",
+        "Info",
+        "Debug",
+        "Notice",
+        "Critical",
+        "Fatal",
+        "Trace",
+        "Warn",
+        "Alert",
+        "Emergency",
+    ]
+)
+
 
 def _non_trivial(tok: str) -> bool:
     if len(tok) < 3 or tok.lower() in _STOPWORDS or tok in _SQL_KEYWORDS:
+        return False
+    if tok.lower() in _CONSTANTS:
         return False
     if tok.isdigit():
         return len(tok) >= 3
