@@ -46,6 +46,7 @@ def test_layout_and_names() -> None:
     assert [f.path for f in result.files] == [
         "Chart.yaml",
         "values.yaml",
+        "values.schema.json",
         "values-staging.yaml",
         ".helmignore",
         "templates/configmap.yaml",

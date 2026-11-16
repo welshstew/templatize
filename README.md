@@ -40,6 +40,7 @@ templatize suggest FILE [--variant FILE]... [--json] [--min-confidence X]
 templatize build   FILE [--variant FILE]... (--accept-all | --vars vars.json)
                    [--engine jinja2|envsubst|terraform] [--min-confidence X] [-o DIR] [--zip bundle.zip]
                    [--print template|env|script] [--json]
+templatize check   FILE [--type ID] [--schema FILE] [--json]
 ```
 
 - `--variant` adds another example of the same document (up to 3). The regions
@@ -48,6 +49,10 @@ templatize build   FILE [--variant FILE]... (--accept-all | --vars vars.json)
   `[{"name": "db_host", "spans": [{"start": 10, "end": 18}]}]`.
 - `--engine` picks the template engine (see [Engines](#engines)); its notes go to stderr.
 - `build` exits with code 2 if the round-trip check fails.
+- `check` validates a document (say, a rendered one) against its JSON Schema, as the
+  preview does (see [Checking rendered output](#checking-rendered-output-against-the-schema)).
+  It exits 0 when valid, 2 with problems (one `FILE: path: message` line each), and 3
+  when no schema applies. For example: `python render.py | templatize check -`.
 
 ### Web UI
 
@@ -106,7 +111,8 @@ TEMPLATIZE_STATIC_DIR=frontend/dist uv run templatize-api   # what `make serve` 
 |---|---|---|
 | `POST /suggest` | `{text, variants?: [≤3]}` | `{candidates, notices}` (spans in code points) |
 | `POST /build` | `{text, variables: [{name, spans, type?, value?}], engine?}` | `{template, env, runner, variables, roundtrip}` |
-| `POST /render` | `{template, values: {name\|ENV_KEY: value}, newline?}` | `{ok, output, error}`: errors are reported, not raised |
+| `POST /render` | `{template, values: {name\|ENV_KEY: value}, newline?, engine?, check_schema?, schema?, document_type?}` | `{ok, output, error, schema_check}`: errors are reported, not raised |
+| `POST /check` | `{text, schema?, document_type?}` | `{checked, ok, schemas, problems: [{document, path, message}], note}`: a YAML/JSON document against its JSON Schema, offline |
 | `POST /download` | same as `/build` | `application/zip` (`template.j2`, `.env`, `render.py`, `README.md`); header `x-roundtrip: pass\|fail` |
 | `GET /healthz`, `GET /info` | | health; version, engines, detectors, limits |
 
@@ -347,6 +353,7 @@ chart**. The chart is built from the same accepted variables:
 storefront/
   Chart.yaml                appVersion from the image tag
   values.yaml               every variable, nested: image.tag, replicaCount, service.port, …
+  values.schema.json        each value's type: Helm refuses replicaCount=three
   values-staging.yaml       per example document: only the values that differ
   .helmignore
   templates/configmap.yaml  one template per resource, in input order
@@ -460,6 +467,7 @@ web/
   tasks/main.yml        # ansible.builtin.template with byte-exact options
   templates/nginx.conf.j2
   meta/main.yml
+  meta/argument_specs.yml  # each variable's type: Ansible refuses web_port=http
   README.md
   examples/<label>.yml  # per --variant: only the values that differ (-e @...)
 playbook.yml
@@ -475,6 +483,53 @@ round trip renders the template with the vars files as Ansible reads them, and t
 test suite runs real `ansible-playbook` (when installed) on the fixtures, including
 CRLF, mixed line endings and literal `{{`. API: `POST /role` and `POST /role/download`.
 In the UI: the **Ansible role** tab of the output panel.
+
+### Typed values: values.schema.json and argument_specs
+
+A generated chart or role checks its own values when it is used. Without that, a bad
+value would just be rendered.
+- **Helm:** `values.schema.json` is checked on every `helm install`, `upgrade` and
+  `template`. `helm template --set replicaCount=three` stops with "at '/replicaCount':
+  'three' does not match pattern …".
+- **Ansible:** `meta/argument_specs.yml` is checked when the role starts. `-e
+  web_port=http` stops the run before anything is written.
+
+**Where the types come from:**
+- **What the detectors found:** an `int`, `port`, `float` or `bool` value, a list of rows
+  with typed fields, a list of strings.
+- **The values actually shipped:** `values.yaml` and every example file. Types are only
+  widened by these, never narrowed, so the defaults and examples always pass. The
+  generator checks that before writing the file. If they ever did not fit, it would leave
+  the file out with a note rather than ship a chart that refuses itself.
+
+- **The field's schema** (bundled or supplied), when it applies:
+  - **Allowed values:** an `enum`, or for Kubernetes, the list in the field's
+    description ("Valid options are ExternalName, ClusterIP, NodePort, and
+    LoadBalancer"). These become `enum` in Helm and `choices` in Ansible, so
+    `service.type=Loadbalancer` is refused.
+  - **Allowed JSON types:** these take precedence over the type guessed from the value.
+    A `targetPort` of `8080` still takes `http`, because Kubernetes allows a port name
+    there, and an env value of `"8080"` takes any string.
+
+**What is accepted:**
+- **Numbers and booleans:** an integer field takes `5` or a quoted `"5"` (both render
+  the same) but not `"three"`. A port must be 1–65535: Kubernetes `containerPort`,
+  `port`, `targetPort` and `nodePort` are detected as ports.
+- **Choices:** a choice list is kept only if every shipped value is in it.
+- **Detected strings:** a number is refused there. YAML would print `tag: 1.10` as
+  `1.1`.
+- **Strings nothing detected:** in the helm create style, defaults such as a probe's
+  `port: http` are left open, since they can take a number too.
+
+**Descriptions:** come from the suggestion's reason and the field's schema, for example
+"Replica count. Number of desired pods.". They show up in the schema and in
+`ansible-doc`. The UI sends them, along with the schema's choices and types, when it
+builds a chart or role. Variables you select yourself carry none of these.
+
+The chart view's preview applies the same check. An edited `values.yaml` that the
+schema refuses shows "✗ values.schema.json: replicaCount: 'three' is not an integer".
+The helm create style shows Helm's own message. In the API, `/chart/render` takes
+`values_schema`.
 
 ### Running it publicly: rate limits and proxies
 
@@ -501,7 +556,7 @@ How it behaves:
 ### MCP server
 
 The same core library is exposed as an MCP server (official Python SDK, `mcp` 2.x)
-with five read-only tools:
+with seven read-only tools:
 
 | Tool | What it does |
 |---|---|
@@ -509,7 +564,8 @@ with five read-only tools:
 | `generate_template(text, variables?, variants?, min_confidence?, engine?)` | Template, values file, runner script and the round-trip verdict (`engine`: `jinja2`, `envsubst` or `terraform`), plus `notes` to pass on. Give variables **by value**, e.g. `[{"name": "db_host", "value": "db01.example.com", "occurrences": "all"}]`, so the model never has to count characters (spans also work). Omit `variables` to accept suggestions automatically |
 | `generate_helm_chart(text, variables?, variants?, chart_name?, variant_labels?, min_confidence?, style?)` | Helm chart from Kubernetes manifests: Chart.yaml, nested values.yaml, templates, and a values file per variant. `style="exact"` checks a byte-for-byte round trip per document; `style="scaffold"` fills in the `helm create` chart and returns a coverage report. Variables take an optional `values_path` |
 | `generate_ansible_role(text, variables?, variants?, role_name?, filename?, dest?, variant_labels?, min_confidence?)` | The template packaged as an Ansible role (defaults, tasks, template, meta, README, a vars file per variant) plus `playbook.yml`, with the round-trip verdict |
-| `render_template(template, values?, newline?)` | Sandboxed render. Errors come back in `error`, not as an exception |
+| `render_template(template, values?, newline?, engine?, check_schema?, json_schema?, document_type?)` | Sandboxed render. Errors come back in `error`, not as an exception. With `check_schema`, the output is checked against its JSON Schema too |
+| `check_document(text, json_schema?, document_type?)` | Checks any YAML/JSON document (one the model wrote, or rendered output) against its JSON Schema, offline: the bundled, pinned schemas for 20 Kubernetes kinds, Compose, GitHub Actions, GitLab CI, cloud-init, Helm `Chart.yaml`, Prometheus, Dependabot and `package.json`, or one passed in. Returns each problem's path and message. `checked` is false when no schema applies |
 | `validate_template(template, values?, expected_text?)` | Syntax, referenced, missing and unused variables, renders?, and reproduces `expected_text` byte for byte? |
 
 Transports:
@@ -952,7 +1008,9 @@ refuses any whose SHA-256 changed. Sources and licences are listed in
 
 The **preview** checks its output against the document's schema on every edit, and
 shows either "✓ Valid against Kubernetes Deployment (apps/v1)" or each problem with its
-path. That way a bad value shows before the file is used. For example:
+path. While a problem stands, a "✗ N schema problems" badge stays in the header next to
+the round-trip badge, and clicking it opens the problem list. That way a bad value shows
+before the file is used. For example:
 - `replica_count: three` gives `spec.replicas`: 'three' is not of type 'integer'.
 - A misspelt key gives "Additional properties are not allowed ('containerport' was
   unexpected)".
@@ -974,7 +1032,10 @@ listed.
   is in `schema_check`.
 - **MCP:** the same options on `render_template`, which now also takes `engine` and
   nested list values.
-- **Library:** `templatize.schemacheck.check_output`.
+- **On its own:** `POST /check`, the MCP tool `check_document` and `templatize check`
+  check a document that wasn't rendered here, such as a manifest an assistant just
+  wrote.
+- **Library:** `templatize.schemacheck.check_output` / `check_document`.
 
 Validation uses the `jsonschema` library (now a core dependency, already in the
 lockfile) and never touches the network.

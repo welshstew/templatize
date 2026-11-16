@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildTree, fileRole, filledLines, findValuesLine, overlayLabel, tokenize } from "./chart.ts";
+import { buildTree, fileRole, filledLines, findValuesLine, overlayLabel, schemaProblem, tokenize } from "./chart.ts";
 
 test("tree: directories first, order kept", () => {
   const tree = buildTree(["Chart.yaml", "values.yaml", "templates/deployment.yaml", "templates/service.yaml", ".helmignore"]);
@@ -16,6 +16,7 @@ test("tree: directories first, order kept", () => {
 
 test("roles", () => {
   assert.equal(fileRole("values.yaml"), "values");
+  assert.equal(fileRole("values.schema.json"), "schema");
   assert.equal(fileRole("values-staging.yaml"), "overlay");
   assert.equal(fileRole("templates/x.yaml"), "template");
   assert.equal(fileRole("rendered/x.yaml"), "rendered");
@@ -64,4 +65,17 @@ test("filledLines marks the key and its block", () => {
     { path: ["missing"], source: "x" },
   ]);
   assert.deepEqual([...m.keys()].sort((a, b) => a - b), [1, 5, 7, 8, 9]);
+});
+
+test("schemaProblem reads both our schema check and Helm's", () => {
+  assert.equal(
+    schemaProblem("the values do not fit values.schema.json: replicaCount: 'three' is not an integer; port: x"),
+    "replicaCount: 'three' is not an integer",
+  );
+  assert.equal(
+    schemaProblem("helm template failed: Error: values don't meet the specifications of the schema(s) in the following chart(s):\nweb:\n- at '/service/port': got string, want integer"),
+    "service.port: got string, want integer",
+  );
+  assert.equal(schemaProblem("template: x.yaml:3: unexpected EOF"), null);
+  assert.equal(schemaProblem(null), null);
 });

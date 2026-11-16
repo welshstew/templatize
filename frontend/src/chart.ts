@@ -42,22 +42,35 @@ export function buildTree(paths: string[]): TreeNode[] {
   return sort(root.children);
 }
 
-export type FileRole = "chart" | "values" | "overlay" | "template" | "ignore" | "rendered" | "other";
+export type FileRole = "chart" | "values" | "schema" | "overlay" | "template" | "ignore" | "rendered" | "other";
 
 export function fileRole(path: string): FileRole {
   if (path.startsWith("rendered/")) return "rendered";
   if (path === "Chart.yaml") return "chart";
   if (path === "values.yaml") return "values";
+  if (path === "values.schema.json") return "schema";
   if (/^values-.+\.yaml$/.test(path)) return "overlay";
   if (path.startsWith("templates/")) return "template";
   if (path === ".helmignore") return "ignore";
   return "other";
 }
 
+/** The first problem of a render refused by values.schema.json (exact style: our own
+ * check; helm create style: Helm's message), or null for any other render error. */
+export function schemaProblem(error: string | null | undefined): string | null {
+  if (!error) return null;
+  const ours = /the values do not fit values\.schema\.json: ([^;]+)/.exec(error);
+  if (ours) return ours[1]!.trim();
+  if (!/schema/i.test(error)) return null;
+  const helm = /at '\/([^']*)': ([^\n]+)/.exec(error);
+  return helm ? `${helm[1]!.replace(/\//g, ".") || "(values)"}: ${helm[2]!.trim()}` : null;
+}
+
 export function language(path: string): string {
   const role = fileRole(path);
   if (role === "template") return "Helm template (Go text/template + YAML)";
   if (role === "ignore") return "Ignore patterns";
+  if (role === "schema") return "JSON Schema (Helm checks values against it)";
   return "YAML";
 }
 

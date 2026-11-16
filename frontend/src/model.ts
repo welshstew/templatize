@@ -42,6 +42,9 @@ export interface Item {
   llmNote: string | null;
   /** Helm values.yaml location (["image", "tag"]); null derives it from the name. */
   valuesPath: string[] | null;
+  /** From the schema: allowed values and JSON types (charts and roles check them). */
+  choices?: string[] | null;
+  accepts?: string[] | null;
 }
 
 export const VAR_TYPES = [
@@ -84,6 +87,8 @@ export function itemsFromCandidates(cands: Candidate[]): Item[] {
     originalName: c.name,
     llmNote: null,
     valuesPath: c.values_path ?? null,
+    choices: c.choices ?? null,
+    accepts: c.accepts ?? null,
   }));
 }
 
@@ -150,6 +155,11 @@ export function specsFor(items: Item[]): VariableSpec[] {
     sources: i.manual ? ["manual"] : i.sources,
     ...(i.valuesPath ? { values_path: i.valuesPath } : {}),
     ...(i.variantValues ? { variant_values: i.variantValues } : {}),
+    // Descriptions and the schema's choices/types go into values.schema.json and
+    // argument_specs.yml; a value the user typed is no longer the schema's field.
+    ...(i.reason && !i.manual ? { description: i.reason } : {}),
+    ...(i.choices && !i.manual ? { choices: i.choices } : {}),
+    ...(i.accepts && !i.manual ? { accepts: i.accepts } : {}),
   }));
 }
 

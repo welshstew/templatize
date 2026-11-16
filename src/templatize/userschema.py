@@ -234,10 +234,86 @@ _FORMAT_TYPES = {
 }
 
 
+# Kubernetes schemas list a string field's values in prose, not as an enum:
+# "One of Always, Never, IfNotPresent", "Valid options are ExternalName, ClusterIP,
+# NodePort, and LoadBalancer", "Must be UDP, TCP, or SCTP". Only lists of two or more
+# capitalised words count ("Exactly one of A and B" names fields, so it does not).
+_CHOICE = r"""["']?[A-Z][A-Za-z]+["']?"""
+_CHOICE_SEP = r"(?:,\s*(?:and\s+|or\s+)?|\s+or\s+|\s+and\s+)"
+_PROSE_CHOICES = re.compile(
+    r"(?<!xactly )(?:[Oo]ne of|Valid options are|Valid values are|[Mm]ust be|"
+    r"[Mm]ay be one of|[Cc]an be one of|[Ss]upported values(?: are)?)[:\s]+"
+    rf"({_CHOICE}(?:{_CHOICE_SEP}{_CHOICE})+)"
+)
+
+
+def _choices(schemas: list[dict[str, Any]]) -> list[str] | None:
+    """The values a string field allows: its ``enum`` (strings only; ``null`` is
+    dropped), else a list in its description."""
+    for s in schemas:
+        enum = s.get("enum")
+        if isinstance(enum, list):
+            vals = [v for v in enum if v is not None]
+            if vals and all(isinstance(v, str) for v in vals):
+                return list(dict.fromkeys(vals))
+            return None
+    for s in schemas:
+        desc, typ = s.get("description"), s.get("type")
+        if isinstance(desc, str) and (
+            typ == "string" or (isinstance(typ, list) and "string" in typ)
+        ):
+            m = _PROSE_CHOICES.search(desc)
+            if m:
+                return list(dict.fromkeys(re.findall(r"[A-Z][A-Za-z]+", m.group(1))))
+    return None
+
+
+def _common(lists: list[list[str] | None]) -> list[str] | None:
+    """What every one of ``lists`` allows, in the first one's order; ``None`` if any
+    is unknown or nothing is common to all."""
+    if not lists or any(x is None for x in lists):
+        return None
+    first, *rest = lists
+    out = [v for v in first or [] if all(v in (r or []) for r in rest)]
+    return out or None
+
+
+_JSON_TYPES = ("integer", "number", "boolean", "string")
+
+
+def _accepts(schemas: list[dict[str, Any]]) -> list[str] | None:
+    """The scalar JSON types the field allows (``type``, or the members of a
+    ``oneOf``/``anyOf``), ``null`` left out; ``None`` when not stated or not scalar."""
+    found: set[str] = set()
+    stated = False
+
+    def take(t: Any) -> bool:
+        types = [t] if isinstance(t, str) else t if isinstance(t, list) else None
+        if types is None:
+            return False
+        found.update(x for x in types if x != "null")
+        return True
+
+    for s in schemas:
+        if take(s.get("type")):
+            stated = True
+        for key in ("oneOf", "anyOf"):
+            members = s.get(key)
+            if isinstance(members, list):
+                for m in members:
+                    if isinstance(m, dict) and take(m.get("type")):
+                        stated = True
+    if not stated or not found or not found <= set(_JSON_TYPES):
+        return None
+    return [t for t in _JSON_TYPES if t in found]
+
+
 class _Facts:
     def __init__(self, schemas: list[dict[str, Any]], value: str) -> None:
         self.const = any("const" in s for s in schemas)
         self.enum = next((s["enum"] for s in schemas if isinstance(s.get("enum"), list)), None)
+        self.choices = _choices(schemas)
+        self.accepts = _accepts(schemas)
         fmt = next((s["format"] for s in schemas if isinstance(s.get("format"), str)), None)
         self.vtype: VarType | None = _FORMAT_TYPES.get(fmt) if fmt else None
         if self.vtype is None and any(
@@ -276,15 +352,21 @@ def _candidate(text: str, span: Span, name: str, vtype: VarType, why: str) -> Ca
 
 
 def apply(
-    text: str, schema: dict[str, Any], raw: list[Candidate], *, doc: int | None = None
+    text: str,
+    schema: dict[str, Any],
+    raw: list[Candidate],
+    *,
+    doc: int | None = None,
+    parsed: list[Field] | None = None,
 ) -> tuple[list[Candidate], SchemaInfo]:
     """``raw`` with a schema applied, and what was matched. ``doc`` limits it to one
-    YAML document (``---``) of a multi-document file."""
+    YAML document (``---``) of a multi-document file; ``parsed`` is the text's fields
+    when the caller already has them (one parse for every document's schema)."""
     s = _Schema(schema)
     title = schema.get("title") if isinstance(schema.get("title"), str) else None
     structure: set[tuple[int, int]] = set()
     facts: dict[tuple[int, int], tuple[_Facts, Field]] = {}
-    for f in fields(text):
+    for f in fields(text) if parsed is None else parsed:
         if doc is not None and f.doc != doc:
             continue
         subs = s.at(f.path)
@@ -324,6 +406,12 @@ def apply(
                 notes.append("the schema's default")
             if fact.enum:
                 notes.append("one of: " + ", ".join(map(str, fact.enum[:8])))
+            # One variable fills every field it occurs in: what all of them allow.
+            choices = _common([f.choices for f, _ in here])
+            if choices and c.value in choices:
+                update["choices"] = choices
+            if accepts := _common([f.accepts for f, _ in here]):
+                update["accepts"] = accepts
             if notes:
                 update["reason"] = "; ".join([*(filter(None, [c.reason])), *notes])
         out.append(c.model_copy(update=update) if update else c)
@@ -367,13 +455,15 @@ def apply_catalog(
     or confidently detected) type; Kubernetes manifests get one schema per resource
     kind. ``None`` info when no bundled schema applies."""
     plan: list[tuple[catalog.Entry, int | None]] = []
+    parsed: list[Field] | None = None
     referenced = catalog.for_url(reference.url) if reference else None
     if referenced is not None:
         plan.append((referenced, None))
     elif doc_type is not None and (doc_type.confirmed or doc_type.confidence >= CATALOG_CONFIDENCE):
         if doc_type.id == "kubernetes":
             heads: dict[int, dict[str, str]] = {}
-            for f in fields(text):
+            parsed = fields(text)
+            for f in parsed:
                 if f.path in (("apiVersion",), ("kind",)):
                     heads.setdefault(f.doc, {})[f.path[0]] = f.value
             for i, head in sorted(heads.items()):
@@ -387,8 +477,13 @@ def apply_catalog(
     matched = 0
     notes: list[str] = []
     used: list[str] = []
+    # Each document's schema sees only its own fields: one parse, not one per document.
+    by_doc: dict[int, list[Field]] = {}
+    for f in parsed or []:
+        by_doc.setdefault(f.doc, []).append(f)
     for entry, doc in plan:
-        raw, info = apply(text, catalog.load(entry.id), raw, doc=doc)
+        mine = by_doc.get(doc, []) if doc is not None and parsed is not None else None
+        raw, info = apply(text, catalog.load(entry.id), raw, doc=doc, parsed=mine)
         matched += info.matched_fields
         notes += [n for n in info.notes if n not in notes]
         if entry.id not in used:

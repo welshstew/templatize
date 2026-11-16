@@ -25,6 +25,7 @@ from typing import Any
 
 import yaml
 
+from templatize import typedvalues
 from templatize.build import VariableSpec, make_ir
 from templatize.emitters.base import EmittedFile
 from templatize.helm import coverage as cov
@@ -39,6 +40,7 @@ from templatize.helm.chart import (
     FilledValue,
     assign_paths,
     default_chart_name,
+    values_schema_file,
 )
 from templatize.ir import Span, Variable
 from templatize.k8s import Resource, parse_resources
@@ -486,6 +488,17 @@ def build_scaffold_chart(
             )
         )
 
+    schema_file, schema_note = values_schema_file(
+        name,
+        values_yaml,
+        overlays,
+        typedvalues.variable_hints(
+            carried_vars, [], ir, {v.name: tuple(v.values_path or []) for v in carried_vars}
+        ),
+    )
+    if schema_note:
+        notes = [*notes, schema_note]
+
     app_version = values["image"].get("tag") or "1.16.0"
     chart_yaml = (
         "apiVersion: v2\n"
@@ -499,6 +512,7 @@ def build_scaffold_chart(
     files = [
         EmittedFile(path="Chart.yaml", content=chart_yaml),
         EmittedFile(path="values.yaml", content=values_yaml),
+        *([schema_file] if schema_file else []),
         *(EmittedFile(path=f, content=c) for f, c in overlays),
         *scaffold,
         *carried,

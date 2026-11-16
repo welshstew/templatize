@@ -27,6 +27,7 @@ from pydantic import Field
 from templatize import __version__
 from templatize.build import VariableInput
 from templatize.doctypes import TYPES
+from templatize.schemacheck import DocumentCheck
 from templatize_mcp import tools
 
 INSTRUCTIONS = """\
@@ -45,6 +46,9 @@ Typical flow:
    SQL rows) become {% for %} loops and their values go to values.yaml instead of .env.
 3. render_template / validate_template to try other values or check a template
    that you edited.
+check_document(text) checks any YAML/JSON document (one you wrote, or rendered
+output) against its JSON Schema, offline: the bundled, pinned schemas for Kubernetes
+kinds, Compose, GitHub Actions, GitLab CI, cloud-init and more, or one you pass.
 Everything runs locally; nothing is stored or sent anywhere.
 """
 
@@ -328,6 +332,38 @@ def create_server() -> MCPServer:
                 _schema_text(json_schema),
                 document_type,
             )
+
+    @server.tool(annotations=READ_ONLY)
+    def check_document(
+        text: Annotated[
+            str, Field(description="The YAML or JSON document (multi-document YAML is fine).")
+        ],
+        json_schema: Annotated[
+            str | dict[str, Any] | None,
+            Field(
+                description=(
+                    "A JSON Schema (an object, or JSON/YAML text) to check against instead "
+                    "of the bundled ones. Its own $ref URLs are not followed."
+                )
+            ),
+        ] = None,
+        document_type: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "What the document is, when detection would not tell (a workflow "
+                    "missing `runs-on`, say). One of: " + ", ".join(t.id for t in TYPES) + "."
+                ),
+                max_length=64,
+            ),
+        ] = None,
+    ) -> DocumentCheck:
+        """Check a document against its JSON Schema, offline: `json_schema` if given, else
+        the bundled schema its `$schema` names, else the one for its type (each
+        Kubernetes resource against its kind's schema). Returns each problem's path and
+        message; `checked` is false when no schema applies. Nothing is downloaded."""
+        with _tool_errors("check_document"):
+            return tools.check_document_tool(text, _schema_text(json_schema), document_type)
 
     @server.tool(annotations=READ_ONLY)
     def validate_template(

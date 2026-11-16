@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import bisect
 import re
 from bisect import bisect_right
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 
 from pydantic import BaseModel
 
@@ -12,7 +13,15 @@ from templatize.compose import compose_profile
 from templatize.detectors import DetectionContext, Detector, default_detectors
 from templatize.detectors.k8s import split_spans
 from templatize.doctypes import DocumentType, detect_type
-from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, Candidate, LoopCandidate, Notice, Span
+from templatize.ir import (
+    MAX_INPUT_CHARS,
+    MAX_LOOP_ITEMS,
+    MAX_VARIANTS,
+    Candidate,
+    LoopCandidate,
+    Notice,
+    Span,
+)
 from templatize.k8s import DocumentProfile, detect_profile, structural_spans
 from templatize.loops import detect_loops, explained_notices
 from templatize.merge import compose_candidates, merge_candidates
@@ -83,6 +92,28 @@ def _outside_template_syntax(text: str, raw: list[Candidate]) -> list[Candidate]
     return out
 
 
+def _longest(lp: LoopCandidate) -> int:
+    """Items of the loop or of any nested list (a nested list's items are counted
+    across all its parents)."""
+    return max([len(lp.items), *(_longest(c) for c in lp.children)])
+
+
+def _overlap_index(spans: Iterable[Span]) -> Callable[[Span], bool]:
+    """``s -> does s overlap any of spans``, in O(log n) per query (a manifest with
+    hundreds of resources has tens of thousands of structural spans)."""
+    ordered = sorted(spans, key=lambda f: f.start)
+    starts = [f.start for f in ordered]
+    reach: list[int] = []  # furthest end among the spans so far
+    for f in ordered:
+        reach.append(max(f.end, reach[-1]) if reach else f.end)
+
+    def hits(s: Span) -> bool:
+        i = bisect.bisect_left(starts, s.end)  # spans starting before s ends
+        return i > 0 and reach[i - 1] > s.start
+
+    return hits
+
+
 def suggest(
     text: str,
     variants: Sequence[str] = (),
@@ -108,7 +139,7 @@ def suggest(
     if profile.format == "kubernetes" and ctx.profile.kubernetes is not False:
         # apiVersion/kind and mapping keys are structure, never parameters; whole
         # images are superseded by their repository/tag parts.
-        fixed = structural_spans(text)
+        hits_fixed = _overlap_index(structural_spans(text))
         split = set(split_spans(text))
         raw = [
             c.model_copy(update={"spans": kept})
@@ -117,8 +148,7 @@ def suggest(
                 kept := [
                     s
                     for s in c.spans
-                    if not any(s.overlaps(f) for f in fixed)
-                    and ("k8s" in c.detectors or s not in split)
+                    if not hits_fixed(s) and ("k8s" in c.detectors or s not in split)
                 ]
             )
         ]
@@ -152,6 +182,21 @@ def suggest(
                 any(r.start <= s.start and s.end <= r.end for r in regions) for s in lp.items
             )
         ]
+    # A loop over the item limit could never be built: say so instead of offering it.
+    too_long = [lp for lp in loops if _longest(lp) > MAX_LOOP_ITEMS]
+    if too_long:
+        loops = [lp for lp in loops if lp not in too_long]
+        for lp in too_long:
+            notices.append(
+                Notice(
+                    kind="info",
+                    message=(
+                        f"the list {lp.name!r} has {_longest(lp):,} items, more than the "
+                        f"{MAX_LOOP_ITEMS:,} a loop can hold; it is left as text"
+                    ),
+                    span=lp.region,
+                )
+            )
     return SuggestResult(
         candidates=candidates,
         notices=explained_notices(notices, loops),

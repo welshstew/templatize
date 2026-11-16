@@ -80,6 +80,15 @@ class BuildResponse(BaseModel):
     """What the user should know: loops an engine cannot express, renamed variables."""
 
 
+class CheckRequest(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    text: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)]
+    json_schema: str | None = Field(default=None, max_length=2_000_000, alias="schema")
+    """A JSON Schema (JSON or YAML) instead of the bundled ones."""
+    document_type: str | None = Field(default=None, max_length=64)
+
+
 class RenderRequest(BaseModel):
     template: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)]
     values: dict[str, Scalar | LoopValue] = Field(default_factory=dict, max_length=MAX_VARIABLES)
@@ -176,6 +185,9 @@ class ChartRenderRequest(BaseModel):
     chart_name: Annotated[str, Field(max_length=53)] = "chart"
     files: list[EmittedFile] = Field(default_factory=list, max_length=MAX_CHART_FILES)
     """Scaffold style: the whole chart (helpers included), rendered with real Helm."""
+    values_schema: Annotated[str, Field(max_length=MAX_INPUT_CHARS * 2)] | None = None
+    """Exact style: the chart's ``values.schema.json``; values that do not fit it are
+    an error, as with ``helm template`` (the scaffold style runs Helm itself)."""
 
 
 class ChartRenderResponse(BaseModel):

@@ -37,9 +37,9 @@ from templatize.helm import ChartError, ChartResult
 from templatize.helm import build as build_helm_chart
 from templatize.helm import coverage as helm_coverage
 from templatize.helm import values as helm_values
-from templatize.helm.chart import CHART_NAME_RE, render_templates
+from templatize.helm.chart import CHART_NAME_RE, render_templates, values_problems
 from templatize.ir import MAX_INPUT_CHARS, MAX_VARIANTS, IRValidationError
-from templatize.schemacheck import check_output
+from templatize.schemacheck import DocumentCheck, check_document, check_output
 from templatize.suggest import InputLimitError, SuggestResult, suggest
 from templatize.userschema import SchemaError
 from templatize_api.middleware import BodyLimitMiddleware, SecurityHeadersMiddleware
@@ -52,6 +52,7 @@ from templatize_api.schemas import (
     ChartRenderResponse,
     ChartRequest,
     ChartResponse,
+    CheckRequest,
     DocumentTypeInfo,
     ErrorResponse,
     InfoResponse,
@@ -365,6 +366,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             notes=result.notes,
         )
 
+    @app.post("/check", tags=["templating"], responses=ERRORS)
+    def check_endpoint(req: CheckRequest) -> DocumentCheck:
+        """Check a YAML/JSON document against its JSON Schema, offline: ``schema`` if
+        given, else the bundled schema its ``$schema`` names, else the one for its type
+        (``document_type``, or detected). ``checked`` is false when none applies."""
+        try:
+            return check_document(req.text, schema=req.json_schema, document_type=req.document_type)
+        except (SchemaError, UnknownDocumentTypeError) as exc:
+            raise ApiError(422, str(exc)) from None
+
     @app.post("/render", tags=["templating"], responses=ERRORS)
     def render_endpoint(req: RenderRequest) -> RenderResponse:
         """Render a template with values (live preview). Rendering is sandboxed and bounded.
@@ -447,6 +458,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             tree = helm_values.load(req.values_yaml)
             if req.overlay_yaml is not None:
                 tree = helm_values.merge(tree, helm_values.load(req.overlay_yaml, "overlay"))
+            if req.values_schema:
+                problems = values_problems(tree, req.values_schema)
+                if problems:
+                    return ChartRenderResponse(
+                        ok=False,
+                        error="the values do not fit values.schema.json: " + "; ".join(problems),
+                    )
             files = render_templates(req.templates, tree)
         except (TemplateRenderError, helm_values.ValuesError) as exc:
             return ChartRenderResponse(ok=False, error=str(exc))

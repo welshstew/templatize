@@ -37,11 +37,12 @@ async def _call(client: Client, name: str, args: dict[str, Any]) -> Any:
     return res
 
 
-def test_lists_six_read_only_tools() -> None:
+def test_lists_seven_read_only_tools() -> None:
     async def main() -> None:
         async with Client(create_server()) as c:
             listed = (await c.list_tools()).tools
             assert sorted(t.name for t in listed) == [
+                "check_document",
                 "generate_ansible_role",
                 "generate_helm_chart",
                 "generate_template",
@@ -189,7 +190,7 @@ def test_stdio_transport() -> None:
 
     async def main() -> None:
         async with Client(params) as c:
-            assert len((await c.list_tools()).tools) == 6
+            assert len((await c.list_tools()).tools) == 7
             gen = await c.call_tool(
                 "generate_template",
                 {"text": TEXT, "variables": [{"name": "port", "value": "5432"}]},
@@ -232,7 +233,7 @@ def test_streamable_http_on_api_app(http_server: str) -> None:
 
     async def main() -> None:
         async with Client(f"{http_server}/mcp") as c:
-            assert len((await c.list_tools()).tools) == 6
+            assert len((await c.list_tools()).tools) == 7
             gen = await c.call_tool(
                 "generate_template",
                 {"text": TEXT, "variables": [{"name": "db_host", "value": "db01.example.com"}]},
@@ -363,5 +364,33 @@ def test_render_template_checks_the_schema() -> None:
             assert not res.is_error and out["ok"]
             assert not out["schema_check"]["ok"]
             assert out["schema_check"]["problems"][0]["path"] == "spec.ports.0.port"
+
+    run(main)
+
+
+def test_check_document() -> None:
+    async def main() -> None:
+        async with Client(create_server()) as c:
+            workflow = "on: push\njobs:\n  build:\n    steps:\n      - run: make\n"
+            res = await c.call_tool(
+                "check_document", {"text": workflow, "document_type": "github-actions"}
+            )
+            out = res.structured_content
+            assert not res.is_error and out["checked"] and out["ok"] is False
+            assert out["schemas"] == ["GitHub Actions workflow"]
+            assert "'runs-on' is a required property" in out["problems"][0]["message"]
+            res = await c.call_tool(
+                "check_document",
+                {
+                    "text": '{"port": "x"}',
+                    "json_schema": {"properties": {"port": {"type": "integer"}}},
+                },
+            )
+            assert res.structured_content["problems"][0]["path"] == "port"
+            res = await c.call_tool("check_document", {"text": "Dear Sam,\n"})
+            assert res.structured_content["checked"] is False
+            assert res.structured_content["ok"] is None
+            res = await c.call_tool("check_document", {"text": "a: 1\n", "json_schema": "[1]"})
+            assert res.is_error
 
     run(main)

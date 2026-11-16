@@ -324,6 +324,7 @@ pre.code {
 .role-template .file-dot { background: var(--tok-action); }
 .role-values .file-dot { background: var(--tok-key); }
 .role-overlay .file-dot { background: var(--src-diff); }
+.role-schema .file-dot { background: var(--tok-num, var(--tok-key)); }
 .role-chart .file-dot { background: var(--tok-num); }
 .role-rendered .file-dot { background: var(--tok-str); border-radius: 50%; }
 .tree-row.from-scaffold .fname { color: var(--muted); }

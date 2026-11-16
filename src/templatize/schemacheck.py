@@ -52,18 +52,53 @@ class _Yaml12Loader(yaml.SafeLoader):
     pass
 
 
-# YAML 1.2 core schema: drop the 1.1 boolean words (on/off/yes/no) and timestamps.
+# YAML 1.2 core schema. YAML 1.1's rules are dropped: the boolean words (on/off/yes/no),
+# timestamps, and the 1.1 numbers: base 60 (``12:30``, whose conversion is quadratic in
+# its length), ``0755`` as octal, ``1_000``.
+_REPLACED = (
+    "tag:yaml.org,2002:bool",
+    "tag:yaml.org,2002:timestamp",
+    "tag:yaml.org,2002:int",
+    "tag:yaml.org,2002:float",
+)
 _Yaml12Loader.yaml_implicit_resolvers = {
-    ch: [
-        (tag, rx)
-        for tag, rx in resolvers
-        if tag not in ("tag:yaml.org,2002:bool", "tag:yaml.org,2002:timestamp")
-    ]
+    ch: [(tag, rx) for tag, rx in resolvers if tag not in _REPLACED]
     for ch, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
 }
 _Yaml12Loader.add_implicit_resolver(  # type: ignore[no-untyped-call]
     "tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
 )
+_Yaml12Loader.add_implicit_resolver(  # type: ignore[no-untyped-call]
+    "tag:yaml.org,2002:int",
+    re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$"),
+    list("-+0123456789"),
+)
+_Yaml12Loader.add_implicit_resolver(  # type: ignore[no-untyped-call]
+    "tag:yaml.org,2002:float",
+    re.compile(
+        r"^(?:[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?"
+        r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"
+    ),
+    list("-+0123456789."),
+)
+
+
+def _int(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> int:
+    value = str(loader.construct_scalar(node))
+    if value.startswith(("0o", "0x")):
+        return int(value, 0)
+    return int(value, 10)  # "0755" is 755 in YAML 1.2
+
+
+def _float(loader: yaml.SafeLoader, node: yaml.ScalarNode) -> float:
+    value = str(loader.construct_scalar(node)).lower()
+    if value.endswith("nan"):
+        return float("nan")
+    return float(value.replace(".inf", "inf"))
+
+
+_Yaml12Loader.add_constructor("tag:yaml.org,2002:int", _int)
+_Yaml12Loader.add_constructor("tag:yaml.org,2002:float", _float)
 
 
 def _documents(text: str) -> list[Any]:
@@ -96,6 +131,15 @@ def _plan(
         return out
     entry = catalog.for_type(doc_type.id)
     return [(entry.title, catalog.load(entry.id), all_docs)] if entry else []
+
+
+def _message(e: Any) -> str:
+    """The error's message; a type list loses ``null`` (Kubernetes schemas allow it on
+    every field, which reads as noise: "is not of type 'integer', 'null'")."""
+    if e.validator == "type" and isinstance(e.validator_value, list):
+        types = [t for t in e.validator_value if t != "null"] or e.validator_value
+        return f"{e.instance!r} is not of type " + ", ".join(repr(t) for t in types)
+    return str(e.message)
 
 
 def check_output(
@@ -155,8 +199,37 @@ def check_output(
                 # the closest alternative's actual problem instead.
                 e = best_match(e.context) if e.context else e
                 path = ".".join(str(p) for p in e.absolute_path) or "(document)"
-                problems.append(SchemaProblem(document=i, path=path, message=e.message[:300]))
+                problems.append(SchemaProblem(document=i, path=path, message=_message(e)[:300]))
     if len(problems) > MAX_PROBLEMS:
         note = f"{len(problems)} problems; the first {MAX_PROBLEMS} are shown"
         problems = problems[:MAX_PROBLEMS]
     return SchemaCheck(ok=not problems, schemas=titles, problems=problems, note=note)
+
+
+class DocumentCheck(BaseModel):
+    """A document checked on its own (the MCP ``check_document`` tool, ``POST /check``)."""
+
+    checked: bool
+    """Whether a schema applied. When false, nothing was checked (see ``note``)."""
+    ok: bool | None = None
+    """Valid against every schema applied; ``None`` when nothing was checked."""
+    schemas: list[str] = []
+    problems: list[SchemaProblem] = []
+    note: str | None = None
+
+
+def check_document(
+    text: str, *, schema: str | None = None, document_type: str | None = None
+) -> DocumentCheck:
+    """:func:`check_output`, saying so when no schema applies."""
+    result = check_output(text, schema=schema, document_type=document_type)
+    if result is None:
+        return DocumentCheck(
+            checked=False,
+            note=(
+                "no schema applies: pass the schema, or the document type if it is one "
+                "with a bundled schema (Kubernetes, Compose, GitHub Actions, GitLab CI, "
+                "cloud-init, Helm Chart.yaml, Prometheus, Dependabot, package.json)"
+            ),
+        )
+    return DocumentCheck(checked=True, **result.model_dump())

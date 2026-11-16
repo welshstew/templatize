@@ -369,6 +369,22 @@ def make_parser() -> argparse.ArgumentParser:
     r.add_argument("--zip", type=Path, help="write the role as a zip")
     r.add_argument("--json", action="store_true", help="print the full result as JSON")
     r.set_defaults(func=cmd_role)
+
+    k = sub.add_parser(
+        "check",
+        help="check a rendered document against its JSON Schema",
+        description=(
+            "Check a document against the schema it should follow: --schema, else the "
+            "bundled schema its $schema names, else the bundled schema of its type "
+            "(Kubernetes per resource kind, Compose, GitHub Actions, cloud-init, ...). "
+            "Offline. Exit status: 0 valid, 2 problems, 3 no schema applies."
+        ),
+    )
+    k.add_argument("file", help="the document ('-' for stdin)")
+    k.add_argument("--type", dest="document_type", metavar="ID", help=TYPE_HELP)
+    k.add_argument("--schema", metavar="FILE", help="a JSON Schema (JSON or YAML) to check against")
+    k.add_argument("--json", action="store_true", help="print the result as JSON")
+    k.set_defaults(func=cmd_check)
     return p
 
 
@@ -423,6 +439,46 @@ def cmd_role(args: argparse.Namespace) -> int:
         verdict = "PASS" if rt.ok else f"FAIL: {rt.error}"
         print(f"round-trip ({label}): {verdict}", file=sys.stderr)
     return 0 if all(rt.ok for _, rt in checks) else 1
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Check a (rendered) document against its JSON Schema: 0 valid, 2 problems,
+    3 no schema applies."""
+    from templatize.schemacheck import check_output
+
+    text = _read(args.file)
+    result = check_output(
+        text,
+        schema=_read(args.schema) if args.schema else None,
+        document_type=args.document_type,
+    )
+    if args.json:
+        print(result.model_dump_json(indent=2) if result else "null")
+    if result is None:
+        if not args.json:
+            print(
+                "no schema applies: give one with --schema, or the document type with --type",
+                file=sys.stderr,
+            )
+        return 3
+    if not args.json:
+        multi = any(p.document for p in result.problems)
+        for prob in result.problems:
+            where = f"document {prob.document + 1}: " if multi else ""
+            print(f"{args.file}: {where}{prob.path}: {prob.message}")
+        against = ", ".join(result.schemas) or "its schema"
+        if result.note:
+            print(f"note: {result.note}", file=sys.stderr)
+        verdict = (
+            f"valid against {against}"
+            if result.ok
+            else f"{len(result.problems)} problem{'s' if len(result.problems) != 1 else ''} "
+            f"against {against}"
+            if result.problems
+            else "not checked"
+        )
+        print(f"schema check: {verdict}", file=sys.stderr)
+    return 0 if result.ok else 2
 
 
 def main(argv: Sequence[str] | None = None) -> int:

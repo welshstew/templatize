@@ -363,3 +363,26 @@ def test_render_checks_the_output_against_its_schema(client: TestClient) -> None
     bad = client.post("/render", json={**body, "values": {"port": "eighty"}}).json()
     assert bad["ok"] and not bad["schema_check"]["ok"]
     assert bad["schema_check"]["problems"][0]["path"] == "spec.ports.0.port"
+
+
+def test_check_a_document_against_its_schema(client: TestClient) -> None:
+    service = (
+        "apiVersion: v1\nkind: Service\nmetadata:\n  name: web\nspec:\n  ports:\n    - port: 80\n"
+    )
+    r = client.post("/check", json={"text": service})
+    assert r.status_code == 200
+    assert r.json() == {
+        "checked": True,
+        "ok": True,
+        "schemas": ["Kubernetes Service (v1)"],
+        "problems": [],
+        "note": None,
+    }
+    bad = client.post("/check", json={"text": service.replace("80", "eighty")}).json()
+    assert bad["ok"] is False and bad["problems"][0]["path"] == "spec.ports.0.port"
+    mine = client.post("/check", json={"text": "a: 1\n", "schema": '{"required": ["b"]}'}).json()
+    assert mine["ok"] is False and "'b' is a required property" in mine["problems"][0]["message"]
+    none = client.post("/check", json={"text": "Dear Sam,\n"}).json()
+    assert none["checked"] is False and none["ok"] is None and "no schema applies" in none["note"]
+    assert client.post("/check", json={"text": "a: 1\n", "schema": "[1]"}).status_code == 422
+    assert client.post("/check", json={"text": "a", "document_type": "nope"}).status_code == 422

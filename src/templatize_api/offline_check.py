@@ -264,6 +264,7 @@ def check_mcp(base: str, fixture: Path) -> str | None:
             "generate_ansible_role",
             "render_template",
             "validate_template",
+            "check_document",
         }
         if listed != expected:
             return f"unexpected tools {sorted(listed)}"
