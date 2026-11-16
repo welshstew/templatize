@@ -1,0 +1,13 @@
+Dear Dr Ananya Rao,
+
+On behalf of the programme committee, I am delighted to invite you to speak at DataOps Summit Lisbon 2027, held at the Centro de Congressos de Lisboa on 18–19 March 2027.
+
+We would love you to give a 40-minute talk on your work on streaming data quality. Your slot is provisionally 11:20 on 18 March, in the Atlantic Hall.
+
+We will cover economy return travel from Bangalore and three nights at the Hotel Miradouro. Please submit your talk title and abstract via https://cfp.dataopssummit.example.org/speakers/2391 by 15 December 2026.
+
+With best wishes,
+
+Carlos Mendes
+Programme Chair, DataOps Summit
+carlos.mendes@dataopssummit.example.org

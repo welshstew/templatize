@@ -10,7 +10,7 @@ OFFLINE = $(COMPOSE) -p templatize-offline -f compose.yaml -f compose.offline.ya
 PLATFORMS ?= linux/amd64,linux/arm64
 
 PHONY_EXTRA = e2e e2e-ci corpus-report schemas schemas-update samples frontend frontend-dev frontend-test check-all up-llm up-llm-gpu up-llm-gpu-large model model-large llm-image offline-test-llm ner-image ner-model up-ner
-.PHONY: $(PHONY_EXTRA) install test lint format typecheck check image check-image image-multiarch offline-test offline-test-cli up down serve clean
+.PHONY: $(PHONY_EXTRA) install test lint format typecheck check eval image check-image image-multiarch offline-test offline-test-cli up down serve clean
 
 install:
 	uv sync --all-extras
@@ -47,6 +47,10 @@ schemas-update:
 # Detection quality on tests/quality/corpus: what is missed and what is noise.
 corpus-report:
 	uv run python scripts/corpus-report.py
+
+# Found / missed / noise on samples, corpus and the holdout set. Optional: NER=URL, LLM=URL.
+eval:
+	uv run python scripts/eval-detectors.py $(if $(NER),--ner $(NER)) $(if $(LLM),--llm $(LLM)) $(EVAL_ARGS)
 
 # Refresh tests/quality/samples.json from the editor's samples (frontend/src/sample.ts).
 samples:

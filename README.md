@@ -367,14 +367,18 @@ parameters are the useful parts.
 documents (882 labelled values) and 12 unseen documents, 5 prose and 7 formats without
 rules (107 labelled values).
 
-| Setup | Samples and corpus found | Unseen found | Unseen: rejected values suggested | Cost per document |
-|---|---|---|---|---|
-| Detectors only | 882 | 71 | 8 | milliseconds |
-| + GLiNER | 882 | 78 | 8 | about 1 ms, about 1 GB of RAM |
-| + 4B | 882 | 84 | 8 | 40–110 s on CPU, about 3 s on a GPU |
-| + GLiNER + 4B | 882 | 85 | 8 | as above |
-| + 30B | 882 | 87 | 13 | about 2 s on a GPU, about 20 GB of VRAM |
-| + GLiNER + 30B | 882 | 88 | 13 | as above |
+| Setup | Samples and corpus found | Samples and corpus: rejected values suggested | Unseen found | Unseen: rejected values suggested | Cost per document |
+|---|---|---|---|---|---|
+| Detectors only | 882 | 0 | 71 | 8 | milliseconds |
+| + GLiNER | 882 | 5 | 78 | 8 | about 1 ms, about 1 GB of RAM |
+| + 4B | 882 | 4 | 84 | 8 | 40–110 s on CPU, about 3 s on a GPU |
+| + GLiNER + 4B | 882 | 9 | 85 | 8 | as above |
+| + 30B | 882 | 3 | 87 | 13 | about 2 s on a GPU, about 20 GB of VRAM |
+| + GLiNER + 30B | 882 | 8 | 88 | 13 | as above |
+
+`make eval` reproduces the detector rows; add `NER=http://127.0.0.1:8081` and
+`LLM=http://127.0.0.1:8080` for the others (see [Holdout set](#holdout-set)). GLiNER's
+five are `Manager`, `Team`, `Owner`, `localhost` and `Google` in prose corpus documents.
 
 - **The detectors already find every labelled value in the samples and corpus.**
   Neither model adds one there; the 30B's contribution on those documents is naming.
@@ -868,6 +872,16 @@ written against (configs, CI files, IaC, emails, letters, logs), with expectatio
 with every suggestion accepted, and for a round trip with a generated example in which
 every suggested value changes. `make corpus-report` lists what is missed and what is
 noise.
+
+<a id="holdout-set"></a>**Holdout set.** `tests/quality/holdout/` holds 12 documents (5 prose, 7 formats
+without schema rules) labelled in `holdout.yaml` before any detector ran on them. pytest
+only checks that each one is labelled, not what is found: they measure how the
+detectors do on documents nobody tuned them for, and stay a fair measure only while
+no rule is written to pass them. When a rule is added for one of these formats, add
+fresh documents rather than tuning against these. `make eval` scores the samples,
+corpus and holdout set; `make eval NER=URL LLM=URL` adds GLiNER and an LLM review,
+and `EVAL_ARGS="--json out.json"` writes each document's misses, noise and the LLM's
+additions and renames.
 
 **UI end-to-end tests.** `make e2e` (against a running app, e.g. `make up`) drives the UI
 in Chrome with Playwright: every sample and corpus document is analyzed, every

@@ -82,3 +82,11 @@ def test_corpus_with_an_example(name: str) -> None:
     role = build_role(text, specs, loops, filename="out", variants=[example])
     assert role.roundtrip.ok
     assert role.example_roundtrips[0].ok, role.example_roundtrips[0]
+
+
+def test_every_holdout_document_is_labelled() -> None:
+    # The holdout set is scored by scripts/eval-detectors.py, not asserted here.
+    labels = yaml.safe_load((HERE / "holdout.yaml").read_text(encoding="utf-8"))
+    assert sorted(p.name for p in (HERE / "holdout").iterdir()) == sorted(labels)
+    for name, exp in labels.items():
+        assert exp.get("want"), name

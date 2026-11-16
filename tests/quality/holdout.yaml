@@ -1,0 +1,38 @@
+# Written before running any detector on these documents.
+# want: values a template author would make variables. reject: never variables.
+tenancy_renewal.txt:
+  want: ["4 November 2026", "Tomasz Nowicki", "Flat 3, 18 Clifton Grove, York YO30 6AF", "31 December 2026", "Eleanor Price", "12", "1 January 2027", "1,045.00", "35.00", "1,200.00", "DPS-7781204", "20 November 2026", "lettings@hartwell.example.co.uk", "Gemma Riley", "01904 555 218"]
+  reject: [Dear, tenancy, Yours sincerely, Re]
+po_email.txt:
+  want: ["4500182736", "Marcus", "Brightline Optics BV", "12 January 2027", "40", "15", "86.50", "4.20", "3,523.00", "45", "ap@fenwick-instruments.example.com", "Joanna Bell", "LX-220", "LX-220-C"]
+  reject: [Subject, Items, Supplier, Thanks]
+speaker_invite.txt:
+  want: ["Ananya Rao", "DataOps Summit Lisbon 2027", "Centro de Congressos de Lisboa", "18–19 March 2027", "40", "11:20", "Atlantic Hall", "Bangalore", "Hotel Miradouro", "https://cfp.dataopssummit.example.org/speakers/2391", "15 December 2026", "Carlos Mendes", "carlos.mendes@dataopssummit.example.org"]
+  reject: [Dear, With best wishes, programme committee]
+refund_reply.txt:
+  want: ["Okonkwo", "NF-2026-118342", "Trailmaster 45L backpack", "129.99", "4417", "5", "15%", "SORRY15-KQ8", "0093321", "Daniel Fitzgerald"]
+  reject: [Hello, Kind regards, Visa]
+press_release.md:
+  want: ["Kestrel Robotics", "Eindhoven", "9 February 2027", "Science Park 14", "6,800", "220", "K-7", "Sofia van Dijk", "Chief Operating Officer", "48 million", "April 2027", "Pieter Janssen", "press@kestrel-robotics.example.com", "+31 40 555 0172"]
+  reject: ["Media contact"]
+wg0.conf:
+  want: ["10.66.0.1/24", "51820", "yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=", "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=", "10.66.0.2/32", "TrMvSoP4jYQlY6RIzBgbssQqY3vxI2Pi+y71lOWWXX0=", "gw.office.example.net:51820", "eth0"]
+  reject: [Interface, Peer, ACCEPT, MASQUERADE, FORWARD, POSTROUTING]
+main.cf:
+  want: [mx1.mail.example.com, example.com, "10.20.0.0/16", "[smtp-relay.example.net]:587", "52428800"]
+  reject: [all, may, "$mydomain", localhost]
+logrotate_app:
+  want: ["/var/log/ledgerd/*.log", "14", ledgerd]
+  reject: [daily, compress, delaycompress, missingok, notifempty, postrotate, endscript]
+Vagrantfile:
+  want: [bento/ubuntu-24.04, build-agent-01, "192.168.56.21", "8080", "18080", "4096", "2"]
+  reject: [virtualbox, private_network, forwarded_port, shell]
+connector.json:
+  want: [orders-postgres-source, orders-db.internal.example.com, "5432", debezium, "d3bz-Secret!", orders, "public.orders,public.order_items"]
+  reject: [io.debezium.connector.postgresql.PostgresConnector, pgoutput]
+rsyslog_forward.conf:
+  want: [logs.central.example.org, "6514", "50000"]
+  reject: [omfwd, tcp, gtls, LinkedList, "x509/name"]
+pgbouncer.ini:
+  want: [billing, pg-billing.internal.example.com, "5432", "6432", /etc/pgbouncer/userlist.txt, "800", "40", pgb_admin]
+  reject: [scram-sha-256, transaction]

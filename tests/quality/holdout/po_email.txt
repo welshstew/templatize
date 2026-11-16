@@ -1,0 +1,22 @@
+Subject: Purchase order 4500182736 – Brightline Optics
+
+Hi Marcus,
+
+Please find below our purchase order for the next delivery.
+
+Supplier: Brightline Optics BV
+Delivery address: Fenwick Instruments, Dock 4, 9 Wharf Lane, Gateshead NE8 2BE
+Requested delivery date: 12 January 2027
+
+Items:
+- 40 x LX-220 lens assembly at EUR 86.50 each
+- 15 x LX-220-C protective cap at EUR 4.20 each
+
+Order total: EUR 3,523.00
+Payment terms: 45 days net
+
+Please confirm receipt and the expected dispatch date. Invoices should quote PO 4500182736 and be sent to ap@fenwick-instruments.example.com.
+
+Thanks,
+Joanna Bell
+Procurement, Fenwick Instruments

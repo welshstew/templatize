@@ -1,0 +1,15 @@
+{
+  "name": "orders-postgres-source",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "orders-db.internal.example.com",
+    "database.port": "5432",
+    "database.user": "debezium",
+    "database.password": "d3bz-Secret!",
+    "database.dbname": "orders",
+    "topic.prefix": "orders",
+    "table.include.list": "public.orders,public.order_items",
+    "plugin.name": "pgoutput"
+  }
+}
