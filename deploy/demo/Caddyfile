@@ -1,0 +1,18 @@
+# Site block for the Caddyfile of the Caddy container on PROXY_NETWORK. It reuses the
+# (security) and (access_log) snippets of Lockstep's Caddyfile; without them, use the
+# header block below on its own. Caddy gets the certificate once DNS points at the host.
+# Reload: docker exec <caddy container> caddy reload --config /etc/caddy/Caddyfile
+
+templatize.getlockstep.cloud {
+	import security
+	import access_log
+	encode zstd gzip
+	header {
+		# The app sets its own Content-Security-Policy. The site links here; keep the app out of search results.
+		X-Robots-Tag "noindex, nofollow"
+	}
+	request_body {
+		max_size 4MB
+	}
+	reverse_proxy templatize-app:8000
+}

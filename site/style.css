@@ -72,6 +72,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
 .lede { font-size: 18px; color: var(--muted); margin: 0 0 24px; }
 .lede strong { color: var(--text); }
 .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+.demo-note { font-size: 14px; color: var(--muted); margin: 16px 0 0; max-width: 60ch; }
 .button {
   display: inline-block; padding: 10px 18px; border-radius: 8px; font-weight: 600; text-decoration: none;
   border: 1px solid var(--border); color: var(--text); background: var(--panel);

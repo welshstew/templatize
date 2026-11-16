@@ -17,6 +17,10 @@ extracted values must reproduce the input **byte for byte**.
 
 Everything runs offline. No external services, API keys, telemetry or update checks.
 
+**Try it:** <https://templatize.getlockstep.cloud/>, a public demo with the detectors
+and GLiNER, without the LLM. It keeps nothing you paste, but don't paste secrets into
+a public server; run it locally for those.
+
 > Status: all milestones complete: core library, CLI, web API, web UI, MCP server, and
 > optional NER (GLiNER) and LLM (llama.cpp) detectors.
 
@@ -605,6 +609,19 @@ How it behaves:
   bucket state.
 - `X-Forwarded-For` is ignored unless the direct peer is a trusted proxy, so clients
   can't spoof their way around a limit.
+
+**The public demo** is `deploy/demo/`: the app and GLiNER, no LLM, `/mcp` off, no host
+ports, memory and CPU capped (about 1 GB of RAM in use). The app joins the network of a
+Caddy container already on the host:
+
+```sh
+cd deploy/demo
+cp .env.example .env          # PROXY_NETWORK, TRUSTED_PROXIES (that network's subnet)
+docker compose up -d --build
+```
+
+then add the site block in `deploy/demo/Caddyfile` to Caddy's config and reload it.
+To update: `git pull && docker compose up -d --build`.
 
 ### MCP server
 
