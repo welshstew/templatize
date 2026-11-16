@@ -1,0 +1,12 @@
+myhostname = mx1.mail.example.com
+mydomain = example.com
+myorigin = $mydomain
+inet_interfaces = all
+inet_protocols = ipv4
+mydestination = $myhostname, localhost.$mydomain, localhost
+mynetworks = 127.0.0.0/8, 10.20.0.0/16
+relayhost = [smtp-relay.example.net]:587
+smtpd_tls_cert_file = /etc/letsencrypt/live/mx1.mail.example.com/fullchain.pem
+smtpd_tls_key_file = /etc/letsencrypt/live/mx1.mail.example.com/privkey.pem
+smtpd_tls_security_level = may
+message_size_limit = 52428800
