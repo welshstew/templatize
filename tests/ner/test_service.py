@@ -35,6 +35,10 @@ needs_model = pytest.mark.skipif(
     not (MODEL_DIR / "model.onnx").exists(), reason="GLiNER model not downloaded"
 )
 LETTER = read_fixture(FIXTURES / "business_letter.txt")
+PRESS = (
+    "Kestrel Robotics today opened its plant at Science Park 14 in Eindhoven.\n\n"
+    '"We are delighted," said Sofia van Dijk, Chief Operating Officer.\n'
+)
 
 
 @pytest.fixture(scope="module")
@@ -89,15 +93,21 @@ def test_detector_and_api_integration(ner_url: str) -> None:
 
     client = TestClient(create_app(Settings(ner_url=ner_url)))
     assert client.get("/info").json()["optional_detectors"]["ner"] is True
-    cands = client.post("/suggest", json={"text": LETTER}).json()["candidates"]
+    # The heuristics already find the letter's people: NER only fills gaps, so it
+    # adds nothing there and changes nothing.
+    with_ner = client.post("/suggest", json={"text": LETTER}).json()["candidates"]
+    without = TestClient(create_app(Settings(ner_url=None)))
+    assert with_ner == without.post("/suggest", json={"text": LETTER}).json()["candidates"]
+    # In prose the heuristics miss, it adds the people, places and titles.
+    cands = client.post("/suggest", json={"text": PRESS}).json()["candidates"]
     by_value = {c["value"]: c for c in cands}
-    assert "ner" in by_value["Ravi Patel"]["sources"]
-    assert "Samuel Okafor" in by_value
+    for value in ("Sofia van Dijk", "Chief Operating Officer", "Science Park 14"):
+        assert by_value[value]["sources"] == ["ner"]
     # Merged with heuristics and still a valid, round-tripping build
     from templatize.suggest import SuggestResult
 
     parsed = SuggestResult.model_validate({"candidates": cands, "notices": []})
-    assert build(LETTER, specs_from_candidates(parsed.candidates)).roundtrip.ok
+    assert build(PRESS, specs_from_candidates(parsed.candidates)).roundtrip.ok
 
 
 def test_api_without_ner_is_unchanged() -> None:

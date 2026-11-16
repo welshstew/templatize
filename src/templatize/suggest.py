@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from templatize.compose import compose_profile
 from templatize.detectors import DetectionContext, Detector, default_detectors
 from templatize.detectors.k8s import split_spans
+from templatize.detectors.ner import fill_gaps_only
 from templatize.doctypes import DocumentType, detect_type
 from templatize.ir import (
     MAX_INPUT_CHARS,
@@ -170,7 +171,7 @@ def suggest(
                 "it is not downloaded (offline). Supply its text to use it."
             ],
         )
-    candidates, composed = compose_candidates(text, merge_candidates(raw))
+    candidates, composed = compose_candidates(text, merge_candidates(fill_gaps_only(raw)))
     notices.extend(composed)
     loops = detect_loops(text, variants, taken_names=[c.name for c in candidates])
     if regions := structure_regions(text, doc_type):
