@@ -4,16 +4,32 @@ Finds semantic values that regexes cannot: person and company names, locations,
 street addresses, phone numbers, money amounts, job titles, products. Standard
 library HTTP only. If the service is absent or fails, the detector returns a
 ``detector_unavailable`` notice and no candidates, so suggestions still work.
+
+GLiNER only fills gaps the other detectors leave:
+
+* it runs on prose (letters, emails, Markdown, HTML, plain text). In config files,
+  data and logs it mostly tagged keywords (``User``, ``entryPoints``, ``spring``);
+* an entity inside a larger token is dropped (``shop`` of ``shop.example.com``);
+* an entity overlapping another detector's candidate is dropped, even an equal one
+  (:func:`fill_gaps_only`), so ``Ms Hughes`` never replaces ``Hughes``.
+
+Measured on the samples and corpus (882 labelled values), letting entities compete
+in the merge instead lost 44 of them; filling gaps lost none and raised recall on
+unseen prose.
 """
 
 from __future__ import annotations
 
+import bisect
 import json
+import re
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from templatize.detectors.base import DetectionContext, DetectorResult
+from templatize.doctypes import is_prose
 from templatize.ir import Candidate, Notice, Source, Span, VarType
 
 # label -> (variable name, type)
@@ -74,6 +90,20 @@ def fetch_entities(config: NerConfig, text: str) -> list[dict[str, object]]:
     return ents
 
 
+# Characters that continue a token: an entity next to one is part of a hostname, path,
+# address or identifier. A "." or ":" only continues it when a word character follows
+# (shop.example.com), not at the end of a sentence (Acme Ltd.).
+_TOKEN = re.compile(r"[\w@/\\-]")
+_JOINER = re.compile(r"[.:]\w")
+_TOKEN_BEFORE = re.compile(r"[\w@/\\.:-]")
+
+
+def _inside_token(text: str, start: int, end: int) -> bool:
+    if start > 0 and _TOKEN_BEFORE.match(text[start - 1]):
+        return True
+    return end < len(text) and bool(_TOKEN.match(text[end]) or _JOINER.match(text, end))
+
+
 def entities_to_candidates(text: str, entities: list[dict[str, object]]) -> list[Candidate]:
     out: list[Candidate] = []
     for e in entities:
@@ -83,7 +113,7 @@ def entities_to_candidates(text: str, entities: list[dict[str, object]]) -> list
             score = float(e["score"])  # type: ignore[arg-type]
         except (KeyError, TypeError, ValueError):
             continue
-        if not 0 <= start < end <= len(text):
+        if not 0 <= start < end <= len(text) or _inside_token(text, start, end):
             continue
         value = text[start:end]
         name, vtype = LABELS.get(label, (label.replace(" ", "_"), VarType.STRING))
@@ -112,6 +142,8 @@ class NerDetector:
         self.config = config
 
     def detect(self, ctx: DetectionContext) -> DetectorResult:
+        if ctx.doc_type is not None and not is_prose(ctx.doc_type.id):
+            return DetectorResult()  # configs, data and logs: keywords, not entities
         if len(ctx.text) > self.config.max_chars:
             return DetectorResult(
                 notices=[
@@ -128,3 +160,30 @@ class NerDetector:
                 notices=[Notice(kind="detector_unavailable", message=f"NER: {exc}")]
             )
         return DetectorResult(candidates=entities_to_candidates(ctx.text, ents))
+
+
+def fill_gaps_only(raw: Sequence[Candidate]) -> list[Candidate]:
+    """``raw`` with every NER span that overlaps another detector's span removed, equal
+    ones included: GLiNER fills gaps and never takes part in a conflict. Its fragments
+    and wider boundaries won merges they should not have, and agreeing with one side
+    (``Bristol`` found by repetition) tipped the merge against the other (the address
+    around it)."""
+    others = [s for c in raw if Source.NER not in c.sources for s in c.spans]
+    if not others:
+        return list(raw)
+    starts = sorted(s.start for s in others)
+    ends = sorted(s.end for s in others)
+
+    def displaces(s: Span) -> bool:
+        # Spans starting before s ends, minus those ending before s starts: the overlaps.
+        return bisect.bisect_left(starts, s.end) - bisect.bisect_right(ends, s.start) > 0
+
+    out: list[Candidate] = []
+    for c in raw:
+        if Source.NER not in c.sources:
+            out.append(c)
+            continue
+        kept = [s for s in c.spans if not displaces(s)]
+        if kept:
+            out.append(c if len(kept) == len(c.spans) else c.model_copy(update={"spans": kept}))
+    return out

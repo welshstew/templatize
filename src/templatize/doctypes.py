@@ -459,6 +459,15 @@ def known_types() -> list[TypeScore]:
     return [TypeScore(id=t.id, label=t.label, confidence=0.0) for t in TYPES]
 
 
+PROSE_CATEGORY = "Documents & messages"
+
+
+def is_prose(type_id: str) -> bool:
+    """Letters, emails, Markdown, HTML and plain text (not configs, data or logs)."""
+    t = _BY_ID.get(type_id)
+    return t is not None and t.category == PROSE_CATEGORY
+
+
 def type_label(type_id: str) -> str:
     try:
         return _BY_ID[type_id].label

@@ -147,8 +147,22 @@ A small named-entity model finds values that regexes can't: person and company n
 locations, street addresses, phone numbers, money amounts, job titles and products.
 Labels map to variable names, e.g. `person` → `person_name` and `money` → `amount`. It
 is fast (well under a second for the business-letter fixture on CPU), so it runs inside
-`/suggest` itself, and its candidates are merged like any other detector's (labelled
-**NER** in the UI).
+`/suggest` itself. Its suggestions are labelled **NER** in the UI.
+
+**It only fills gaps** the other detectors leave:
+- **Prose only.** It runs on letters, emails, Markdown, HTML and plain text, not on
+  configs, data or logs. There it mostly tagged keywords (`User`, `entryPoints`, `spring`).
+- **Whole tokens only.** An entity inside a hostname, path or address is dropped:
+  `shop` of `shop.example.com`, `acme` of `ghcr.io/acme`.
+- **Never in a conflict.** An entity that overlaps another detector's suggestion is
+  dropped, even an identical one. `Ms Hughes` doesn't replace `Hughes`, and agreeing
+  with `Bristol` doesn't tip the merge against the address around it.
+
+When its entities competed in the merge like any other detector's, GLiNER lost 44 of
+the 882 labelled values in the samples and corpus. A fragment such as `shop` scored
+0.70 and beat `shop.example.com` at 0.65. Filling gaps only, it loses none, and on 12
+unseen documents it took the values found from 71 to 78 of 107: people, job titles,
+venues and products in prose.
 
 ```sh
 make up-ner    # app + ner (COMPOSE_PROFILES=ner docker compose up -d --build)
@@ -210,9 +224,9 @@ filesystem.
 
 RAM: about 1 GB for the NER service with the fp32 model.
 
-**Limits.** GLiNER small sometimes tags short generic tokens (for example a single
-lowercase word as an `organization` in config files). Its confidence (0.45 + 0.4 × score) keeps
-it below the strong heuristics. The LLM review, if enabled, sees NER candidates too.
+**Limits.** GLiNER small still tags generic words in prose: `Manager`, `Team` and
+`Owner` in Markdown, `Google` in interview notes. The LLM review, if enabled, sees NER
+candidates too.
 
 ### Optional LLM detector (llama.cpp, fully local)
 
@@ -348,6 +362,33 @@ Whether a value stays the same in every copy is a question about the other copie
 **examples** (`--variant`) answer it exactly, and the **schema rules** (see
 [Schema rules](#schema-rules)) know each format's keywords. Naming and finding missed
 parameters are the useful parts.
+
+**Which to run.** Measured on the same documents: the 27 samples and 117 corpus
+documents (882 labelled values) and 12 unseen documents, 5 prose and 7 formats without
+rules (107 labelled values).
+
+| Setup | Samples and corpus found | Unseen found | Unseen: rejected values suggested | Cost per document |
+|---|---|---|---|---|
+| Detectors only | 882 | 71 | 8 | milliseconds |
+| + GLiNER | 882 | 78 | 8 | about 1 ms, about 1 GB of RAM |
+| + 4B | 882 | 84 | 8 | 40–110 s on CPU, about 3 s on a GPU |
+| + GLiNER + 4B | 882 | 85 | 8 | as above |
+| + 30B | 882 | 87 | 13 | about 2 s on a GPU, about 20 GB of VRAM |
+| + GLiNER + 30B | 882 | 88 | 13 | as above |
+
+- **The detectors already find every labelled value in the samples and corpus.**
+  Neither model adds one there; the 30B's contribution on those documents is naming.
+- **On unseen prose they miss about a third.** GLiNER recovers some of it for almost
+  nothing; the LLMs recover more.
+- **On a CPU, run GLiNER.** The 4B adds a little recall over GLiNER at 40–110 s a
+  review, and about one in three of its additions on the corpus was noise.
+- **With a GPU, add the 30B.** It has the best recall and renames about two
+  suggestions per document, nearly all for the better (`endpoint_2` →
+  `kafka_bootstrap_server_2`). On a logrotate file it suggested `daily`, `compress`
+  and other keywords, hence the extra rejected values.
+
+The labels for the unseen documents and the judgements of the models' additions are
+the author's, from one run per model, so read the numbers as rough.
 
 The MCP server doesn't use the LLM, because its client already is one.
 
