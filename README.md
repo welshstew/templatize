@@ -220,8 +220,7 @@ A local model reviews the heuristic suggestions. It runs on CPU by default, or o
 with an override file. In the brief's priority order, it:
 1. gives candidates descriptive names (`ip_address` → `backend_ip_1`, `date_2` →
    `letter_date`);
-2. classifies each candidate as a variable or as fixed text;
-3. finds parameters the heuristics miss: person and company names, order numbers,
+2. finds parameters the heuristics miss: person and company names, order numbers,
    amounts, quantities (`PO-55821` → `order_reference_number`,
    `GBP 18,450.00` → `total_amount`, `Ravi Patel` → `account_manager_name`).
 
@@ -335,12 +334,21 @@ Kubernetes stack 7 against none. On the business letter both found the same miss
 values (`PO-55821`, `GBP 18,450.00`, `Ravi Patel`). It still makes occasional mistakes,
 e.g. naming an Ingress backend port `service_target_port`.
 
-**Limitations.** The variable/fixed-text verdict from a 4B model is unreliable. An
-earlier prompt flagged correctly on one run and flagged every k8s field on the next. The
-prompt therefore asks for `fixed_text: true` only for format constants and defaults to
-"parameter". The code also ignores the verdicts when more than half the candidates are
-flagged, and a verdict only halves the confidence, never auto-rejects. In practice it
-now rarely flags anything. Naming and missed-parameter detection are the useful parts.
+**It doesn't decide what is fixed text.** An earlier version asked it to mark each
+candidate as fixed text or a parameter. Measured on the 27 editor samples against 11
+format keywords (`Type=simple`, `actions/checkout@v4`, `shell: /bin/bash`, …), three
+runs each with the candidates reordered, neither model could:
+- With a yes/no field, the 4B model flagged nothing at all, and the 30B one found 2 of
+  the 33.
+- Asked for a category instead, the 30B model found 30 of the 33, but also flagged 44
+  other values, among them meeting times, invoice dates, a release version and a
+  product name, and changed its answers when the order changed.
+
+Whether a value stays the same in every copy is a question about the other copies:
+**examples** (`--variant`) answer it exactly, and the **schema rules** (see
+[Schema rules](#schema-rules)) know each format's keywords. Naming and finding missed
+parameters are the useful parts.
+
 The MCP server doesn't use the LLM, because its client already is one.
 
 ### Helm charts from Kubernetes manifests
@@ -917,12 +925,20 @@ keyed by the field's path in the YAML. A rule takes one of four actions:
 
 | Action | Example |
 |---|---|
-| structure: never a value | `**.imagePullPolicy`, `services.*.restart`, `permissions.*`, `package_update` |
+| structure: never a value | `**.imagePullPolicy`, `services.*.restart`, `permissions.*`, `steps[].uses`, `package_update`, `users[].shell` |
 | name the value | `jobs.*.runs-on` → `runs_on`, `jobs.*.timeout-minutes` → `timeout_minutes` |
 | suggest it even if no detector did | cloud-init `hostname`, `timezone`, a one-item `packages:` list |
 | `KEY=value` item | Compose `environment: [QUEUE_NAME=emails]` → `queue_name` |
 
 **When they apply:** when the type is confirmed, or detected with confidence ≥ 0.9.
+
+**Formats that aren't YAML** mark their structure by pattern instead:
+- **HCL** (Terraform, Vault): block labels, capability lists, references and heredoc
+  markers.
+- **systemd units:** systemd's own keywords (`Type=simple`, `Restart=on-failure`,
+  `NoNewPrivileges=true`) and the targets in dependencies (`After=network-online.target`,
+  `WantedBy=multi-user.target`). A dependency on another service is left to the
+  detectors, since it may be a parameter.
 
 **How they were measured:** on eight unseen documents (`tests/quality/corpus`, batch
 nine), the rules took the problems from 17 to 0. On every earlier document they only

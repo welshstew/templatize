@@ -468,8 +468,9 @@ aws_cli.json:
   names: {orders-prod.c9akciq32.eu-west-1.rds.amazonaws.com: endpoint_address}
 
 systemd_timer.timer:
-  want: [Nightly database backup, "*-*-* 02:30:00", 15min, timers.target]
-  reject: []
+  # WantedBy=timers.target is systemd's own target (a structure rule), not a value.
+  want: [Nightly database backup, "*-*-* 02:30:00", 15min]
+  reject: [timers.target]
 
 nginx_error.log:
   want: ["2026/12/04 10:15:02", 203.0.113.9, api.acme.example.com, "http://10.0.3.14:8080/v1/health"]

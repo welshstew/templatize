@@ -114,8 +114,9 @@ csv:
 cloud-init:
   # Terraform templatefile sample: packages and users (with their keys) are loops.
   loops: {packages: 3, users: 2}
-  want: [app-01, Europe/London, /bin/bash]
-  reject: ["#cloud-config", laptop, ops, backup, nginx, ssh-ed25519]
+  # A login shell is the user's, not the deployment's: a schema rule (users[].shell).
+  want: [app-01, Europe/London]
+  reject: ["#cloud-config", laptop, ops, backup, nginx, ssh-ed25519, /bin/bash]
   names: {app-01: hostname, Europe/London: timezone}
 
 haproxy:

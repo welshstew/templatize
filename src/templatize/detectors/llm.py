@@ -5,10 +5,17 @@ schema (llama.cpp turns ``response_format.json_schema`` into a grammar, so the o
 always parses). In priority order it:
 
 1. names the heuristic candidates (referenced by short ids such as ``c3``),
-2. classifies each as a real variable or fixed text,
-3. reports variables the heuristics missed as ``{substring, occurrence, name, type,
+2. reports variables the heuristics missed as ``{substring, occurrence, name, type,
    reason}``. Character offsets are never requested; this code locates each substring
    and discards any that do not occur in the input.
+
+It is not asked whether a candidate is fixed text. Measured on the editor samples,
+neither the 4B nor the 30B model answered that reliably: with a yes/no field they
+flagged almost nothing, and asked for a category they also flagged dates, versions
+and names, and changed their answers with the candidates' order. Whether a value
+varies between copies is a question about other copies: the examples
+(``--variant``) answer it, and the schema rules (:mod:`templatize.schemas`) know the
+format's own keywords.
 
 Uses only the standard library (HTTP via urllib in a worker thread), so the core
 package keeps no web dependencies. Nothing is logged; the document is only sent to
@@ -47,8 +54,6 @@ MAX_CANDIDATES_SENT = 80
 MAX_MISSED = 20
 CONTEXT_CHARS = 60
 ADDITION_CONFIDENCE = 0.6
-FIXED_PENALTY = 0.5
-MAX_FIXED_SHARE = 0.5
 
 
 class LlmUnavailable(Exception):
@@ -73,15 +78,8 @@ class Rename(BaseModel):
     reason: str | None = None
 
 
-class FixedText(BaseModel):
-    candidate_id: str
-    reason: str | None = None
-
-
 class LlmReview(BaseModel):
     renames: list[Rename] = Field(default_factory=list)
-    fixed: list[FixedText] = Field(default_factory=list)
-    """Heuristic candidates the model thinks are fixed text, not parameters."""
     additions: list[Candidate] = Field(default_factory=list)
     """Variables the heuristics missed, located in the text."""
     discarded: int = 0
@@ -95,8 +93,6 @@ class LlmReview(BaseModel):
 class _CandidateVerdict(BaseModel):
     id: str
     name: str
-    fixed_text: bool = False
-    reason: str | None = None
 
 
 class _Missed(BaseModel):
@@ -126,10 +122,8 @@ def response_schema(n_candidates: int) -> dict[str, Any]:
                     "properties": {
                         "id": {"type": "string"},
                         "name": name,
-                        "fixed_text": {"type": "boolean"},
-                        "reason": reason,
                     },
-                    "required": ["id", "name", "fixed_text"],
+                    "required": ["id", "name"],
                 },
             },
             "missed": {
@@ -154,8 +148,7 @@ def response_schema(n_candidates: int) -> dict[str, Any]:
 
 SYSTEM_PROMPT = """\
 You help turn a document into a reusable template. A parameter is a value that would \
-change between deployments, recipients or instances. Fixed text is structure, keywords \
-and wording that stays the same in every copy.
+change between deployments, recipients or instances.
 
 You get the document and a list of candidate parameters found by simple heuristics, \
 each with an id, its value and the line it is on. Answer with compact JSON only, on \
@@ -163,10 +156,7 @@ a single line without indentation; omit "reason" unless it adds information.
 
 Task 1, "candidates": one entry per candidate id. "name" is a short, descriptive \
 snake_case variable name (e.g. db_host, recipient_name, invoice_date, upstream_port), \
-unique across the answer. "fixed_text" is true ONLY for values that belong to the \
-document's format and would be identical in every copy of it (e.g. apiVersion, kind, \
-protocol keywords, the sender's own letterhead); hosts, names, images, sizes, ports, \
-counts, dates and ids are parameters, so "fixed_text" is false. When unsure, use false.
+unique across the answer.
 
 Task 2, "missed": the heuristics only recognise things like IP addresses, dates, \
 emails, URLs and key: value pairs, so they usually MISS parameters such as person \
@@ -306,23 +296,13 @@ def parse_review(text: str, content: str, short_ids: dict[str, Candidate]) -> Ll
         raise LlmUnavailable("model output did not match the schema") from None
 
     review = LlmReview()
-    # Small models occasionally collapse into calling everything fixed text; a verdict
-    # that sweeping is not informative, so it is ignored rather than burying parameters.
-    n_fixed = sum(1 for v in out.candidates if v.fixed_text and v.id in short_ids)
-    trust_fixed = n_fixed <= max(2, int(MAX_FIXED_SHARE * len(short_ids)))
-    if not trust_fixed:
-        review.notices.append(
-            Notice(kind="info", message="LLM fixed-text verdicts looked unreliable; ignored")
-        )
     for v in out.candidates:
         cand = short_ids.get(v.id)
         if cand is None:
             continue
-        if v.fixed_text and trust_fixed:
-            review.fixed.append(FixedText(candidate_id=cand.id, reason=v.reason))
         name = _clean_name(v.name)
         if name and name != cand.name:
-            review.renames.append(Rename(candidate_id=cand.id, name=name, reason=v.reason))
+            review.renames.append(Rename(candidate_id=cand.id, name=name))
 
     taken = [s for c in short_ids.values() for s in c.spans]
     for m in out.missed:
@@ -367,11 +347,9 @@ def apply_review(candidates: Sequence[Candidate], review: LlmReview) -> list[Can
     """Merge an LLM review into heuristic candidates.
 
     LLM names replace names derived from types/context/generic rules, but not names
-    taken from a key (``db_host: ...``) or chosen manually. Candidates the model calls
-    fixed text keep their place but lose confidence. Additions are merged like any
-    other detector output (overlaps resolved, names de-duplicated)."""
+    taken from a key (``db_host: ...``) or chosen manually. Additions are merged like
+    any other detector output (overlaps resolved, names de-duplicated)."""
     renames = {r.candidate_id: r for r in review.renames}
-    fixed = {f.candidate_id: f for f in review.fixed}
     out: list[Candidate] = []
     for c in candidates:
         update: dict[str, Any] = {}
@@ -379,20 +357,7 @@ def apply_review(candidates: Sequence[Candidate], review: LlmReview) -> list[Can
         r = renames.get(c.id)
         if r and NAME_ORIGIN_RANK[c.name_origin] < NAME_ORIGIN_RANK["key"]:
             update.update(name=r.name, name_origin="llm")
-        f = fixed.get(c.id)
-        if f:
-            update["confidence"] = round(c.confidence * FIXED_PENALTY, 3)
-            update["reason"] = "; ".join(
-                x
-                for x in [
-                    c.reason,
-                    f"LLM: likely fixed text ({f.reason})"
-                    if f.reason
-                    else "LLM: likely fixed text",
-                ]
-                if x
-            )
-        if (r or f) and Source.LLM not in sources:
+        if r and Source.LLM not in sources:
             sources.append(Source.LLM)
             update["sources"] = sources
         out.append(c.model_copy(update=update) if update else c)

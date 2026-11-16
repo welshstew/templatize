@@ -6,7 +6,8 @@ path in the YAML document rather than the full JSON Schemas (the Kubernetes Open
 spec alone is megabytes). A rule says that a field is
 
 * ``structure``: never a value (``imagePullPolicy``, ``restart: always``, the
-  ``permissions:`` of a workflow, ``package_update: true``);
+  ``permissions:`` of a workflow and the actions its steps use, ``package_update:
+  true``);
 * ``name``: a value, named after the field (``runs_on``, ``timeout_minutes``);
 * ``suggest``: a value worth a variable even when no detector found it (a one-item
   ``branches: [main]``, the only package in ``packages:``);
@@ -14,7 +15,11 @@ spec alone is megabytes). A rule says that a field is
 
 They apply when the type is confirmed, or detected with high confidence
 (:data:`APPLY_CONFIDENCE`); :func:`apply` rewrites the raw candidates before they are
-merged.
+merged. Formats that are not YAML (HCL, systemd units) mark their structure by
+pattern instead, in :func:`structure_regions`.
+
+These rules, not the optional LLM, decide what is fixed text: asked the same
+question, the models tested could not tell a format keyword from a parameter.
 
 Paths are key names joined by ``.``; ``[]`` is a list item, ``*`` any one segment and
 ``**`` any number of segments: ``services.*.restart``, ``**.imagePullPolicy``.
@@ -23,6 +28,7 @@ Paths are key names joined by ``.``; ``[]`` is a list item, ``*`` any one segmen
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Literal
 
@@ -102,6 +108,8 @@ RULES: dict[str, list[Rule]] = {
             "jobs.*.continue-on-error",
             "jobs.*.steps[].continue-on-error",
             "jobs.*.steps[].shell",
+            # actions/checkout@v4: the workflow's own machinery, bumped by Dependabot.
+            "jobs.*.steps[].uses",
             "concurrency.cancel-in-progress",
         ),
         # Not on.*.branches: a workflow's trigger branch is rarely a parameter.
@@ -122,6 +130,7 @@ RULES: dict[str, list[Rule]] = {
             "disable_root",
             "power_state.mode",
             "users[].lock_passwd",
+            "users[].shell",
             "manage_etc_hosts",
             "preserve_hostname",
         ),
@@ -256,9 +265,53 @@ _HEREDOC = re.compile(r"=[ \t]*(<<-?[A-Z_]+)[ \t]*$", re.MULTILINE)
 _VALUE_LABELS = frozenset({"path"})
 
 
+# --- systemd units ------------------------------------------------------------------
+
+SYSTEMD_CONFIDENCE = 0.9
+# Directives whose value is a keyword of systemd's own (Type=simple, Restart=on-failure,
+# booleans and sandboxing levels), not something a deployment chooses.
+_SYSTEMD_KEYWORDS = re.compile(
+    r"^[ \t]*(?:Type|Restart|KillMode|NotifyAccess|ExitType|StandardInput|StandardOutput|"
+    r"StandardError|ProtectSystem|ProtectHome|PrivateTmp|PrivateDevices|NoNewPrivileges|"
+    r"RemainAfterExit|DefaultDependencies)[ \t]*=([^\n]*)$",
+    re.MULTILINE,
+)
+# Dependencies: only the targets (network-online.target, multi-user.target) are
+# systemd's; a dependency on another service may well be a parameter.
+_SYSTEMD_DEPS = re.compile(
+    r"^[ \t]*(?:After|Before|Wants|Requires|Requisite|BindsTo|PartOf|Upholds|Conflicts|"
+    r"WantedBy|RequiredBy|UpheldBy)[ \t]*=([^\n]*)$",
+    re.MULTILINE,
+)
+_TARGET = re.compile(r"[^\s]+\.target(?=\s|$)")
+
+
+def _systemd_regions(text: str) -> list[Span]:
+    out: list[Span] = []
+    for m in _SYSTEMD_KEYWORDS.finditer(text):
+        raw = m.group(1)
+        value = raw.strip()
+        if value:
+            start = m.start(1) + (len(raw) - len(raw.lstrip()))
+            out.append(Span(start=start, end=start + len(value)))
+    for m in _SYSTEMD_DEPS.finditer(text):
+        base = m.start(1)
+        out.extend(
+            Span(start=base + t.start(), end=base + t.end()) for t in _TARGET.finditer(m.group(1))
+        )
+    return out
+
+
 def structure_regions(text: str, doc_type: DocumentType | None) -> list[Span]:
-    """Parts of an HCL document that are never values: block labels (except a policy's
-    path), capability lists, unquoted references and heredoc markers."""
+    """Parts of a document that are never values. HCL: block labels (except a policy's
+    path), capability lists, unquoted references and heredoc markers. systemd units:
+    systemd's own keywords (``Type=simple``) and targets (``multi-user.target``)."""
+    if (
+        doc_type is not None
+        and doc_type.id == "systemd"
+        and (doc_type.confirmed or doc_type.confidence >= SYSTEMD_CONFIDENCE)
+    ):
+        return _systemd_regions(text)
     if (
         doc_type is None
         or doc_type.id not in HCL_TYPES
@@ -335,9 +388,18 @@ def apply(text: str, doc_type: DocumentType | None, raw: list[Candidate]) -> lis
         elif rule.action == "env" and (m := _ENV_ITEM.fullmatch(f.value)):
             start = f.span.start + m.start(2)
             added.append(_candidate(text, start, f.span.end, snake_case(m.group(1)), why))
+    # Parts of a structure field go too (bin/bash of shell: /bin/bash). Field values
+    # never overlap, so the one starting last at or before a span is the only container.
+    starts = sorted(structure)
+    firsts = [st for st, _ in starts]
+
+    def is_structure(s: Span) -> bool:
+        i = bisect_right(firsts, s.start) - 1
+        return i >= 0 and s.end <= starts[i][1]
+
     out: list[Candidate] = []
     for c in raw:
-        spans = [s for s in c.spans if (s.start, s.end) not in structure]
+        spans = [s for s in c.spans if not is_structure(s)]
         if not spans:
             continue
         update: dict[str, object] = {}

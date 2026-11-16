@@ -38,8 +38,6 @@ export interface Item {
   nameOrigin: string;
   /** Name as originally suggested, to tell whether the user renamed it. */
   originalName: string;
-  /** Set when the LLM thinks this is fixed text rather than a parameter. */
-  llmNote: string | null;
   /** Helm values.yaml location (["image", "tag"]); null derives it from the name. */
   valuesPath: string[] | null;
   /** From the schema: allowed values and JSON types (charts and roles check them). */
@@ -85,7 +83,6 @@ export function itemsFromCandidates(cands: Candidate[]): Item[] {
     manual: false,
     nameOrigin: c.name_origin,
     originalName: c.name,
-    llmNote: null,
     valuesPath: c.values_path ?? null,
     choices: c.choices ?? null,
     accepts: c.accepts ?? null,
@@ -95,7 +92,6 @@ export function itemsFromCandidates(cands: Candidate[]): Item[] {
 export interface ReviewOutcome {
   items: Item[];
   renamed: number;
-  flagged: number;
   added: number;
 }
 
@@ -103,13 +99,11 @@ const PROTECTED_ORIGINS = new Set(["schema", "key", "manual"]);
 
 /** Merge an LLM review that arrives after the user may already have acted:
  * only pending suggestions the user has not renamed are renamed (never key-derived
- * names), "fixed text" verdicts are shown as a note with lower confidence, and new
- * suggestions are added only where they overlap nothing that is not rejected. */
+ * names), and new suggestions are added only where they overlap nothing that is not
+ * rejected. */
 export function applyReview(items: Item[], review: LlmReview): ReviewOutcome {
   const renames = new Map(review.renames.map((r) => [r.candidate_id, r]));
-  const fixed = new Map(review.fixed.map((f) => [f.candidate_id, f]));
   let renamed = 0;
-  let flagged = 0;
   let next = items.map((item) => {
     if (item.status !== "suggested") return item;
     let out = item;
@@ -117,15 +111,6 @@ export function applyReview(items: Item[], review: LlmReview): ReviewOutcome {
     if (r && item.name === item.originalName && !PROTECTED_ORIGINS.has(item.nameOrigin)) {
       out = { ...out, name: r.name, originalName: r.name, nameOrigin: "llm" };
       renamed++;
-    }
-    const f = fixed.get(item.id);
-    if (f) {
-      out = {
-        ...out,
-        llmNote: f.reason ? `LLM: likely fixed text (${f.reason})` : "LLM: likely fixed text",
-        confidence: out.confidence === null ? null : Math.round(out.confidence * 50) / 100,
-      };
-      flagged++;
     }
     if (out !== item && !out.sources.includes("llm")) out = { ...out, sources: [...out.sources, "llm"] };
     return out;
@@ -140,7 +125,7 @@ export function applyReview(items: Item[], review: LlmReview): ReviewOutcome {
     next = [...next, { ...add, name: uniqueName(add.name, next) }];
     added++;
   }
-  return { items: next, renamed, flagged, added };
+  return { items: next, renamed, added };
 }
 
 export function accepted(items: Item[]): Item[] {
@@ -333,7 +318,6 @@ export function addManual(
     manual: true,
     nameOrigin: "manual",
     originalName: req.name,
-    llmNote: null,
     valuesPath: null,
   };
   const next = items.map((i) =>

@@ -329,7 +329,6 @@ function SuggestionRow({ item, items, loops, selected, checked, onCheck, onSelec
         <Sources item={item} />
       </div>
       {helm ? <div class="meta muted values-hint">.Values.{derivedPath(item)}</div> : null}
-      {item.llmNote ? <div class="meta llm-note">{item.llmNote}</div> : null}
       {item.variantValues?.length ? (
         <div class="meta muted">
           examples: {item.variantValues.map((v) => short(v, 24)).join(" · ")}
@@ -365,7 +364,6 @@ function LlmPill({ llm }: { llm: LlmStatus }) {
   const parts = [
     llm.renamed ? `renamed ${llm.renamed}` : "",
     llm.added ? `added ${llm.added}` : "",
-    llm.flagged ? `flagged ${llm.flagged} as likely fixed` : "",
   ].filter(Boolean);
   return (
     <div class="llm-pill done" role="status">

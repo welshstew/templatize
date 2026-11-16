@@ -262,7 +262,6 @@ export interface ChartOptions {
 
 export interface LlmReview {
   renames: { candidate_id: string; name: string; reason: string | null }[];
-  fixed: { candidate_id: string; reason: string | null }[];
   additions: Candidate[];
   discarded: number;
   notices: Notice[];

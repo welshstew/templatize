@@ -138,3 +138,51 @@ def test_hcl_labels_references_and_capabilities_are_structure() -> None:
     agent += "template {\n  contents = <<EOT\nx\nEOT\n}\n"
     found = values(agent)
     assert "kubernetes" not in found and "<<EOT" not in found and "auth/k8s" in found
+
+
+def test_actions_used_by_steps_are_structure() -> None:
+    text = (
+        "name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-24.04\n    steps:\n"
+        "      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n"
+        "        with:\n          node-version: '22'\n"
+    )
+    found = values(text)
+    assert not any(v.startswith("actions/") for v in found)
+    assert found["22"] == "node_version"
+
+
+def test_cloud_init_login_shell_is_structure() -> None:
+    text = (
+        "#cloud-config\nhostname: app-01\nusers:\n  - name: deploy\n    groups: sudo\n"
+        "    shell: /bin/bash\n"
+    )
+    found = values(text)
+    assert not any("bash" in v for v in found)  # nor a part of it
+    assert "app-01" in found
+
+
+SYSTEMD_UNIT = (
+    "[Unit]\nDescription=Event ingestion daemon\nAfter=network-online.target\n"
+    "Wants=network-online.target\n\n[Service]\nType=simple\nUser=ingest\n"
+    "ExecStart=/opt/ingestd/bin/ingestd --port 9100\nRestart=on-failure\nRestartSec=5\n\n"
+    "[Install]\nWantedBy=multi-user.target\n"
+)
+
+
+def test_systemd_keywords_and_targets_are_structure() -> None:
+    found = values(SYSTEMD_UNIT)
+    for fixed in ("simple", "on-failure", "network-online.target", "multi-user.target"):
+        assert fixed not in found
+    assert found["ingest"] == "service_user"
+    assert not any(".target" in v for v in found)
+
+
+def test_systemd_rules_need_the_type() -> None:
+    from templatize.doctypes import detect_type
+    from templatize.schemas import structure_regions
+
+    assert detect_type(SYSTEMD_UNIT).id == "systemd"
+    assert structure_regions(SYSTEMD_UNIT, detect_type(SYSTEMD_UNIT))
+    plain = detect_type(SYSTEMD_UNIT, confirmed="ini")
+    assert structure_regions(SYSTEMD_UNIT, plain) == []
+    assert structure_regions("Type=simple\n", None) == []
