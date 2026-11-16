@@ -20,3 +20,4 @@ frontend/dist/
 # secrets for deploy/llm-host
 /deploy/llm-host/llm_api_key
 /deploy/llm-host/.env
+.claude/
