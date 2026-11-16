@@ -49,7 +49,7 @@ export type LlmStatus =
   | { state: "running" }
   | { state: "unavailable"; detail: string }
   | { state: "limited"; detail: string }
-  | { state: "done"; renamed: number; flagged: number; added: number };
+  | { state: "done"; renamed: number; added: number };
 
 const DEFAULT_LIMITS = { max_input_chars: 1_000_000, max_variants: 3, max_variables: 2000 };
 
@@ -182,7 +182,7 @@ export function App() {
           return;
         }
         const review = res.review;
-        let outcome = { renamed: 0, flagged: 0, added: 0 };
+        let outcome = { renamed: 0, added: 0 };
         setItems((cur) => {
           const r = applyReview(cur, review);
           outcome = r;

@@ -215,7 +215,6 @@ mark.selected { outline: 2px solid var(--c); outline-offset: 1px; }
 /* LLM review status */
 .llm-pill { font-size: 12px; border: 1px solid var(--src-llm); color: var(--src-llm); border-radius: 6px; padding: 5px 8px; margin-bottom: 12px; display: flex; gap: 6px; align-items: center; }
 .llm-pill.muted { border-color: var(--border); color: var(--muted); }
-.llm-note { color: var(--src-llm); }
 .spinner { width: 10px; height: 10px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

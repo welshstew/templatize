@@ -318,7 +318,7 @@ def check_llm(base: str, fixture: Path, expect: bool, wait: float = 900.0) -> tu
     if not result.roundtrip.ok:
         return False, "round-trip failed after merging the LLM review"
     return True, (
-        f"LLM review: {len(review.renames)} renamed, {len(review.fixed)} flagged fixed, "
+        f"LLM review: {len(review.renames)} renamed, "
         f"{len(review.additions)} added, {review.discarded} discarded; round-trip ok"
     )
 

@@ -72,20 +72,15 @@ def test_request_uses_constrained_json_schema_and_never_offsets() -> None:
     assert TEXT in req["messages"][1]["content"]
 
 
-def test_renames_fixed_and_missed() -> None:
+def test_renames_and_missed() -> None:
     with fake_llama() as fake:
 
         def respond(req: dict[str, Any]) -> str:
             ids = ids_by_value(req)
             return answer(
                 [
-                    {"id": ids["db01.example.com"], "fixed_text": False, "name": "warehouse_host"},
-                    {
-                        "id": ids["2.14.3"],
-                        "fixed_text": True,
-                        "name": "version",
-                        "reason": "doc version",
-                    },
+                    {"id": ids["db01.example.com"], "name": "warehouse_host"},
+                    {"id": ids["2.14.3"], "name": "document_version"},
                 ],
                 [
                     {
@@ -139,7 +134,7 @@ def test_renames_fixed_and_missed() -> None:
     by_id = {c.id: c for c in cands}
     renamed = {by_id[r.candidate_id].value: r.name for r in rv.renames}
     assert renamed["db01.example.com"] == "warehouse_host"
-    assert [by_id[f.candidate_id].value for f in rv.fixed] == ["2.14.3"]
+    assert renamed["2.14.3"] == "document_version"
     added = {a.value: (a.name, a.type.value, a.sources) for a in rv.additions}
     assert added["Bristol"][0] == "warehouse_city"
     assert added["Alice Johnson"][:2] == ("recipient_name", "string")
@@ -198,8 +193,8 @@ def test_apply_review_respects_key_names_and_merges() -> None:
             ids = ids_by_value(req)
             return answer(
                 [
-                    {"id": ids["10.0.0.5"], "fixed_text": False, "name": "database_ip"},
-                    {"id": ids["192.168.1.20"], "fixed_text": False, "name": "app_server_ip"},
+                    {"id": ids["10.0.0.5"], "name": "database_ip"},
+                    {"id": ids["192.168.1.20"], "name": "app_server_ip"},
                 ],
                 [
                     {
@@ -225,7 +220,9 @@ def test_apply_review_respects_key_names_and_merges() -> None:
     assert result.roundtrip.ok
 
 
-def test_fixed_verdict_lowers_confidence() -> None:
+def test_no_fixed_text_verdict_is_asked_or_applied() -> None:
+    """The model is not asked whether a value is fixed text (it cannot tell reliably);
+    an answer that says so anyway changes nothing."""
     text = "version: 2.14.3\n"
     with fake_llama() as fake:
         fake.responder = lambda req: answer(
@@ -233,9 +230,11 @@ def test_fixed_verdict_lowers_confidence() -> None:
         )
         cands = suggest(text).candidates
         rv = asyncio.run(review_candidates(LlmConfig(url=fake.url), text, cands))
+        req = fake.requests[-1]
+    assert "fixed_text" not in json.dumps(req)
     (after,) = apply_review(cands, rv)
-    assert after.confidence == pytest.approx(cands[0].confidence * 0.5, abs=0.01)
-    assert "likely fixed" in (after.reason or "")
+    assert after.confidence == cands[0].confidence
+    assert after.reason == cands[0].reason
 
 
 def test_unavailable_and_bad_output() -> None:
@@ -282,7 +281,7 @@ def test_api_suggest_llm(caplog: pytest.LogCaptureFixture) -> None:
         def respond(req: dict[str, Any]) -> str:
             ids = ids_by_value(req)
             return answer(
-                [{"id": ids["db01.example.com"], "fixed_text": False, "name": "warehouse_host"}],
+                [{"id": ids["db01.example.com"], "name": "warehouse_host"}],
                 [
                     {
                         "substring": "Bristol",
@@ -341,24 +340,6 @@ def test_cli_llm_url(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None
     assert "warehouse_city" in out and "llm" in out
     assert cli_main(["suggest", str(src), "--llm-url", "http://127.0.0.1:9"]) == 0
     assert "LLM review skipped" in capsys.readouterr().err
-
-
-def test_sweeping_fixed_verdicts_are_ignored() -> None:
-    """A model that calls (nearly) everything fixed text is not trusted."""
-    text = "host: a.example.com\nport: 8443\nimage: nginx:1.27\nreplicas: 3\nregion: eu-west-1\n"
-    with fake_llama() as fake:
-        fake.responder = lambda req: answer(
-            [
-                {"id": sid, "fixed_text": True, "name": f"n{sid}"}
-                for sid in ids_by_value(req).values()
-            ],
-            [],
-        )
-        cands = suggest(text).candidates
-        rv = asyncio.run(review_candidates(LlmConfig(url=fake.url), text, cands))
-    assert len(cands) >= 4
-    assert rv.fixed == []
-    assert any("unreliable" in n.message for n in rv.notices)
 
 
 def test_api_key_is_sent_and_401_is_explained(

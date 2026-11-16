@@ -150,7 +150,7 @@ test("segments cover the whole text in order", () => {
   assert.equal(marked && text.slice(marked.start, marked.end), "db01");
 });
 
-test("LLM review: renames untouched suggestions, flags fixed text, adds non-overlapping", async () => {
+test("LLM review: renames untouched suggestions, adds non-overlapping", async () => {
   const { applyReview, updateItem } = await import("./model.ts");
   const base = itemsFromCandidates([
     cand({ id: "a", name: "ip_address", name_origin: "type", value: "10.0.0.1", spans: [{ start: 0, end: 8 }] }),
@@ -166,7 +166,6 @@ test("LLM review: renames untouched suggestions, flags fixed text, adds non-over
       { candidate_id: "b", name: "database_host", reason: null },
       { candidate_id: "c", name: "llm_name", reason: null },
     ],
-    fixed: [{ candidate_id: "d", reason: "page number" }],
     additions: [
       cand({ id: "n1", name: "city", name_origin: "llm", value: "Paris", spans: [{ start: 40, end: 45 }], sources: ["llm"] }),
       cand({ id: "n2", name: "dup", name_origin: "llm", value: "10.0", spans: [{ start: 0, end: 4 }], sources: ["llm"] }),
@@ -179,10 +178,9 @@ test("LLM review: renames untouched suggestions, flags fixed text, adds non-over
   assert.ok(byId.a?.sources.includes("llm"));
   assert.equal(byId.b?.name, "host"); // key-derived names are kept
   assert.equal(byId.c?.name, "my_name"); // user's rename wins
-  assert.match(byId.d?.llmNote ?? "", /fixed text \(page number\)/);
-  assert.equal(byId.d?.confidence, 0.35);
+  assert.equal(byId.d?.confidence, 0.7); // untouched
   assert.ok(byId.n1 && !byId.n2); // overlapping addition dropped
-  assert.deepEqual([out.renamed, out.flagged, out.added], [1, 1, 1]);
+  assert.deepEqual([out.renamed, out.added], [1, 1]);
 });
 
 // The old, quadratic setStatus: the fast one must give exactly the same result.
