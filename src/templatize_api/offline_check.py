@@ -323,7 +323,15 @@ def check_llm(base: str, fixture: Path, expect: bool, wait: float = 900.0) -> tu
     )
 
 
-def check_ner(base: str, fixture: Path, wait: float = 120.0) -> tuple[bool, str]:
+# Prose the heuristics only partly cover: NER fills gaps only, so a document whose
+# entities the heuristics already find (the business letter) gets nothing from it.
+NER_PROBE = (
+    "Kestrel Robotics today opened its plant at Science Park 14 in Eindhoven.\n\n"
+    '"We are delighted," said Sofia van Dijk, Chief Operating Officer.\n'
+)
+
+
+def check_ner(base: str, text: str = NER_PROBE, wait: float = 120.0) -> tuple[bool, str]:
     """The NER service must come up and contribute candidates to /suggest, and the
     merged suggestions must still round-trip."""
     deadline = time.monotonic() + wait
@@ -331,7 +339,6 @@ def check_ner(base: str, fixture: Path, wait: float = 120.0) -> tuple[bool, str]
         if time.monotonic() > deadline:
             return False, f"NER did not become available within {wait:.0f}s"
         time.sleep(2)
-    text = fixture.read_bytes().decode("utf-8")
     status, body, _ = _post(base, "/suggest", {"text": text, "variants": []})
     if status != 200:
         return False, f"/suggest -> {status}"
@@ -385,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
         print("PASS MCP over streamable HTTP: 5 tools; generate_template round-trips")
 
     if args.expect_ner or os.environ.get("TEMPLATIZE_OFFLINE_EXPECT_NER") == "1":
-        ok, msg = check_ner(base, args.fixtures / "business_letter.txt")
+        ok, msg = check_ner(base)
         print(f"{'PASS' if ok else 'FAIL'} {msg}")
         if not ok:
             return 1
