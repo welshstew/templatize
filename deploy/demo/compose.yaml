@@ -1,10 +1,13 @@
-# Public demo (e.g. templatize.getlockstep.cloud): the app plus GLiNER, behind a
-# reverse proxy on the same host. No LLM (no GPU) and no MCP endpoint.
+# Public demo (templatize.getlockstep.cloud): the app plus GLiNER, behind a Caddy
+# container that already runs on the host. No LLM (no GPU) and no MCP endpoint.
 #
-#   cp .env.example .env            # check DEMO_PORT and TRUSTED_PROXIES, then:
+# The app joins Caddy's network (PROXY_NETWORK) as "templatize-app" and publishes no
+# host port; GLiNER is only on this project's own network.
+#
+#   cp .env.example .env            # check PROXY_NETWORK and TRUSTED_PROXIES, then:
 #   docker compose up -d --build
 #
-# Add the site block from Caddyfile to the host's Caddy and reload it.
+# Add the site block from Caddyfile to Caddy's config and reload it.
 name: templatize-demo
 
 x-hardening: &hardening
@@ -22,9 +25,10 @@ services:
       dockerfile: docker/app.Dockerfile
       target: runtime
     <<: *hardening
-    ports:
-      # Loopback only: the reverse proxy is the one way in.
-      - "${DEMO_BIND:-127.0.0.1}:${DEMO_PORT:-8100}:8000"
+    networks:
+      default:
+      proxy:
+        aliases: [templatize-app]
     environment:
       TEMPLATIZE_NER_URL: http://ner:8081
       TEMPLATIZE_LLM_URL: ""
@@ -61,3 +65,9 @@ services:
       timeout: 3s
       retries: 5
       start_period: 20s
+
+networks:
+  default: {}
+  proxy:
+    name: ${PROXY_NETWORK:?set PROXY_NETWORK to the reverse proxy's docker network}
+    external: true

@@ -610,16 +610,17 @@ How it behaves:
 - `X-Forwarded-For` is ignored unless the direct peer is a trusted proxy, so clients
   can't spoof their way around a limit.
 
-**The public demo** is `deploy/demo/`: the app and GLiNER, no LLM, `/mcp` off, ports on
-loopback only, memory and CPU capped (about 1 GB of RAM in use), behind Caddy:
+**The public demo** is `deploy/demo/`: the app and GLiNER, no LLM, `/mcp` off, no host
+ports, memory and CPU capped (about 1 GB of RAM in use). The app joins the network of a
+Caddy container already on the host:
 
 ```sh
 cd deploy/demo
-cp .env.example .env          # DEMO_PORT, TRUSTED_PROXIES (where Caddy connects from)
+cp .env.example .env          # PROXY_NETWORK, TRUSTED_PROXIES (that network's subnet)
 docker compose up -d --build
 ```
 
-then add the site block in `deploy/demo/Caddyfile` to the host's Caddy and reload it.
+then add the site block in `deploy/demo/Caddyfile` to Caddy's config and reload it.
 To update: `git pull && docker compose up -d --build`.
 
 ### MCP server
