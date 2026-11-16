@@ -1,0 +1,15 @@
+# Site block for the host's Caddyfile. Caddy gets the certificate itself once the
+# DNS A/AAAA records point here. Reload with: caddy reload (or restart its container).
+templatize.getlockstep.cloud {
+	encode zstd gzip
+	request_body {
+		max_size 2MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+	reverse_proxy 127.0.0.1:8100
+}
